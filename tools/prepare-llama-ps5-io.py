@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Apply guarded, repeatable PS5-only hooks to a llama.cpp source tree."""
 from pathlib import Path
+from prepare_build import write_text_if_changed
 import argparse
 
 root = Path(__file__).resolve().parents[1]
@@ -12,7 +13,7 @@ def replace(path, before, after):
         return
     if text.count(before) != 1:
         raise SystemExit(f"{path}: PS5 I/O hook no longer matches pinned llama.cpp")
-    path.write_text(text.replace(before, after))
+    write_text_if_changed(path, text.replace(before, after))
 
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -88,7 +89,7 @@ if marker not in text:
         flops.clear();
     }
 '''.replace('SIGNATURE', signature)
-    vulkan.write_text(text[:begin] + body + text[end:])
+    write_text_if_changed(vulkan, text[:begin] + body + text[end:])
 
 # Oberon's RDNA2 UMA benefits from computing four adjacent standard-quant
 # output rows per subgroup. A console A/B on Mistral 7B Q4_0 measured

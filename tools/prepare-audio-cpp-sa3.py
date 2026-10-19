@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 from pathlib import Path
+from prepare_build import write_text_if_changed
 
 PIN = "886076fc89c09b9902592aa4bfbd12922d4a9e26"
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,22 +15,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def replace_once(path: Path, old: str, new: str) -> None:
     source = path.read_text()
+    # Some PS5 adapters extend a line that remains inside the replacement. In
+    # that case the old fragment is still present after patching, so recognize
+    # the complete replacement before applying it again. For disjoint patches,
+    # wait until the old fragment is gone; the replacement may be common text.
+    if old in new and new in source:
+        return
     if old not in source:
         if not new or new in source:
             return
     if source.count(old) != 1:
         raise SystemExit(f"{path}: expected one known patch site; inspect source changes")
-    path.write_text(source.replace(old, new, 1))
+    write_text_if_changed(path, source.replace(old, new, 1))
 
 
 def adapt_weak_canonical(path: Path) -> None:
     text = path.read_text()
-    signature = "std::filesystem::path ps5_weakly_canonical(const std::filesystem::path & path) {"
-    while signature in text:
-        start = text.index(signature)
-        opening = text.index("{", start)
-        closing = text.index("\n}", opening) + 2
-        text = text[:start] + text[closing:]
+    helper_block = re.compile(
+        r"namespace \{\nstd::filesystem::path ps5_weakly_canonical\("
+        r"const std::filesystem::path & path\) \{.*?\n\}\n\} // namespace\n\n",
+        re.S,
+    )
+    text = helper_block.sub("", text)
     text = text.replace("std::filesystem::weakly_canonical(", "ps5_weakly_canonical(")
     if "ps5_weakly_canonical(" not in text:
         return
@@ -47,7 +55,7 @@ std::filesystem::path ps5_weakly_canonical(const std::filesystem::path & path) {
 } // namespace
 
 '''
-    path.write_text(text[:at] + helper + text[at:])
+    write_text_if_changed(path, text[:at] + helper + text[at:])
 
 
 def omit_cmake_sources(path: Path) -> None:
@@ -77,7 +85,7 @@ def omit_cmake_sources(path: Path) -> None:
             raise SystemExit(f"{path}: duplicate CMake entry for {entry}")
         if matches:
             del lines[matches[0]]
-    path.write_text("".join(lines))
+    write_text_if_changed(path, "".join(lines))
 
 
 def include_sa3_dependencies(path: Path) -> None:
@@ -95,7 +103,7 @@ def include_sa3_dependencies(path: Path) -> None:
     if source.count(anchor) != 1:
         raise SystemExit(f"{path}: expected one source insertion point for Stable Audio encoders")
     insertion = anchor + "".join(f"    {entry}\n" for entry in entries)
-    path.write_text(source.replace(anchor, insertion, 1))
+    write_text_if_changed(path, source.replace(anchor, insertion, 1))
 
 
 def include_ace_step_dependencies(path: Path) -> None:
@@ -122,17 +130,20 @@ def include_ace_step_dependencies(path: Path) -> None:
         if source.count(anchor) != 1:
             raise SystemExit(f"{path}: cannot restore ACE-Step dependency {entry}")
         source = source.replace(anchor, anchor + line, 1)
-    path.write_text(source)
+    write_text_if_changed(path, source)
 
 
 def reuse_parent_ggml(path: Path) -> None:
     """Reuse the parent runtime's upstream GGML target when added as a subproject."""
+    guarded = '''if (NOT TARGET ggml)
+    add_subdirectory("${AUDIOCPP_GGML_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ggml")
+endif()'''
+    if guarded in path.read_text():
+        return
     replace_once(
         path,
         'add_subdirectory("${AUDIOCPP_GGML_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ggml")',
-        '''if (NOT TARGET ggml)
-    add_subdirectory("${AUDIOCPP_GGML_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ggml")
-endif()''',
+        guarded,
     )
 
 
@@ -165,7 +176,7 @@ def adapt_ace_step_staged_memory(source: Path) -> None:
     if text.count(planner_new) != 2:
         if text.count(planner_old) != 2:
             raise SystemExit(f"{session}: expected two ACE-Step planner release sites")
-        session.write_text(text.replace(planner_old, planner_new))
+        write_text_if_changed(session, text.replace(planner_old, planner_new))
     replace_once(session,
         "        pre_dit_->release_runtime_graphs();\n",
         "        pre_dit_->release_runtime_graphs();\n        pre_dit_.reset(); // PS5: free the text encoder before diffusion\n")
@@ -207,7 +218,7 @@ def adapt_chatterbox_s3_tokenizer_arena(source: Path) -> None:
         "params.mem_size = 128ull * 1024ull * 1024ull; // PS5: graph metadata only",
         "params.mem_size = 768ull * 1024ull * 1024ull;",
     )
-    t3_runner.write_text(text)
+    write_text_if_changed(t3_runner, text)
     replace_once(
         t3_runner,
         "        params.mem_size = 256ull * 1024ull * 1024ull;",
@@ -276,7 +287,7 @@ def adapt_chatterbox_s3_tokenizer_arena(source: Path) -> None:
     if text.count(cleared) != 2:
         if text.count(plan) != 2:
             raise SystemExit(f"{t3_runner}: expected two T3 runner buffer allocations")
-        t3_runner.write_text(text.replace(plan, cleared))
+        write_text_if_changed(t3_runner, text.replace(plan, cleared))
     # S3 retains attention and feed-forward runners for every encoder layer.
     # Their no_alloc contexts contain metadata only, but upstream reserves
     # 128/192 MiB per runner, exhausting the host heap before audio decoding.
@@ -295,7 +306,7 @@ def adapt_chatterbox_s3_tokenizer_arena(source: Path) -> None:
         if text.count(old) != expected_count:
             raise SystemExit(f"{s3_runtime}: unexpected S3 {arena_mb} MiB arena count")
         text = text.replace(old, new)
-    s3_runtime.write_text(text)
+    write_text_if_changed(s3_runtime, text)
     hift = source / "src/framework/modules/vocoders/hift_vocoder.cpp"
     replace_once(
         hift,
@@ -338,7 +349,7 @@ def adapt_gguf_streaming(path: Path) -> None:
         old_budget = next((budget for budget in old_budgets if source.count(budget) == 1), None)
         if old_budget is None:
             raise SystemExit(f"{path}: expected one known GGUF read budget")
-        path.write_text(source.replace(old_budget, new_budget, 1))
+        write_text_if_changed(path, source.replace(old_budget, new_budget, 1))
         return
     begin = source.index("class GgufTensorSource final : public TensorSource {")
     end = source.index("\nstd::unordered_map<std::string, std::string> parse_indexed_tensor_weight_map", begin)
@@ -392,7 +403,7 @@ def adapt_gguf_streaming(path: Path) -> None:
     patch("    mutable engine::io::BinaryBlob bytes_;", """    size_t file_size_ = 0;
     mutable std::vector<std::byte> tensor_bytes_;
     mutable engine::io::BinaryBlob bytes_;""")
-    path.write_text(source[:begin] + section + source[end:])
+    write_text_if_changed(path, source[:begin] + section + source[end:])
 
 
 def main() -> None:

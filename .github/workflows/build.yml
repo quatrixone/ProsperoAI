@@ -311,6 +311,8 @@ jobs:
       CC: clang-18
       CXX: clang++-18
       BUILD_JOBS: 4
+      CCACHE_DIR: ${{ github.workspace }}/build/ccache
+      CCACHE_MAXSIZE: 1G
       PROSPERO_REQUIRE_VULKAN_RUNTIME: "1"
     steps:
       - name: Check out source
@@ -319,6 +321,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes clang-18 cmake ninja-build ccache glslc spirv-headers libvulkan-dev libespeak-ng-dev mesa-vulkan-drivers vulkan-tools git unzip
+      - name: Restore Vulkan runtime compiler cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/ccache
+          key: ccache-vulkan-${{ runner.os }}-${{ runner.arch }}-clang18-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-vulkan-${{ runner.os }}-${{ runner.arch }}-clang18-
       - name: Select the software Vulkan driver
         shell: bash
         run: |
@@ -332,3 +341,6 @@ jobs:
         run: bash tools/build-vulkan-runtime.sh host
       - name: Run mandatory ABI and Vulkan media tests
         run: python3 -m unittest discover -s tests -p test_vulkan_runtime.py -v
+      - name: Report Vulkan runtime compiler cache statistics
+        if: always()
+        run: ccache --show-stats

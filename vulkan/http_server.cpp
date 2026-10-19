@@ -11,16 +11,19 @@
 // does. No runtime module lookup or sceKernelDlsym() is involved.
 
 #include "http_server.hpp"
+#include "debug_log.hpp"
 #include "model_paths.hpp"
 
 #include "gpt_runtime.hpp"
 #include "runtime_settings.hpp"
+#include "model_manager.hpp"
 #include "chatterbox_languages.hpp"
 #include "generated_voice_catalog.hpp"
 #include "runtime_voice_catalog.hpp"
 #include "voice_recorder.hpp"
 #include "session_store.hpp"
 #include "generation_limits.hpp"
+#include "direct_memory.hpp"
 #include "prospero_search.hpp"
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
 #include "model_downloader_ps5.hpp"
@@ -41,7 +44,9 @@
 #include <stdexcept>
 #include <memory>
 #include <cmath>
+#include <chrono>
 #include <mutex>
+#include <map>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -330,6 +335,7 @@ bool run_generation(const gpt_runtime_message_t *messages, unsigned message_coun
                     unsigned ubatch_tokens = 0)
 {
     pthread_mutex_lock(&generation_mutex);
+    std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
     gpt_runtime_settings_t settings{0, max_tokens};
     const auto runtime = prospero_settings::get();
     settings.context_length = runtime.context;
@@ -378,7 +384,7 @@ void send_status(const NetApi &api, int sock, const char *status, const char *co
     const std::size_t body_length = std::strlen(body);
     std::snprintf(header, sizeof(header),
                   "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-                  "Connection: close\r\n\r\n",
+                  "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
                   status, content_type, body_length);
     send_all(api, sock, header, std::strlen(header));
     send_all(api, sock, body, body_length);
@@ -515,6 +521,7 @@ const char kChatPage[] =
 
 void handle_get_tags(const NetApi &api, int sock)
 {
+    std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
     char body[2048];
     std::snprintf(body, sizeof(body), "{\"models\":[");
     const unsigned count = gpt_runtime_model_count();
@@ -565,9 +572,12 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
     const unsigned batch_tokens = request_option(request_body, "num_batch", 0, 2048);
     const unsigned ubatch_tokens = request_option(request_body, "num_ubatch", 0, 2048);
     gpt_runtime_stats_t stats{};
+    const auto operation_id = prospero::debug::begin_operation("api-generation", model);
     const bool ok =
         run_generation(messages, 1, response_text.data(), response_text.size(), max_tokens, &stats,
                        model, context_tokens, batch_tokens, ubatch_tokens);
+    prospero::debug::event(ok ? "api-generation-completed" : "api-generation-failed", model,
+                           ok ? "" : "runtime-generation-failed", operation_id);
 
     char created_at[32];
     iso8601_now(created_at, sizeof(created_at));
@@ -623,12 +633,15 @@ void handle_chat(const NetApi &api, int sock, const char *request_body)
 
     std::vector<char> response_text(kResponseTextCapacity);
     gpt_runtime_stats_t stats{};
+    const auto operation_id = prospero::debug::begin_operation("api-generation", model);
     const bool ok = run_generation(
         messages, message_count, response_text.data(), response_text.size(),
         request_option(request_body, "num_predict", prospero_generation::MaxOutputTokens,
                        prospero_generation::MaxOutputTokens),
         &stats, model,
         request_option(request_body, "num_ctx", 0, prospero_generation::MaxContextTokens));
+    prospero::debug::event(ok ? "api-generation-completed" : "api-generation-failed", model,
+                           ok ? "" : "runtime-generation-failed", operation_id);
 
     char created_at[32];
     iso8601_now(created_at, sizeof(created_at));
@@ -732,6 +745,10 @@ void handle_model_download_cancel(const NetApi &api, int sock)
 
 void handle_model_presets(const NetApi &api, int sock, const char *body = nullptr)
 {
+    // PS5's statfs call is not safe on this title's network worker. Until a supported
+    // storage-query API is available, report unknown rather than risk terminating the app.
+    constexpr bool storage_known = false;
+    constexpr std::uint64_t available_storage = 0;
     if (body)
     {
         const char *value = json_value_start(body, "index");
@@ -742,6 +759,16 @@ void handle_model_presets(const NetApi &api, int sock, const char *body = nullpt
         {
             send_status(api, sock, "400 Bad Request", "application/json",
                         "{\"error\":\"a valid preset index is required\"}");
+            return;
+        }
+        const auto required = prospero_model_download::presets[index].size;
+        if (storage_known && required > available_storage)
+        {
+            send_status(api, sock, "507 Insufficient Storage", "application/json",
+                        nlohmann::json{{"error", "Not enough free space for this model."},
+                                       {"required_bytes", required},
+                                       {"available_bytes", available_storage}}
+                            .dump().c_str());
             return;
         }
         if (!prospero_model_download::download_preset(index))
@@ -761,7 +788,10 @@ void handle_model_presets(const NetApi &api, int sock, const char *body = nullpt
                          {"kind", preset.kind},
                          {"source_filename", preset.kind == 0 ? preset.files[0].source : ""},
                          {"size", preset.size},
-                         {"installed", prospero_model_download::preset_installed(i)}});
+                         {"installed", prospero_model_download::preset_installed(i)},
+                         {"required_bytes", preset.size},
+                         {"available_bytes", storage_known ? available_storage : 0},
+                         {"storage_check_available", storage_known}});
     }
     const auto response = nlohmann::json{{"data", items}}.dump();
     send_json(api, sock, response.c_str());
@@ -1391,9 +1421,30 @@ void handle_model_selection(const NetApi &api, int sock, const char *method,
 {
     if (std::strcmp(method, "GET") == 0)
     {
-        const unsigned selected = gpt_runtime_selected_model();
-        const char *id = gpt_runtime_model_id(selected);
-        const auto response = nlohmann::json{{"id", id ? id : ""}}.dump();
+        const auto state = prospero::model_manager::snapshot();
+        std::string id = state.model_id;
+        if (id.empty())
+        {
+            std::unique_lock<std::mutex> runtime_lock(
+                prospero::model_manager::runtime_mutex(), std::try_to_lock);
+            if (runtime_lock.owns_lock())
+            {
+                const unsigned selected = gpt_runtime_selected_model();
+                const char *runtime_id = gpt_runtime_model_id(selected);
+                id = runtime_id ? runtime_id : "";
+            }
+        }
+        const char *stage = state.stage == prospero::model_manager::Stage::ready ? "ready"
+                            : state.stage == prospero::model_manager::Stage::preparing
+                                ? "preparing"
+                            : state.stage == prospero::model_manager::Stage::failed ? "failed"
+                            : state.stage == prospero::model_manager::Stage::selected
+                                ? "selected"
+                                : "unknown";
+        const auto response = nlohmann::json{{"id", id}, {"state", stage},
+                                              {"error", state.error},
+                                              {"revision", state.revision}}
+                                  .dump();
         send_json(api, sock, response.c_str());
         return;
     }
@@ -1412,31 +1463,47 @@ void handle_model_selection(const NetApi &api, int sock, const char *method,
     }
     const bool prepare = request.value("prepare", true);
     const std::string id = request["id"].get<std::string>();
-    for (unsigned index = 0; index < gpt_runtime_model_count(); ++index)
+    const auto operation_id = prepare
+                                  ? prospero::debug::begin_operation("api-model-preparation", id.c_str())
+                                  : 0;
+    std::string error;
+    if (!prospero::model_manager::select(id.c_str(), prepare, true, &error))
     {
-        const char *candidate = gpt_runtime_model_id(index);
-        if (candidate && id == candidate)
-        {
-            if (!gpt_runtime_select_model(index))
-            {
-                send_status(
-                    api, sock, "409 Conflict", "application/json",
-                    "{\"error\":\"The model cannot be switched while generation is busy.\"}");
-                return;
-            }
-            if (prepare && gpt_runtime_prepare() != 0)
-            {
-                send_status(api, sock, "500 Internal Server Error", "application/json",
-                            "{\"error\":\"The selected model could not be prepared.\"}");
-                return;
-            }
-            const auto response = nlohmann::json{{"id", candidate}, {"preparation_deferred", !prepare}}.dump();
-            send_json(api, sock, response.c_str());
-            return;
-        }
+        const char *error_code = error.find("busy") != std::string::npos
+                                     ? "runtime-busy"
+                                 : error.find("not installed") != std::string::npos
+                                     ? "model-not-installed"
+                                     : "selection-or-prepare-failed";
+        prospero::debug::event("api-model-selection-failed", id.c_str(),
+                               error_code, operation_id);
+        const auto response = nlohmann::json{{"error", error}}.dump();
+        const char *status = error.find("not installed") != std::string::npos
+                                 ? "404 Not Found"
+                             : error.find("busy") != std::string::npos
+                                 ? "409 Conflict"
+                                 : "500 Internal Server Error";
+        send_status(api, sock, status, "application/json", response.c_str());
+        return;
     }
-    send_status(api, sock, "404 Not Found", "application/json",
-                "{\"error\":\"Model is not installed.\"}");
+    const auto selected = prospero::model_manager::snapshot();
+    prospero::debug::event(prepare ? "api-model-ready" : "api-model-selected", id.c_str(), "",
+                           operation_id);
+    if (prepare)
+    {
+        const auto settings = prospero_settings::get();
+        std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
+        char loaded[384]{};
+        if (gpt_runtime_loaded_model(loaded, sizeof(loaded), nullptr, 0) && id == loaded)
+            prospero::debug::model_memory_sample(id.c_str(), settings.context,
+                settings.output_limit, settings.thinking, gpt_runtime_vulkan_heap_bytes(),
+                prospero_memory::flexible_free());
+    }
+    const char *stage = selected.stage == prospero::model_manager::Stage::ready ? "ready" : "selected";
+    const auto response = nlohmann::json{{"id", id}, {"state", stage},
+                                          {"preparation_deferred", !prepare},
+                                          {"revision", selected.revision}}
+                              .dump();
+    send_json(api, sock, response.c_str());
 }
 
 void handle_model_delete(const NetApi &api, int sock, const char *body)
@@ -1457,6 +1524,100 @@ void handle_model_delete(const NetApi &api, int sock, const char *body)
         return;
     }
     send_json(api, sock, nlohmann::json{{"deleted", id}}.dump().c_str());
+}
+
+void handle_model_memory_estimate(const NetApi &api, int sock, const char *body)
+{
+    const auto request = nlohmann::json::parse(body ? body : "", nullptr, false);
+    if (!request.is_object() || !request.contains("id") || !request["id"].is_string())
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"Provide a model ID.\"}");
+        return;
+    }
+    const std::string model_id = request["id"].get<std::string>();
+    if (model_id.empty() || model_id.size() >= prospero_session::ModelIdBytes)
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"Invalid model ID.\"}");
+        return;
+    }
+    if (!request.contains("context_tokens") || !request["context_tokens"].is_number_unsigned() ||
+        !request.contains("output_limit") || !request["output_limit"].is_number_unsigned() ||
+        !request.contains("thinking") || !request["thinking"].is_boolean())
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"Provide context_tokens, output_limit, and thinking settings.\"}");
+        return;
+    }
+    const unsigned context_tokens = request["context_tokens"].get<unsigned>();
+    const unsigned output_limit = request["output_limit"].get<unsigned>();
+    const bool thinking = request["thinking"].get<bool>();
+
+    nlohmann::json gguf_size = nullptr;
+    if (model_id.size() > 5 && model_id.compare(model_id.size() - 5, 5, ".gguf") == 0 &&
+        model_id.front() != '/' && model_id.find("..") == std::string::npos &&
+        model_id.find('\\') == std::string::npos)
+    {
+        char model_path[1024];
+        const int path_size = std::snprintf(model_path, sizeof(model_path), "%s/%s",
+                                             prospero::model_root(), model_id.c_str());
+        struct stat model_info{};
+        if (path_size > 0 && static_cast<std::size_t>(path_size) < sizeof(model_path) &&
+            ::stat(model_path, &model_info) == 0 && S_ISREG(model_info.st_mode) &&
+            model_info.st_size >= 0)
+            gguf_size = static_cast<std::uint64_t>(model_info.st_size);
+    }
+
+    const auto summary = prospero::debug::model_memory_summary(
+        model_id.c_str(), context_tokens, output_limit, thinking);
+    const unsigned samples = summary.samples;
+    const std::uint64_t largest_heap = summary.largest_vulkan_heap_bytes;
+    const std::uint64_t least_flexible_free = summary.least_flexible_free_bytes;
+    nlohmann::json latest_settings = nullptr;
+    const char *files[] = {"/download0/ProsperoAI/logs/events.prev.jsonl",
+                           "/download0/ProsperoAI/logs/events.jsonl"};
+    for (const char *file_path : files)
+    {
+        if (std::FILE *file = std::fopen(file_path, "rb"))
+        {
+            char line[1024];
+            while (std::fgets(line, sizeof(line), file))
+            {
+                const auto event = nlohmann::json::parse(line, nullptr, false);
+                if (!event.is_object() || event.value("operation", std::string()) !=
+                                              "model-memory-sample" ||
+                    event.value("model", std::string()) != model_id ||
+                    event.value("context_tokens", 0U) != context_tokens ||
+                    event.value("output_limit", 0U) != output_limit ||
+                    event.value("thinking", false) != thinking ||
+                    !event.contains("vulkan_heap_bytes") ||
+                    !event["vulkan_heap_bytes"].is_number_integer() ||
+                    !event.contains("flexible_free_bytes") ||
+                    !event["flexible_free_bytes"].is_number_integer())
+                    continue;
+                latest_settings = nlohmann::json{{"context_tokens", event.value("context_tokens", 0U)},
+                    {"output_limit", event.value("output_limit", 0U)},
+                    {"thinking", event.value("thinking", false)}};
+            }
+            std::fclose(file);
+        }
+    }
+
+    nlohmann::json current = nullptr;
+    std::unique_lock<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex(),
+                                               std::try_to_lock);
+    if (runtime_lock.owns_lock())
+        current = nlohmann::json{{"largest_direct_block_bytes", prospero_memory::largest_free_block()},
+            {"flexible_free_bytes", prospero_memory::flexible_free()}};
+    const auto response = nlohmann::json{{"model", model_id}, {"samples", samples},
+        {"gguf_file_size_bytes", gguf_size},
+        {"estimate_available", samples > 0}, {"largest_observed_vulkan_heap_bytes", largest_heap},
+        {"least_observed_flexible_free_bytes", samples ? least_flexible_free : 0},
+        {"latest_sample_settings", latest_settings}, {"current_memory", current},
+        {"confidence", samples ? "historical-observations-not-fit-guarantee" : "unavailable"}}
+                              .dump();
+    send_json(api, sock, response.c_str());
 }
 
 // Same allowlist the native app uses to recognize a generated-media reference inside a
@@ -1522,6 +1683,156 @@ void handle_media_file(const NetApi &api, int sock, const char *path)
     std::fclose(file);
 }
 
+nlohmann::json list_saved_media()
+{
+    std::map<std::string, nlohmann::json> media;
+    prospero_session::Record records[prospero_session::CatalogCapacity]{};
+    const unsigned count = prospero_session::scan(records, prospero_session::CatalogCapacity);
+    for (unsigned i = 0; i < count; ++i)
+    {
+        const auto &record = records[i];
+        for (unsigned message_index = 0; message_index < record.message_count; ++message_index)
+        {
+            prospero_session::Message message{};
+            if (!prospero_session::load_message(record.id, message_index, &message))
+                continue;
+            const std::string &content = message.content;
+            std::size_t at = 0;
+            while ((at = content.find("/download0/", at)) != std::string::npos)
+            {
+                std::size_t end = at;
+                while (end < content.size() &&
+                       !std::isspace(static_cast<unsigned char>(content[end])) &&
+                       content[end] != '<' && content[end] != '>' && content[end] != '"')
+                    ++end;
+                while (end > at && (content[end - 1] == ')' || content[end - 1] == ',' ||
+                                    content[end - 1] == '.' || content[end - 1] == ';'))
+                    --end;
+                const std::string path = content.substr(at, end - at);
+                const bool image = path.size() >= 4 &&
+                                   (path.compare(path.size() - 4, 4, ".png") == 0 ||
+                                    path.compare(path.size() - 4, 4, ".tga") == 0);
+                const bool audio = path.size() >= 4 &&
+                                   (path.compare(path.size() - 4, 4, ".wav") == 0);
+                if ((image || audio) && media_path_allowed(path))
+                    media.emplace(path, nlohmann::json{{"path", path},
+                        {"kind", image ? "image" : "audio"}, {"conversation_id", record.id},
+                        {"title", record.title}, {"model", record.model_id},
+                        {"modelName", record.model_name}});
+                at = std::max(end, at + 1);
+            }
+        }
+    }
+    nlohmann::json data = nlohmann::json::array();
+    for (auto &item : media)
+        data.push_back(std::move(item.second));
+    return data;
+}
+
+bool delete_archived_media(const std::string &path, std::string &error)
+{
+    if (!media_path_allowed(path))
+    {
+        error = "Media path is outside the allowed storage area.";
+        return false;
+    }
+    const bool supported_media = path.size() >= 4 &&
+        (path.compare(path.size() - 4, 4, ".png") == 0 ||
+         path.compare(path.size() - 4, 4, ".tga") == 0 ||
+         path.compare(path.size() - 4, 4, ".wav") == 0);
+    if (!supported_media)
+    {
+        error = "Only archived image and audio files can be deleted here.";
+        return false;
+    }
+    prospero_session::Record records[prospero_session::CatalogCapacity]{};
+    const unsigned count = prospero_session::scan(records, prospero_session::CatalogCapacity);
+    prospero_session::Record owner{};
+    std::vector<prospero_session::Message> owner_messages;
+    unsigned owner_message = 0;
+    unsigned references = 0;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        for (unsigned j = 0; j < records[i].message_count; ++j)
+        {
+            prospero_session::Message message{};
+            if (!prospero_session::load_message(records[i].id, j, &message))
+                continue;
+            std::size_t at = 0;
+            bool found = false;
+            while ((at = message.content.find(path, at)) != std::string::npos)
+            {
+                found = true;
+                ++references;
+                at += path.size();
+                if (references > 1)
+                {
+                    error = "This media file is referenced more than once.";
+                    return false;
+                }
+            }
+            if (found)
+            {
+                owner = records[i];
+                owner_message = j;
+                owner_messages.resize(owner.message_count);
+                if (!prospero_session::load(owner.id, &owner, owner_messages.data(),
+                                            static_cast<unsigned>(owner_messages.size())))
+                {
+                    error = "The source conversation could not be loaded.";
+                    return false;
+                }
+            }
+        }
+    }
+    if (references != 1)
+    {
+        error = "Only media linked to a saved conversation can be deleted here.";
+        return false;
+    }
+    char owned_prefix[160];
+    bool owned_copy = false;
+    static const char *media_kinds[] = {"image", "audio", "voice"};
+    for (const char *kind : media_kinds)
+    {
+        std::snprintf(owned_prefix, sizeof(owned_prefix),
+                      "/download0/ProsperoAI/work/%s/%s/", kind, owner.id);
+        if (path.compare(0, std::strlen(owned_prefix), owned_prefix) == 0 &&
+            path.find('/', std::strlen(owned_prefix)) == std::string::npos)
+        {
+            owned_copy = true;
+            break;
+        }
+    }
+    if (!owned_copy)
+    {
+        error = "Only an archived output copy stored with its conversation can be deleted.";
+        return false;
+    }
+    auto &content = owner_messages[owner_message].content;
+    const std::string original = content;
+    std::size_t at = content.find(path);
+    if (at == std::string::npos)
+    {
+        error = "The media reference changed; refresh and try again.";
+        return false;
+    }
+    content.replace(at, path.size(), "[media deleted]");
+    if (!prospero_session::save(&owner, owner_messages.data(), owner.message_count))
+    {
+        error = "The conversation could not be updated.";
+        return false;
+    }
+    if (std::remove(path.c_str()) != 0)
+    {
+        owner_messages[owner_message].content = original;
+        (void)prospero_session::save(&owner, owner_messages.data(), owner.message_count);
+        error = "The archived media file could not be removed.";
+        return false;
+    }
+    return true;
+}
+
 bool handle_conversations(const NetApi &api, int sock, const char *method, const char *path,
                           const char *body)
 {
@@ -1545,6 +1856,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
                             {"model", record.model_id},
                             {"modelName", record.model_name},
                             {"purpose", record.purpose},
+                            {"pinned", record.pinned},
+                            {"archived", record.archived},
                             {"message_count", record.message_count},
                             {"created_us", record.created_us},
                             {"updated_us", record.updated_us}});
@@ -1575,6 +1888,13 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
         const std::string model = string_field("model");
         const std::string model_name = string_field("modelName", model.c_str());
         const std::string purpose = string_field("purpose", "text-to-text");
+        if ((request.contains("pinned") && !request["pinned"].is_boolean()) ||
+            (request.contains("archived") && !request["archived"].is_boolean()))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"Pinned and archived must be boolean values.\"}");
+            return true;
+        }
         if (!prospero_session::valid_id(id.c_str()) || model.empty() || title.empty() ||
             title.size() >= sizeof(prospero_session::Record{}.title) ||
             model.size() >= sizeof(prospero_session::Record{}.model_id) || model_name.empty() ||
@@ -1601,6 +1921,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
         std::snprintf(record.model_id, sizeof(record.model_id), "%s", model.c_str());
         std::snprintf(record.model_name, sizeof(record.model_name), "%s", model_name.c_str());
         std::snprintf(record.purpose, sizeof(record.purpose), "%s", purpose.c_str());
+        if (request.contains("pinned")) record.pinned = request["pinned"].get<bool>();
+        if (request.contains("archived")) record.archived = request["archived"].get<bool>();
         if (request.contains("messages"))
         {
             const auto &items = request["messages"];
@@ -1649,6 +1971,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
             {"model", record.model_id},
             {"modelName", record.model_name},
             {"purpose", record.purpose},
+            {"pinned", record.pinned},
+            {"archived", record.archived},
             {"message_count", record.message_count},
             {"created_us", record.created_us},
             {"updated_us",
@@ -1663,6 +1987,51 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
     {
         send_status(api, sock, "400 Bad Request", "application/json",
                     "{\"error\":\"Invalid conversation ID.\"}");
+        return true;
+    }
+    if (std::strcmp(method, "PATCH") == 0)
+    {
+        const auto request = nlohmann::json::parse(body, nullptr, false);
+        if (!request.is_object() ||
+            (request.contains("title") && !request["title"].is_string()) ||
+            (request.contains("pinned") && !request["pinned"].is_boolean()) ||
+            (request.contains("archived") && !request["archived"].is_boolean()) ||
+            (!request.contains("title") && !request.contains("pinned") &&
+             !request.contains("archived")))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"Provide a title, pinned, or archived field.\"}");
+            return true;
+        }
+        const std::string title = request.value("title", std::string());
+        if (request.contains("title") &&
+            (title.empty() || title.size() >= sizeof(prospero_session::Record{}.title)))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"Title must be 1–71 bytes.\"}");
+            return true;
+        }
+        prospero_session::Record record{};
+        std::vector<prospero_session::Message> messages(prospero_session::MessageCapacity);
+        if (!prospero_session::load(id.c_str(), &record, messages.data(),
+                                    static_cast<unsigned>(messages.size())))
+        {
+            send_status(api, sock, "404 Not Found", "application/json",
+                        "{\"error\":\"Conversation not found.\"}");
+            return true;
+        }
+        if (request.contains("title"))
+            std::snprintf(record.title, sizeof(record.title), "%s", title.c_str());
+        if (request.contains("pinned")) record.pinned = request["pinned"].get<bool>();
+        if (request.contains("archived")) record.archived = request["archived"].get<bool>();
+        if (!prospero_session::save(&record, messages.data(), record.message_count))
+        {
+            send_status(api, sock, "500 Internal Server Error", "application/json",
+                        "{\"error\":\"Could not rename the conversation.\"}");
+            return true;
+        }
+        send_json(api, sock, nlohmann::json{{"id", record.id}, {"title", record.title},
+            {"pinned", record.pinned}, {"archived", record.archived}}.dump().c_str());
         return true;
     }
     if (std::strcmp(method, "DELETE") == 0)
@@ -1696,6 +2065,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
             {"model", record.model_id},
             {"modelName", record.model_name},
             {"purpose", record.purpose},
+            {"pinned", record.pinned},
+            {"archived", record.archived},
             {"message_count", record.message_count},
             {"created_us", record.created_us},
             {"updated_us", record.updated_us},
@@ -1734,22 +2105,108 @@ void handle_connection(const NetApi &api, int sock)
         return;
     }
 #endif
+    // This exposes only the security mode, never the configured credential. Keep it
+    // readable without a key so a misconfigured install can explain why API calls fail.
+    if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/settings/security") == 0)
+    {
+        const char *authentication = !api_key_valid ? "misconfigured"
+                                     : !api_key.empty() ? "required"
+                                                        : "disabled";
+        send_json(api, sock,
+                  nlohmann::json{{"authentication", authentication},
+                                 {"transport", "http"},
+                                 {"listener_scope", "all_interfaces"},
+                                 {"encrypted", false}}
+                      .dump()
+                      .c_str());
+        api.socket_close(sock);
+        return;
+    }
     if (!api_authorized(request))
         openai_error(api, sock, "401 Unauthorized", "invalid_api_key",
                      "A valid bearer API key is required.");
 #ifdef PS5_LLAMA_VULKAN
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/auth/session") == 0)
+    {
+        const std::string authorization = api_header(request, "authorization");
+        std::string token;
+        if (api_key.empty() || authorization != "Bearer " + api_key)
+            send_status(api, sock, "401 Unauthorized", "application/json",
+                        "{\"error\":\"A valid API key is required to create a browser session.\"}");
+        else if (!api_issue_browser_session(request, token))
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"A same-origin browser session could not be created.\"}");
+        else
+            send_json(api, sock, nlohmann::json{{"token", token}, {"expires_in", 1800}}.dump().c_str());
+    }
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/models/memory") == 0)
     {
+        std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
         char id[256]{}, name[256]{};
         const bool loaded=gpt_runtime_loaded_model(id,sizeof(id),name,sizeof(name));
-        send_json(api,sock,nlohmann::json{{"loaded",loaded},{"id",id},{"name",name}}.dump().c_str());
+        send_json(api,sock,nlohmann::json{{"loaded",loaded},{"id",id},{"name",name},
+            {"vulkan_heap_bytes",gpt_runtime_vulkan_heap_bytes()},
+            {"largest_direct_block_bytes",prospero_memory::largest_free_block()},
+            {"flexible_free_bytes",prospero_memory::flexible_free()},
+            {"estimate_confidence","live-memory-snapshot"}}.dump().c_str());
     }
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/models/estimate") == 0)
+        handle_model_memory_estimate(api, sock, body);
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/v1/models") == 0)
         handle_openai_models(api, sock);
     else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/v1/chat/completions") == 0)
         handle_openai_chat(api, sock, body);
 #endif
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    else if (std::strcmp(path, "/api/media") == 0 &&
+             (std::strcmp(method, "GET") == 0 || std::strcmp(method, "DELETE") == 0))
+    {
+        if (std::strcmp(method, "GET") == 0)
+            send_json(api, sock, nlohmann::json{{"data", list_saved_media()}}.dump().c_str());
+        else
+        {
+            const auto request = nlohmann::json::parse(body, nullptr, false);
+            if (!request.is_object() || !request.contains("path") ||
+                !request["path"].is_string())
+                send_status(api, sock, "400 Bad Request", "application/json",
+                            "{\"error\":\"Provide a media path.\"}");
+            else
+            {
+                std::string error;
+                const std::string media_path = request["path"].get<std::string>();
+                if (delete_archived_media(media_path, error))
+                    send_json(api, sock, "{\"deleted\":true}");
+                else
+                    send_status(api, sock, "409 Conflict", "application/json",
+                                nlohmann::json{{"error", error}}.dump().c_str());
+            }
+        }
+    }
+    else if (std::strcmp(method, "GET") == 0 &&
+             std::strcmp(path, "/api/diagnostics/events") == 0)
+    {
+        const char *files[] = {"/download0/ProsperoAI/logs/events.jsonl",
+                               "/download0/ProsperoAI/logs/events.prev.jsonl"};
+        nlohmann::json events = nlohmann::json::array();
+        for (const char *file_path : files)
+        {
+            if (std::FILE *file = std::fopen(file_path, "rb"))
+            {
+                char line[512];
+                while (std::fgets(line, sizeof(line), file))
+                {
+                    auto event = nlohmann::json::parse(line, nullptr, false);
+                    if (event.is_object()) events.push_back(std::move(event));
+                }
+                std::fclose(file);
+            }
+        }
+        if (events.size() > 256)
+            events.erase(events.begin(), events.end() - 256);
+        send_json(api, sock, nlohmann::json{{"data", std::move(events)},
+                         {"privacy", "No prompts, responses, API keys, or recordings are stored."}}
+                         .dump().c_str());
+    }
     else if (std::strcmp(method, "GET") == 0 && std::strncmp(path, "/download0/", 11) == 0)
         handle_media_file(api, sock, path);
     else if (std::strncmp(path, "/api/conversations", 18) == 0 &&
@@ -1934,6 +2391,11 @@ bool prospero_http_server_mobile_url(char *text, std::size_t capacity)
         return false;
     }
     return true;
+}
+
+int prospero_http_server_auth_status()
+{
+    return !api_key_valid ? -1 : !api_key.empty() ? 1 : 0;
 }
 
 bool prospero_http_server_start(unsigned short port)

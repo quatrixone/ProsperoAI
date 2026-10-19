@@ -55,6 +55,8 @@ class NativeController(unittest.TestCase):
             kit = tool("prepare-ui-kit.sh") / "src"
             fonts = tool("bake-fonts.sh")
             binary = directory / "controller-test"
+            logs = directory / "logs"
+            logs.mkdir()
             subprocess.run([os.environ.get("HOST_CXX", "clang++"), "-std=c++20", "-pthread",
                             "-g", "-O1", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                             "-Wall", "-Wextra", "-Werror", "-DPROSPERO_HOST",
@@ -79,4 +81,5 @@ class NativeController(unittest.TestCase):
                             str(kit / "gfx/font.cpp"),
                             "-o", str(binary)], check=True)
             subprocess.run([str(binary), str(fonts / "inter-regular.huifont"),
-                            str(fonts / "noto-sans-east-asian.huifont")], check=True, timeout=30)
+                            str(fonts / "noto-sans-east-asian.huifont"), str(logs)],
+                           check=True, timeout=30)

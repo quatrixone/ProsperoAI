@@ -6,6 +6,10 @@
 #include "runtime_settings.hpp"
 #include "prospero_search.hpp"
 #include "generation_limits.hpp"
+#include "model_manager.hpp"
+#ifdef PS5_LLAMA_VULKAN
+#include "direct_memory.hpp"
+#endif
 
 #include "debug_log.hpp"
 #ifdef PS5_LLAMA_VULKAN
@@ -411,6 +415,32 @@ void App::poll()
         if (!start(Job::Preferences))
             preferences_dirty_ = true;
     }
+    if (!running_)
+    {
+        const auto selected = model_manager::snapshot();
+        if (selected.revision != model_manager_revision_)
+        {
+            model_manager_revision_ = selected.revision;
+            const auto found =
+                std::find_if(state_.models.begin(), state_.models.end(),
+                             [&](const Model &model) { return model.id == selected.model_id; });
+            if (found != state_.models.end())
+            {
+                state_.selected_model = static_cast<int>(found - state_.models.begin());
+                state_.preferences.model_id = selected.model_id;
+                state_.ready = selected.stage == model_manager::Stage::ready;
+                state_.preparing = selected.stage == model_manager::Stage::preparing;
+                state_.status =
+                    selected.stage == model_manager::Stage::failed ? selected.error
+                    : state_.ready                                 ? found->name + " is ready"
+                    : state_.preparing
+                        ? found->name + " is loading…"
+                        : found->name + " selected; prepare it to start a new conversation";
+                preferences_dirty_ = true;
+                ++state_.revision;
+            }
+        }
+    }
 }
 
 bool App::generating() const
@@ -454,9 +484,20 @@ bool App::select_model(unsigned index)
 {
     if (running_ || state_.unsaved || index >= state_.models.size())
         return false;
+    const int previous_model = state_.selected_model;
+    const bool previous_ready = state_.ready;
     argument_ = index;
+    state_.selected_model = static_cast<int>(index);
+    state_.ready = false;
+    state_.preparing = true;
     state_.status = "Preparing " + state_.models[index].name + "...";
-    return start(Job::Select);
+    if (start(Job::Select))
+        return true;
+    state_.selected_model = previous_model;
+    state_.ready = previous_ready;
+    state_.preparing = false;
+    state_.status = "Could not start model preparation. Try again.";
+    return false;
 }
 
 bool App::open_session(unsigned index)
@@ -668,11 +709,13 @@ void App::work()
 {
     const auto began = std::chrono::steady_clock::now();
     const Job job = job_;
+    diagnostic_error_.clear();
     switch (job_)
     {
     case Job::Discover:
     {
 #ifdef PS5_LLAMA_VULKAN
+        std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
         gpt_runtime_refresh_models();
 #endif
         result_.models.clear();
@@ -699,6 +742,7 @@ void App::work()
     }
     case Job::RefreshModels:
     {
+        std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
         gpt_runtime_refresh_models();
         const std::string selected =
             result_.selected_model >= 0
@@ -725,10 +769,39 @@ void App::work()
         break;
     }
     case Job::Select:
-        result_.ready = gpt_runtime_select_model(argument_) && gpt_runtime_prepare() == 0;
-        result_.selected_model = static_cast<int>(gpt_runtime_selected_model());
-        result_.preferences.model_id =
-            result_.models[static_cast<std::size_t>(result_.selected_model)].id;
+    {
+        const auto operation_id = prospero::debug::begin_operation(
+            "model-preparation", result_.models[static_cast<std::size_t>(argument_)].id.c_str());
+        result_.ready = model_manager::select(
+            result_.models[static_cast<std::size_t>(argument_)].id.c_str(), true);
+        result_.preparing = false;
+        {
+            const auto selected = model_manager::snapshot();
+            result_.selected_model = -1;
+            for (std::size_t i = 0; i < result_.models.size(); ++i)
+                if (result_.models[i].id == selected.model_id)
+                    result_.selected_model = static_cast<int>(i);
+            prospero::debug::event(result_.ready ? "model-ready" : "model-failed",
+                                   selected.model_id.c_str(), result_.ready ? "" : "prepare-failed",
+                                   operation_id);
+#ifdef PS5_LLAMA_VULKAN
+            if (result_.ready)
+            {
+                const auto settings = prospero_settings::get();
+                std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
+                char loaded[384]{};
+                if (gpt_runtime_loaded_model(loaded, sizeof(loaded), nullptr, 0) &&
+                    selected.model_id == loaded)
+                    prospero::debug::model_memory_sample(
+                        selected.model_id.c_str(), settings.context, settings.output_limit,
+                        settings.thinking, gpt_runtime_vulkan_heap_bytes(),
+                        prospero_memory::flexible_free());
+            }
+#endif
+        }
+        if (result_.selected_model >= 0)
+            result_.preferences.model_id =
+                result_.models[static_cast<std::size_t>(result_.selected_model)].id;
         if (result_.ready)
         {
             result_.session = {};
@@ -744,9 +817,10 @@ void App::work()
             result_.stats_valid = false;
         }
         result_.notice = result_.ready ? Notice::ModelReady : Notice::ModelFailed;
-        result_.status = result_.ready ? "Ready when you are"
-                                       : "Model preparation failed. Select the model to retry.";
+        result_.status = result_.ready ? "Ready when you are" : model_manager::snapshot().error;
+        model_manager_revision_ = model_manager::snapshot().revision;
         break;
+    }
     case Job::Open:
     {
         prospero_session::Record record{};
@@ -760,16 +834,40 @@ void App::work()
         }
         messages.resize(record.message_count);
         const int index = model_of(result_, &record);
+        const auto operation_id =
+            prospero::debug::begin_operation("conversation-open", record.model_id);
         result_.session = record;
         result_.messages = std::move(messages);
         refresh_images();
         result_.retry_available = false;
         result_.stats_valid = false;
-        result_.ready = index >= 0 && gpt_runtime_select_model(static_cast<unsigned>(index)) &&
-                        gpt_runtime_prepare() == 0;
+        result_.ready = index >= 0 && model_manager::select(record.model_id, true);
+        prospero::debug::event(result_.ready ? "conversation-model-ready"
+                                             : "conversation-model-failed",
+                               record.model_id,
+                               result_.ready ? ""
+                               : index < 0   ? "model-not-installed"
+                                             : "prepare-failed",
+                               operation_id);
+#ifdef PS5_LLAMA_VULKAN
+        if (result_.ready)
+        {
+            const auto settings = prospero_settings::get();
+            std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
+            char loaded[384]{};
+            if (gpt_runtime_loaded_model(loaded, sizeof(loaded), nullptr, 0) &&
+                std::strcmp(record.model_id, loaded) == 0)
+                prospero::debug::model_memory_sample(
+                    record.model_id, settings.context, settings.output_limit, settings.thinking,
+                    gpt_runtime_vulkan_heap_bytes(), prospero_memory::flexible_free());
+        }
+#endif
         if (index >= 0)
         {
-            result_.selected_model = static_cast<int>(gpt_runtime_selected_model());
+            {
+                std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
+                result_.selected_model = static_cast<int>(gpt_runtime_selected_model());
+            }
             result_.preferences.model_id =
                 result_.models[static_cast<std::size_t>(result_.selected_model)].id;
         }
@@ -801,7 +899,31 @@ void App::work()
         }
         break;
     case Job::Generate:
+        diagnostic_operation_id_ =
+            prospero::debug::begin_operation("native-generation", result_.session.model_id);
         generate();
+        {
+            const char *model_id = result_.session.model_id;
+            if (!model_id[0] && result_.selected_model >= 0)
+                model_id =
+                    result_.models[static_cast<std::size_t>(result_.selected_model)].id.c_str();
+            if (!result_.stats_valid)
+                prospero::debug::event(diagnostic_error_ == "web-search-disabled"
+                                           ? "generation-rejected"
+                                           : "generation-failed",
+                                       model_id,
+                                       diagnostic_error_.empty() ? "runtime-generation-failed"
+                                                                 : diagnostic_error_.c_str(),
+                                       diagnostic_operation_id_);
+            else if (result_.unsaved)
+                prospero::debug::event("generation-save-failed", model_id,
+                                       diagnostic_error_.empty() ? "assistant-message-save-failed"
+                                                                 : diagnostic_error_.c_str(),
+                                       diagnostic_operation_id_);
+            else
+                prospero::debug::event("generation-completed", model_id, "",
+                                       diagnostic_operation_id_);
+        }
         break;
     case Job::Save:
         result_.unsaved = !prospero_session::save(&result_.session, result_.messages.data(),
@@ -907,16 +1029,19 @@ void App::work()
 
 void App::generate()
 {
+    std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
     const auto &model = result_.models[static_cast<std::size_t>(result_.selected_model)];
     result_.retry_available = true;
     result_.unsaved = true;
     result_.stats_valid = false;
     result_.notice = Notice::SaveFailed;
+    diagnostic_error_ = "runtime-generation-failed";
     if (!result_.session.id[0])
     {
         if (!prospero_session::create(&result_.session, model.id.c_str(), model.name.c_str(),
                                       model.purpose.c_str()))
         {
+            diagnostic_error_ = "conversation-create-failed";
             result_.status =
                 "Could not create a conversation. Check available storage, then retry.";
             return;
@@ -928,6 +1053,7 @@ void App::generate()
     if (!prospero_session::save(&result_.session, result_.messages.data(),
                                 static_cast<unsigned>(result_.messages.size())))
     {
+        diagnostic_error_ = "user-message-save-failed";
         result_.status = "Could not save your message. Check available storage, then retry.";
         return;
     }
@@ -949,6 +1075,7 @@ void App::generate()
     {
         if (!runtime.web_search)
         {
+            diagnostic_error_ = "web-search-disabled";
             result_.notice = Notice::GenerationFailed;
             result_.status = "Enable search in Settings before using /search or /fetch.";
             refresh_sessions();
@@ -1110,12 +1237,14 @@ void App::generate()
     result_.stream.clear();
     if (status)
     {
+        diagnostic_error_ = "runtime-generation-failed";
         result_.notice = Notice::GenerationFailed;
         result_.status = response[0] ? response.data()
                                      : "Generation failed. Your message is saved; you can retry.";
         refresh_sessions();
         return;
     }
+    diagnostic_error_.clear();
     prospero_session::OutputMetadata metadata;
     metadata.model_id = model.id.c_str();
     metadata.model_name = model.name.c_str();
@@ -1181,6 +1310,11 @@ void App::generate()
     result_.status = !saved ? "Response is shown, but could not be saved. Check available storage."
                      : !archived ? "Response saved, but its work export could not be archived."
                                  : "Saved on your console";
+    if (!saved)
+        diagnostic_error_ = "assistant-message-save-failed";
+    if (!archived)
+        prospero::debug::event("media-archive-failed", model.id.c_str(), "output-archive-failed",
+                               diagnostic_operation_id_);
     refresh_sessions();
 }
 } // namespace prospero

@@ -4,6 +4,7 @@
 #include "gpt_runtime.hpp"
 #include "session_store.hpp"
 #include "media_preview.hpp"
+#include "debug_log.hpp"
 #include <array>
 #include <atomic>
 #include <string>
@@ -79,7 +80,8 @@ struct State
     prospero_session::Record session{};
     Preferences preferences;
     int selected_model = -1;
-    bool ready = false, initialized = false, retry_available = false, unsaved = false;
+    bool ready = false, preparing = false, initialized = false, retry_available = false,
+         unsaved = false;
     std::string status = "Opening your space...", stream;
     // Figures of the last answer in the conversation on screen; see stats_valid.
     gpt_runtime_stats_t stats{};
@@ -153,12 +155,15 @@ class App
     unsigned argument_ = 0;
     std::string session_id_;
     std::string audio_path_;
+    std::string diagnostic_error_;
+    prospero::debug::OperationId diagnostic_operation_id_ = 0;
     std::vector<Notice> notices_;
     bool running_ = false, preferences_dirty_ = false;
     std::atomic<bool> done_{false};
     std::atomic_flag stream_lock_ = ATOMIC_FLAG_INIT;
     std::atomic<unsigned> stream_version_{0};
     unsigned displayed_stream_ = 0;
+    std::uint64_t model_manager_revision_ = 0;
     std::vector<char> stream_buffer_ = std::vector<char>(prospero_session::MessageBytes);
 #ifdef PROSPERO_HOST
     pthread_t thread_{};

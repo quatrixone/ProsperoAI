@@ -190,6 +190,7 @@ bool read_metadata(const char *id, Record *record)
     std::uint64_t schema = 0;
     std::uint64_t message_count = 0;
     std::uint64_t context_start = 0;
+    std::uint64_t pinned = 0, archived = 0;
     if (!json_u64(json, "schema", &schema) || schema != 1 ||
         !json_string(json, "id", parsed.id, sizeof(parsed.id)) || std::strcmp(parsed.id, id) != 0 ||
         !json_string(json, "title", parsed.title, sizeof(parsed.title)) ||
@@ -203,8 +204,15 @@ bool read_metadata(const char *id, Record *record)
         !json_u64(json, "context_start", &context_start) || message_count > MessageCapacity ||
         context_start > message_count)
         return false;
+    // These fields were added without changing schema 1; existing sessions default to false.
+    json_u64(json, "pinned", &pinned);
+    json_u64(json, "archived", &archived);
+    if (pinned > 1 || archived > 1)
+        return false;
     parsed.message_count = static_cast<unsigned>(message_count);
     parsed.context_start = static_cast<unsigned>(context_start);
+    parsed.pinned = pinned != 0;
+    parsed.archived = archived != 0;
     *record = parsed;
     return true;
 }
@@ -452,10 +460,11 @@ bool save(Record *record, const Message *messages, unsigned message_count)
     write_json_string(file, record->updated_time);
     std::fprintf(file,
                  ",\n  \"created_us\": %llu,\n  \"updated_us\": %llu,\n"
-                 "  \"message_count\": %u,\n  \"context_start\": %u\n}\n",
+                 "  \"message_count\": %u,\n  \"context_start\": %u,\n"
+                 "  \"pinned\": %u,\n  \"archived\": %u\n}\n",
                  static_cast<unsigned long long>(record->created_us),
                  static_cast<unsigned long long>(record->updated_us), record->message_count,
-                 record->context_start);
+                 record->context_start, record->pinned ? 1u : 0u, record->archived ? 1u : 0u);
     if (std::fclose(file) != 0 || std::rename(temporary, path) != 0)
     {
         std::remove(temporary);
@@ -475,6 +484,13 @@ bool load(const char *id, Record *record, Message *messages, unsigned message_ca
             return false;
     *record = loaded;
     return true;
+}
+
+bool load_message(const char *id, unsigned index, Message *message)
+{
+    Record record{};
+    return message && read_metadata(id, &record) && index < record.message_count &&
+           read_message(id, index, message);
 }
 
 unsigned scan(Record *records, unsigned capacity)

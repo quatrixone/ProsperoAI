@@ -41,6 +41,8 @@ struct Record
     std::uint64_t updated_us;
     unsigned message_count;
     unsigned context_start;
+    bool pinned;
+    bool archived;
 };
 
 // Stable categories also apply to conversations saved before filtering existed.
@@ -86,6 +88,7 @@ bool create_with_id(Record *record, const char *id, const char *model_id, const 
                     const char *purpose);
 bool save(Record *record, const Message *messages, unsigned message_count);
 bool load(const char *id, Record *record, Message *messages, unsigned message_capacity);
+bool load_message(const char *id, unsigned index, Message *message);
 unsigned scan(Record *records, unsigned capacity);
 bool erase(const char *id);
 struct OutputMetadata

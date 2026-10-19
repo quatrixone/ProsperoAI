@@ -26,6 +26,7 @@ class HttpApiTests(unittest.TestCase):
                         "-I"+str(ROOT / "search-engine/include"), "-I"+str(ROOT / "search-engine/src"),
                         "-I"+str(ROOT / ".deps/llama.cpp/vendor"),
                         str(ROOT / "tests/http_api_harness.cpp"), str(ROOT / "src/session_store.cpp"),
+                        str(ROOT / "src/debug_log.cpp"),
                         str(ROOT / "search-engine/src/query.cpp"),
                         str(ROOT / "search-engine/src/providers.cpp"),
                         str(ROOT / "search-engine/src/scan.cpp"),
@@ -228,7 +229,11 @@ class HttpApiTests(unittest.TestCase):
     def test_model_memory_status(self):
         head, body = self.request("/api/models/memory")
         self.assertIn("200 OK", head)
-        self.assertEqual(json.loads(body), {"loaded": False, "id": "", "name": ""})
+        self.assertEqual(json.loads(body), {
+            "loaded": False, "id": "", "name": "", "vulkan_heap_bytes": 0,
+            "largest_direct_block_bytes": 0, "flexible_free_bytes": 0,
+            "estimate_confidence": "live-memory-snapshot",
+        })
         self.assertIn("401 Unauthorized", self.request("/api/models/memory", key="secret")[0])
 
     def test_models_and_selection(self):
@@ -246,6 +251,7 @@ class HttpApiTests(unittest.TestCase):
         self.assertIn("404 Not Found", self.request("/api/models/selection", body={"id": "missing.gguf"})[0])
         self.assertIn("400 Bad Request", self.request("/api/models/selection", body={"id": 3})[0])
         self.assertIn("401 Unauthorized", self.request("/api/models/selection", key="secret")[0])
+
         header, body = self.request("/api/models", body={"id": "tiny.gguf"}, method="DELETE")
         self.assertIn("409 Conflict", header)
         self.assertIn("active", json.loads(body)["error"])
@@ -259,6 +265,35 @@ class HttpApiTests(unittest.TestCase):
         data = json.loads(body)
         self.assertEqual(data["model"], "second.gguf")
         self.assertEqual(data["usage"]["total_tokens"], 14)
+
+    def test_model_memory_estimate_requires_settings(self):
+        head, body = self.request("/api/models/estimate", body={"id": "second.gguf"})
+        self.assertIn("400 Bad Request", head)
+        self.assertIn("context_tokens", body)
+        head, body = self.request(
+            "/api/models/estimate",
+            body={"id": "second.gguf", "context_tokens": 4096, "output_limit": 512,
+                  "thinking": False},
+        )
+        self.assertIn("200 OK", head)
+        self.assertFalse(json.loads(body)["estimate_available"])
+
+    def test_model_selection_reports_prepare_failure_and_runtime_busy(self):
+        header, body = self.request(
+            "/api/models/selection",
+            body={"id": "second.gguf"},
+            environment={"PROSPERO_TEST_FAIL_PREPARE": "1"},
+        )
+        self.assertIn("500 Internal Server Error", header)
+        self.assertIn("could not be prepared", json.loads(body)["error"])
+
+        header, body = self.request(
+            "/api/models/selection",
+            body={"id": "second.gguf"},
+            environment={"PROSPERO_TEST_RUNTIME_BUSY": "1"},
+        )
+        self.assertIn("409 Conflict", header)
+        self.assertIn("runtime is busy", json.loads(body)["error"])
 
     def test_ollama_uses_requested_model(self):
         for route, body in [
@@ -478,6 +513,18 @@ class HttpApiTests(unittest.TestCase):
             self.assertIn("401", head)
         head, _ = self.request("/v1/models", key="secret", headers=["authorization: Bearer secret"])
         self.assertIn("200", head)
+
+    def test_security_status_exposes_mode_but_never_the_key(self):
+        head, body = self.request("/api/settings/security")
+        self.assertIn("200 OK", head)
+        self.assertEqual(json.loads(body), {
+            "authentication": "disabled", "transport": "http",
+            "listener_scope": "all_interfaces", "encrypted": False,
+        })
+        head, body = self.request("/api/settings/security", key="secret")
+        self.assertIn("200 OK", head)
+        self.assertEqual(json.loads(body)["authentication"], "required")
+        self.assertNotIn("secret", body)
 
     def test_nested_text_parts_and_escaped_content(self):
         text = 'quoted " and } braces café 😀'

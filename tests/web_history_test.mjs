@@ -24,6 +24,7 @@ function fixture() {
     const lookup = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
     lookup('history-kind').value = 'all';
     const context = { $: lookup, document: { createElement: element },
+        conversationMeta: {},
         conversations: [
             { id: 'first', title: 'Text title', model: 'text', messages: [{ content: 'a galaxy of stars' }] },
             { id: 'image', title: 'Mountain', model: 'image', messages: [] },
@@ -46,7 +47,7 @@ test('category, content/model search and filtered open/delete keep conversation 
     assert.equal(rows().length, 1); rows()[0].children[0].onclick(); assert.equal(c.current.id, 'first');
     $('history-kind').value = 'text-to-speech'; $('history-search').value = 'SAVED VOICE'; c.renderHistory();
     assert.equal(rows().length, 1); rows()[0].children[0].onclick(); assert.equal(c.current.id, 'voice');
-    rows()[0].children[1].onclick(); assert.equal(c.pendingDelete, 'voice');
+    rows()[0].children[1].children[1].children[4].onclick(); assert.equal(c.pendingDelete, 'voice');
     $('delete-dialog').returnValue = 'delete'; await $('delete-dialog').events.close();
     assert.equal(c.conversations.length, 3); assert.ok(!c.conversations.some(x => x.id === 'voice'));
     assert.equal(c.saved.value.length, 3);
@@ -72,7 +73,7 @@ test('browser history migrates to the console and receives native conversations'
         purpose: 'text-to-text', messages: [{ role: 'user', content: 'Saved in browser' }], updatedAt: 1000 };
     const server = new Map([[native.id, native]]);
     const saved = {};
-    const context = { conversations: [local], conversationSyncReady: false, conversationSyncBusy: false,
+    const context = { conversations: [local], conversationMeta: {}, conversationSyncReady: false, conversationSyncBusy: false,
         controller: null, current: null, document: { visibilityState: 'visible' },
         save(key, value) { saved[key] = value; }, renderHistory() {}, renderMessages() {}, openChat() {},
         $(id) { return { textContent: '' }; },

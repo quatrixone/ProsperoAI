@@ -51,8 +51,28 @@ enum DialogAction
     kDeleteModel,
     kCloseApp,
     kCancelDownload,
+    kDownloadPreset,
     kDeleteVoice
 };
+
+std::string model_memory_note(const std::string &model_id)
+{
+    const auto settings = prospero_settings::get();
+    const auto summary = debug::model_memory_summary(model_id.c_str(), settings.context,
+                                                     settings.output_limit, settings.thinking);
+    if (!summary.samples)
+        return "No successful memory measurement exists for this model with the current context, "
+               "output limit, and thinking setting. A reliable fit estimate is unavailable.";
+    char note[320];
+    constexpr double gib = 1024.0 * 1024.0 * 1024.0;
+    std::snprintf(note, sizeof(note),
+                  "%u past successful load(s). Largest observed Vulkan heap: %.2f GiB. "
+                  "Lowest remaining flexible memory: %.2f GiB. Past runs do not guarantee "
+                  "this model will fit now.",
+                  summary.samples, summary.largest_vulkan_heap_bytes / gib,
+                  summary.least_flexible_free_bytes / gib);
+    return note;
+}
 } // namespace
 
 NativeUI::Impl::Impl(NativeUI &owner, App &app, FontSet &font_set, gfx::Renderer &renderer)
@@ -137,8 +157,13 @@ NativeUI::Impl::Impl(NativeUI &owner, App &app, FontSet &font_set, gfx::Renderer
             composer_.insert(value);
         else if (tabs_.active() == 0)
         {
-            session_search_.insert(value);
-            session_query_ = session_search_.text();
+            if (selecting_model_)
+                workspace_model_query_ += value;
+            else
+            {
+                session_search_.insert(value);
+                session_query_ = session_search_.text();
+            }
             refresh_sessions();
         }
         else
@@ -153,8 +178,16 @@ NativeUI::Impl::Impl(NativeUI &owner, App &app, FontSet &font_set, gfx::Renderer
             composer_.backspace();
         else if (tabs_.active() == 0)
         {
-            session_search_.backspace();
-            session_query_ = session_search_.text();
+            if (selecting_model_)
+            {
+                if (!workspace_model_query_.empty())
+                    workspace_model_query_.pop_back();
+            }
+            else
+            {
+                session_search_.backspace();
+                session_query_ = session_search_.text();
+            }
             refresh_sessions();
         }
         else
@@ -645,6 +678,16 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
                 accepted = quit_ = !app_.busy() && !app_.state().unsaved;
             else if (dialog_action_ == kCancelDownload)
                 accepted = cancel_pending_ = prospero_model_download::cancel();
+            else if (dialog_action_ == kDownloadPreset && dialog_index_ >= 0 &&
+                     static_cast<std::size_t>(dialog_index_) <
+                         prospero_model_download::preset_count)
+            {
+                const auto &preset = prospero_model_download::presets[dialog_index_];
+                accepted = prospero_model_download::download_preset(
+                    static_cast<std::size_t>(dialog_index_));
+                if (accepted)
+                    toasts_.push(ui::StatusKind::info, "Downloading model", preset.name);
+            }
             else if (dialog_action_ == kDeleteVoice)
             {
                 auto preferences = app_.state().preferences;
@@ -689,8 +732,16 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
     }
     else if (input.is_pressed(Action::page_next) || input.is_pressed(Action::page_prev))
     {
-        if (tabs_.step(input.is_pressed(Action::page_next) ? 1 : -1, input, feedback) ==
-            ui::Event::changed)
+        if (conversation_ && selecting_model_ && rail_)
+        {
+            const int delta = input.is_pressed(Action::page_next) ? 1 : -1;
+            workspace_model_filter_ = (workspace_model_filter_ + 1 + delta + 5) % 5 - 1;
+            sessions_.set_focus(0);
+            refresh_sessions();
+            feedback.play(audio::Cue::focus);
+        }
+        else if (tabs_.step(input.is_pressed(Action::page_next) ? 1 : -1, input, feedback) ==
+                 ui::Event::changed)
             change_page(tabs_.active());
     }
     else if (tabs_.active() == 1)
@@ -876,14 +927,17 @@ void NativeUI::Impl::handle_models(const InputFrame &input, ui::Feedback &feedba
                 toasts_.push(ui::StatusKind::info, "Model bundle saved",
                              "The model is installed in your library.");
             }
-            else if (prospero_model_download::download_preset(preset_index))
-            {
-                feedback.play(audio::Cue::tab);
-                toasts_.push(ui::StatusKind::info, "Downloading model",
-                             prospero_model_download::presets[preset_index].name);
-            }
             else
-                feedback.play(audio::Cue::error);
+            {
+                const auto &preset = prospero_model_download::presets[preset_index];
+                const auto size_mib =
+                    static_cast<unsigned long long>(preset.size / (1024ULL * 1024ULL));
+                open_dialog(kDownloadPreset, static_cast<int>(preset_index), "Download this model?",
+                            std::string(preset.name) + " requires " + std::to_string(size_mib) +
+                                " MiB. Free console storage cannot be checked safely. Check that "
+                                "enough space is available before continuing.",
+                            "Download model", false, feedback);
+            }
             return;
         }
         if (app_.busy() || state.unsaved)
@@ -898,7 +952,8 @@ void NativeUI::Impl::handle_models(const InputFrame &input, ui::Feedback &feedba
             open_dialog(kUseModel, index,
                         "Use " + state.models[static_cast<std::size_t>(index)].name + "?",
                         "Your current conversation is kept. A new conversation starts with "
-                        "this model.",
+                        "this model. " +
+                            model_memory_note(state.models[static_cast<std::size_t>(index)].id),
                         "Use model", false, feedback);
     }
 }
@@ -970,8 +1025,9 @@ void NativeUI::Impl::handle_workspace(const InputFrame &input, ui::Feedback &fee
     else if (rail_ && input.is_pressed(Action::west))
     {
         search_open_ = true;
-        keyboard_.style.max_length = 64;
-        keyboard_.set_length(session_search_.length());
+        keyboard_.style.max_length = selecting_model_ ? 96 : 64;
+        keyboard_.set_length(selecting_model_ ? workspace_model_query_.size()
+                                              : session_search_.length());
         keyboard_.enter();
     }
     else if (input.is_pressed(Action::west))
@@ -1068,7 +1124,8 @@ void NativeUI::Impl::handle_workspace(const InputFrame &input, ui::Feedback &fee
                         workspace_model_indices_[static_cast<std::size_t>(sessions_.focus())];
                     const auto &model = app_.state().models[index];
                     open_dialog(kUseModel, static_cast<int>(index), "Use " + model.name + "?",
-                                "This model will load into memory for the new conversation.",
+                                "This model will load into memory for the new conversation. " +
+                                    model_memory_note(model.id),
                                 "Use model", false, feedback);
                 }
                 else
@@ -1223,24 +1280,38 @@ void NativeUI::Impl::refresh_sessions()
     if (selecting_model_)
     {
         workspace_model_indices_.clear();
+        std::string query = workspace_model_query_;
+        std::transform(query.begin(), query.end(), query.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         for (unsigned i = 0; i < state.models.size(); ++i)
         {
             const auto &model = state.models[i];
+            if (workspace_model_filter_ >= 0 &&
+                static_cast<int>(model.capability) != workspace_model_filter_)
+                continue;
+            std::string searchable = model.name + " " + model.id + " " + model.purpose;
+            std::transform(searchable.begin(), searchable.end(), searchable.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (!query.empty() && searchable.find(query) == std::string::npos)
+                continue;
             ui::ListItem item;
             item.title = model.name;
             static constexpr const char *kCapabilityNames[] = {"Text", "Image", "Audio", "Voice"};
-            item.subtitle =
-                std::string(kCapabilityNames[static_cast<unsigned>(model.capability)]) +
-                (state.ready && static_cast<int>(i) == state.selected_model ? " · Loaded in memory"
-                                                                            : " · Select to load");
+            const bool selected = static_cast<int>(i) == state.selected_model;
+            item.subtitle = std::string(kCapabilityNames[static_cast<unsigned>(model.capability)]) +
+                            (selected ? (state.ready       ? " · Ready"
+                                         : state.preparing ? " · Loading…"
+                                                           : " · Selected, not prepared")
+                                      : " · Select to load");
             rows.push_back(std::move(item));
             workspace_model_indices_.push_back(i);
         }
         if (rows.empty())
         {
             ui::ListItem item;
-            item.title = "No models installed";
-            item.subtitle = "Install a model before starting a conversation";
+            item.title = state.models.empty() ? "No models installed" : "No matching models";
+            item.subtitle = state.models.empty() ? "Install a model before starting a conversation"
+                                                 : "Change or clear your model search";
             rows.push_back(std::move(item));
         }
         bool changed = rows.size() != sessions_.items().size();
@@ -1346,6 +1417,8 @@ void NativeUI::Impl::refresh_sessions()
 void NativeUI::Impl::begin_model_selection()
 {
     selecting_model_ = true;
+    workspace_model_query_.clear();
+    workspace_model_filter_ = -1;
     conversation_ = true;
     rail_ = true;
     sessions_.set_focus(0);
@@ -1359,8 +1432,16 @@ void NativeUI::Impl::type(char character, ui::Feedback &feedback)
         return;
     if (tabs_.active() == 0 && search_open_)
     {
-        session_search_.insert(character, feedback);
-        session_query_ = session_search_.text();
+        if (selecting_model_)
+        {
+            if (workspace_model_query_.size() < 96)
+                workspace_model_query_.push_back(character);
+        }
+        else
+        {
+            session_search_.insert(character, feedback);
+            session_query_ = session_search_.text();
+        }
         refresh_sessions();
     }
     else if (tabs_.active() == 1)
@@ -1384,8 +1465,16 @@ void NativeUI::Impl::backspace(ui::Feedback &feedback)
         return;
     if (tabs_.active() == 0 && search_open_)
     {
-        session_search_.backspace(feedback);
-        session_query_ = session_search_.text();
+        if (selecting_model_)
+        {
+            if (!workspace_model_query_.empty())
+                workspace_model_query_.pop_back();
+        }
+        else
+        {
+            session_search_.backspace(feedback);
+            session_query_ = session_search_.text();
+        }
         refresh_sessions();
     }
     else if (tabs_.active() == 1)
@@ -1514,51 +1603,73 @@ void NativeUI::Impl::build_generation_form()
 {
     const auto p = app_.state().preferences;
     const auto runtime = prospero_settings::get();
+    const auto &state = app_.state();
+    const Capability capability =
+        state.selected_model >= 0
+            ? state.models[static_cast<std::size_t>(state.selected_model)].capability
+            : Capability::Text;
     form_.clear();
     form_.set_bounds({536, 262, 1288, 676});
-    form_.add_header("Generation");
-    form_.add_choice(6, "Response style", {"Balanced", "Precise", "Creative"},
-                     static_cast<int>(p.style));
-    const unsigned output = runtime.output_limit;
-    form_.add_choice(7, "Response length",
-                     {"Auto", "64 tokens", "128 tokens", "192 tokens", "256 tokens", "512 tokens",
-                      "1024 tokens", "2048 tokens", "4096 tokens", "8192 tokens", "16384 tokens",
-                      "32768 tokens", "65536 tokens", "131072 tokens"},
-                     output == 0       ? 0
-                     : output <= 256   ? static_cast<int>(output / 64)
-                     : output == 512   ? 5
-                     : output == 1024  ? 6
-                     : output == 2048  ? 7
-                     : output == 4096  ? 8
-                     : output == 8192  ? 9
-                     : output == 16384 ? 10
-                     : output == 32768 ? 11
-                                       : 12);
-    constexpr unsigned contexts[] = {0, 4096, 8192, 16384, 32768, 65536, 131072, 262144};
-    int selected_context = 0;
-    for (int i = 0; i < 8; ++i)
-        if (contexts[i] == runtime.context)
-            selected_context = i;
-    form_.add_choice(17, "Context length",
-                     {"Auto", "4K", "8K", "16K", "32K", "64K", "128K", "256K"}, selected_context);
-    form_.add_toggle(19, "Thinking", runtime.thinking);
-    form_.add_value(21, "Model memory", "Release the runtime when idle.");
+    if (capability == Capability::Text)
+    {
+        form_.add_header("Text responses");
+        auto &style_field = form_.add_choice(
+            6, "Response style", {"Balanced", "Precise", "Creative"}, static_cast<int>(p.style));
+        style_field.description =
+            "Choose how concise, factual or imaginative text replies should be.";
+        const unsigned output = runtime.output_limit;
+        auto &length_field = form_.add_choice(
+            7, "Response length",
+            {"Auto", "64 tokens", "128 tokens", "192 tokens", "256 tokens", "512 tokens",
+             "1024 tokens", "2048 tokens", "4096 tokens", "8192 tokens", "16384 tokens",
+             "32768 tokens", "65536 tokens", "131072 tokens"},
+            output == 0       ? 0
+            : output <= 256   ? static_cast<int>(output / 64)
+            : output == 512   ? 5
+            : output == 1024  ? 6
+            : output == 2048  ? 7
+            : output == 4096  ? 8
+            : output == 8192  ? 9
+            : output == 16384 ? 10
+            : output == 32768 ? 11
+                              : 12);
+        length_field.description =
+            "Auto uses the available context. Larger limits can take longer and use more memory.";
+        form_.add_header("Advanced text settings");
+        constexpr unsigned contexts[] = {0, 4096, 8192, 16384, 32768, 65536, 131072, 262144};
+        int selected_context = 0;
+        for (int i = 0; i < 8; ++i)
+            if (contexts[i] == runtime.context)
+                selected_context = i;
+        auto &context_field = form_.add_choice(
+            17, "Context length", {"Auto", "4K", "8K", "16K", "32K", "64K", "128K", "256K"},
+            selected_context);
+        context_field.description = "How much of the conversation the text model can consider. "
+                                    "Larger contexts need more memory.";
+        auto &thinking_field = form_.add_toggle(19, "Thinking", runtime.thinking);
+        thinking_field.description =
+            "Allow supported text models to spend extra tokens reasoning before answering.";
+    }
+    form_.add_header("Model memory");
+    form_.add_value(21, "Memory use", "Unload the selected model after it has been idle.");
     constexpr unsigned idle_minutes[] = {1, 2, 5, 10, 30, 60};
     int selected_idle = 1;
     for (int i = 0; i < 6; ++i)
         if (idle_minutes[i] == runtime.idle_unload_minutes)
             selected_idle = i;
-    form_.add_choice(
+    auto &unload_field = form_.add_choice(
         20, "Unload model after",
         {"1 minute", "2 minutes", "5 minutes", "10 minutes", "30 minutes", "60 minutes"},
         selected_idle);
-    const auto &state = app_.state();
+    unload_field.description =
+        "Free model memory after this idle time. The next request will load the model again.";
     const bool audio_model =
         state.selected_model >= 0 &&
         state.models[static_cast<std::size_t>(state.selected_model)].capability ==
             Capability::Audio;
     if (audio_model)
     {
+        form_.add_header("Audio generation");
         constexpr unsigned durations[] = {0, 8, 16, 30, 60, 120, 300};
         int selected_duration = 0;
         for (int i = 0; i < 7; ++i)
@@ -1568,12 +1679,18 @@ void NativeUI::Impl::build_generation_form()
                         runtime.audio_duration_sec == 0
                             ? "Model default"
                             : std::to_string(runtime.audio_duration_sec) + " seconds");
-        form_.add_choice(24, "Audio clip duration",
-                         {"Keep current", "Model default", "8 seconds", "16 seconds", "30 seconds",
-                          "60 seconds", "120 seconds", "300 seconds"},
-                         selected_duration);
+        auto &duration_field =
+            form_.add_choice(24, "Audio clip duration",
+                             {"Keep current", "Model default", "8 seconds", "16 seconds",
+                              "30 seconds", "60 seconds", "120 seconds", "300 seconds"},
+                             selected_duration);
+        duration_field.description = "Choose the clip length. Model default lets the model choose; "
+                                     "longer clips take more time.";
         form_.add_value(27, "Current audio seed", std::to_string(runtime.audio_seed));
-        form_.add_choice(28, "Audio seed", {"Keep current", "42", "123", "1234", "2026", "0"}, 0);
+        auto &audio_seed_field = form_.add_choice(
+            28, "Audio seed", {"Keep current", "42", "123", "1234", "2026", "0"}, 0);
+        audio_seed_field.description = "The same seed and settings can reproduce a result when the "
+                                       "model supports seeded output.";
     }
     const bool image_model =
         state.selected_model >= 0 &&
@@ -1581,26 +1698,37 @@ void NativeUI::Impl::build_generation_form()
             Capability::Image;
     if (image_model)
     {
+        form_.add_header("Image generation");
         form_.add_value(25, "Current image seed",
                         runtime.sd_seed == 0 ? "Random" : std::to_string(runtime.sd_seed));
-        form_.add_choice(26, "Image seed", {"Keep current", "42", "123", "1234", "2026", "Random"},
-                         0);
+        auto &image_seed_field = form_.add_choice(
+            26, "Image seed", {"Keep current", "42", "123", "1234", "2026", "Random"}, 0);
+        image_seed_field.description =
+            "Use the same seed to make similar results, or Random to vary each image.";
         std::string image_size = "Model default";
         if (runtime.sd_width && runtime.sd_height)
             image_size =
                 std::to_string(runtime.sd_width) + " x " + std::to_string(runtime.sd_height);
         form_.add_value(30, "Current image size", image_size);
-        form_.add_choice(
+        auto &image_size_field = form_.add_choice(
             31, "Image size",
             {"Keep current", "Model default", "512 x 512", "768 x 768", "512 x 768", "768 x 512"},
             0);
-        form_.add_choice(32, "Image upscaler", {"Off", "Real-ESRGAN 4x"},
-                         runtime.sd_upscale ? 1 : 0);
+        image_size_field.description = "Larger images need more memory and take longer. "
+                                       "Unsupported sizes use the model default.";
+        auto &upscale_field = form_.add_choice(32, "Image upscaler", {"Off", "Real-ESRGAN 4x"},
+                                               runtime.sd_upscale ? 1 : 0);
+        upscale_field.description =
+            "Optional 4x enlargement. It needs the upscaler weights and additional memory.";
         if (runtime.sd_upscale)
             form_.add_value(33, "Upscaler model path", "models/upscalers/RealESRGAN_x4plus.pth");
     }
+    form_.add_header("Online tools");
     form_.add_value(9, "Processing", "On this console");
-    form_.add_choice(22, "Web search", {"Off", "LibreY"}, runtime.web_search ? 1 : 0);
+    auto &search_field =
+        form_.add_choice(22, "Web search", {"Off", "LibreY"}, runtime.web_search ? 1 : 0);
+    search_field.description = "When on, supported text models can search the web. Search terms "
+                               "are sent to the configured providers.";
     form_.add_value(23, "Search engine", "Built into ProsperoAI");
     form_.enter();
 }
@@ -1647,19 +1775,26 @@ void NativeUI::Impl::apply_form()
 void NativeUI::Impl::apply_generation_form()
 {
     auto p = app_.state().preferences;
-    p.style = static_cast<unsigned>(form_.choice_index(6));
-    constexpr unsigned limits[] = {0,    64,   128,  192,   256,   512,   1024,
-                                   2048, 4096, 8192, 16384, 32768, 65536, 131072};
-    p.output_limit = limits[std::clamp(form_.choice_index(7), 0, 13)];
-    constexpr unsigned contexts[] = {0, 4096, 8192, 16384, 32768, 65536, 131072, 262144};
-    p.context_length = contexts[std::clamp(form_.choice_index(17), 0, 7)];
-    p.kv_cache = 0;
-    p.thinking = form_.toggle_value(19);
+    const auto &state = app_.state();
+    const Capability capability =
+        state.selected_model >= 0
+            ? state.models[static_cast<std::size_t>(state.selected_model)].capability
+            : Capability::Text;
+    if (capability == Capability::Text)
+    {
+        p.style = static_cast<unsigned>(form_.choice_index(6));
+        constexpr unsigned limits[] = {0,    64,   128,  192,   256,   512,   1024,
+                                       2048, 4096, 8192, 16384, 32768, 65536, 131072};
+        p.output_limit = limits[std::clamp(form_.choice_index(7), 0, 13)];
+        constexpr unsigned contexts[] = {0, 4096, 8192, 16384, 32768, 65536, 131072, 262144};
+        p.context_length = contexts[std::clamp(form_.choice_index(17), 0, 7)];
+        p.kv_cache = 0;
+        p.thinking = form_.toggle_value(19);
+    }
     constexpr unsigned idle_minutes[] = {1, 2, 5, 10, 30, 60};
     p.idle_unload_minutes = idle_minutes[std::clamp(form_.choice_index(20), 0, 5)];
     app_.set_preferences(std::move(p));
     auto runtime = prospero_settings::get();
-    const auto &state = app_.state();
     const bool audio_model =
         state.selected_model >= 0 &&
         state.models[static_cast<std::size_t>(state.selected_model)].capability ==
@@ -1836,6 +1971,17 @@ void NativeUI::Impl::upload_visible_image()
 {
     if (tabs_.active() != 0 || !conversation_)
         return;
+    // Keep at most four app-owned image textures resident. Conversation images are
+    // retained as decoded data by the app; GPU copies outside the viewport are LRU.
+    for (const auto &row : chat_rows_)
+    {
+        if (row.image_path.empty() || row.y + row.height < chat_.offset_y() ||
+            row.y > chat_.offset_y() + chat_.bounds().h)
+            continue;
+        const auto found = images_.find(row.image_path);
+        if (found != images_.end())
+            found->second.last_used = clock_;
+    }
     for (const auto &row : chat_rows_)
     {
         if (row.image_path.empty() || images_.count(row.image_path) ||
@@ -1849,9 +1995,37 @@ void NativeUI::Impl::upload_visible_image()
                                                                   static_cast<int>(image->height),
                                                                   image->rgba.data());
             if (texture)
-                images_.emplace(image->path,
-                                Texture{texture, static_cast<float>(image->width) /
-                                                     static_cast<float>(image->height)});
+            {
+                constexpr std::size_t kMaxResidentImageTextures = 4;
+                if (images_.size() >= kMaxResidentImageTextures)
+                {
+                    auto oldest = images_.end();
+                    for (auto candidate = images_.begin(); candidate != images_.end(); ++candidate)
+                    {
+                        const bool visible = std::any_of(
+                            chat_rows_.begin(), chat_rows_.end(),
+                            [&](const ChatRow &visible_row)
+                            {
+                                return visible_row.image_path == candidate->first &&
+                                       visible_row.y + visible_row.height >= chat_.offset_y() &&
+                                       visible_row.y <= chat_.offset_y() + chat_.bounds().h;
+                            });
+                        if (!visible && (oldest == images_.end() ||
+                                         candidate->second.last_used < oldest->second.last_used))
+                            oldest = candidate;
+                    }
+                    // If more than four previews are visible, leave the extra preview
+                    // deferred until scrolling frees a texture; avoid per-frame churn.
+                    if (oldest == images_.end())
+                        return;
+                    glDeleteTextures(1, &oldest->second.id);
+                    images_.erase(oldest);
+                }
+                images_.emplace(image->path, Texture{texture,
+                                                     static_cast<float>(image->width) /
+                                                         static_cast<float>(image->height),
+                                                     clock_});
+            }
             return; // At most one bounded upload per frame.
         }
     }
