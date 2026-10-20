@@ -33,6 +33,6 @@ fi
 cmake -S "$root/tools/vulkan-runtime" -B "$build_tree" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release "${options[@]}"
 targets=(llama stable-diffusion kokoro audiocpp)
-[[ $mode != host ]] || targets+=(vulkan-runtime-abi-test vulkan-runtime-media-test)
+[[ $mode != host ]] || targets+=(vulkan-runtime-abi-test vulkan-runtime-media-test expert-cache-test expert-upload-test)
 cmake --build "$build_tree" --target "${targets[@]}" \
     --parallel "${BUILD_JOBS:-4}"

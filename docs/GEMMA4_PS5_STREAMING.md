@@ -46,9 +46,10 @@ reuse. ProsperoAI should keep GGUF and its Vulkan quantized kernels.
    and system memory. Do not advertise the 5 GiB Vulkan target until these
    measurements pass.
 
-This PR keeps S0's GGUF budget report and S1's opt-in tensor planning diagnostics.
-It does not yet add the bounded expert cache or claim Gemma 4 fits in 5 GiB of
-Vulkan memory.
+This PR keeps S0's GGUF budget report, S1's opt-in tensor planning diagnostics and
+the first part of S2: a bounded expert reader with host parity tests, not yet
+connected to the model loader or the ggml scheduler. It does not claim Gemma 4
+fits in 5 GiB of Vulkan memory.
 
 ## Initial Q4_K_M size probe
 
@@ -139,3 +140,36 @@ storage alive until GPU transfers complete. Unsupported CPU fallbacks must
 fail explicitly rather than dereference a tensor whose full weights are absent.
 Measure the scheduler's destination buffers as well as the expert cache when
 enforcing the Vulkan budget.
+
+## Bounded expert reads — host parity passed, 2026-10-20
+
+`inference/streaming/expert_cache.cpp` reads one routed expert at a time with
+`pread` into a fixed set of 64-byte-aligned slots. The budget and slot size are
+fixed at construction, so neither a miss nor an eviction can grow the payload
+allocation. A slot is handed out as a move-only lease that pins it; eviction
+picks the oldest unpinned slot and raises `CacheBusy` when every slot is pinned.
+A failed or short read is never published as a hit, cancellation is checked
+before and during each read, and a lease keeps its bytes valid after the cache
+and the original file descriptor are gone. `pread` leaves the loader's file
+cursor untouched.
+
+`inference/streaming/expert_upload.hpp` holds the lease across
+`ggml_backend_tensor_set_async` and synchronizes before overwriting the
+destination, so neither the source bytes nor earlier GPU work can be lost. This
+is the baseline, not the pipelined version: a future overlapped implementation
+must keep both lifetimes with backend events.
+
+Host verification (`bash tools/build-vulkan-runtime.sh host`, then
+`python3 -m unittest discover -s tests -p test_vulkan_runtime.py`):
+
+- `expert-cache-test`: ranges, pins, eviction order, `CacheBusy`, cancellation,
+  partial-EOF rejection, 8-thread concurrency and lease lifetime.
+- `expert-upload-test`: routed `MUL_MAT_ID` output matches identical fully
+  resident weights for Q4_K, Q6_K and Q4_0 at 32 and 64 rows across five
+  routing changes, on the CPU backend and on Vulkan (llvmpipe), with two CPU
+  cache slots for eight experts.
+
+This proves the reader and the upload path in isolation. It does not touch the
+production loader, so the PS5 mmap guard stays in place, and it does not measure
+PS5 memory, bandwidth or Gemma inference. S2 still needs the scheduler
+integration described in the constraints above; S3 and S4 remain open.
