@@ -6,6 +6,7 @@
 #include <limits>
 #include <mutex>
 #include <system_error>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
@@ -29,6 +30,7 @@ struct ExpertCache::State {
         bool valid = false;
     };
     int fd = -1;
+    bool owns_fd = false;
     std::uint64_t file_size = 0, clock = 0;
     std::size_t stride = 0, max_expert = 0;
     std::uint8_t *payload = nullptr;
@@ -36,28 +38,46 @@ struct ExpertCache::State {
     Stats stats;
     mutable std::mutex mutex;
     ~State() {
-        if (fd >= 0) close(fd);
+        if (owns_fd && fd >= 0) close(fd);
         std::free(payload);
     }
 };
 
+ExpertCache::ExpertCache(const char *path, std::size_t budget, std::size_t max_expert)
+    : state_(std::make_shared<State>()) {
+    auto &s = *state_;
+    allocate(s, budget, max_expert);
+    s.fd = open(path, O_RDONLY);
+    if (s.fd < 0) throw std::system_error(errno, std::generic_category(), "Open model file");
+    s.owns_fd = true;
+    measure(s);
+}
+
 ExpertCache::ExpertCache(int fd, std::size_t budget, std::size_t max_expert)
     : state_(std::make_shared<State>()) {
-    constexpr std::size_t alignment = 64;
-    if (!max_expert || max_expert > std::numeric_limits<std::size_t>::max() - (alignment - 1))
-        throw std::invalid_argument("Invalid expert cache slot size");
     auto &s = *state_;
-    s.max_expert = max_expert;
-    s.stride = (max_expert + alignment - 1) & ~(alignment - 1);
-    const auto count = budget / s.stride;
-    if (!count) throw std::invalid_argument("Expert cache budget cannot hold one aligned slot");
-    s.fd = dup(fd);
-    if (s.fd < 0) throw std::system_error(errno, std::generic_category(), "Duplicate model file");
+    allocate(s, budget, max_expert);
+    if (fd < 0) throw std::invalid_argument("Expert cache requires an open model file");
+    s.fd = fd;
+    measure(s);
+}
+
+void ExpertCache::measure(State &s) {
     struct stat st{};
     if (fstat(s.fd, &st)) throw std::system_error(errno, std::generic_category(), "Stat model file");
     if (!S_ISREG(st.st_mode) || st.st_size < 0)
         throw std::invalid_argument("Expert cache requires a regular model file");
     s.file_size = static_cast<std::uint64_t>(st.st_size);
+}
+
+void ExpertCache::allocate(State &s, std::size_t budget, std::size_t max_expert) {
+    constexpr std::size_t alignment = 64;
+    if (!max_expert || max_expert > std::numeric_limits<std::size_t>::max() - (alignment - 1))
+        throw std::invalid_argument("Invalid expert cache slot size");
+    s.max_expert = max_expert;
+    s.stride = (max_expert + alignment - 1) & ~(alignment - 1);
+    const auto count = budget / s.stride;
+    if (!count) throw std::invalid_argument("Expert cache budget cannot hold one aligned slot");
     s.slots.resize(count);
     void *data = nullptr;
     const auto bytes = count * s.stride; // bounded by budget

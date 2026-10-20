@@ -54,9 +54,15 @@ public:
         std::size_t slot_ = 0, size_ = 0;
     };
 
-    // Duplicates fd. The source must remain immutable while this cache exists.
-    // budget_bytes covers aligned payload slots; small bookkeeping is separate.
-    // No allocation or eviction can increase the payload budget after construction.
+    // Opens the model itself and owns that descriptor. The source must remain
+    // immutable while this cache exists. budget_bytes covers aligned payload
+    // slots; small bookkeeping is separate. No allocation or eviction can
+    // increase the payload budget after construction.
+    ExpertCache(const char *path, std::size_t budget_bytes, std::size_t max_expert_bytes);
+    // Borrows fd, which must stay open until this cache is destroyed. PS5 has no
+    // usable dup(): the clean-room libc issues syscall 41 directly and the kernel
+    // rejects it (SYSTEM_ILLEGAL_FUNCTION_CALL), so nothing here duplicates a
+    // descriptor. On the console, construct from a path.
     ExpertCache(int fd, std::size_t budget_bytes, std::size_t max_expert_bytes);
     ExpertCache(const ExpertCache &) = delete;
     ExpertCache &operator=(const ExpertCache &) = delete;
@@ -64,6 +70,8 @@ public:
                   const std::atomic<bool> *cancel = nullptr);
     Stats stats() const;
 private:
+    static void allocate(State &state, std::size_t budget_bytes, std::size_t max_expert_bytes);
+    static void measure(State &state);
     std::shared_ptr<State> state_;
 };
 } // namespace prospero_streaming

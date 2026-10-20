@@ -43,10 +43,12 @@ class VulkanRuntimeTests(unittest.TestCase):
 
     def test_bounded_expert_cache_and_routed_upload(self):
         """Bounded expert reads must match fully resident weights on CPU and Vulkan."""
-        cache, upload = self.require('expert-cache-test', 'expert-upload-test')
+        cache, upload, probe = self.require('expert-cache-test', 'expert-upload-test',
+                                            'expert-probe-test')
         environment = host_environment()
         with tempfile.TemporaryDirectory(prefix='prospero-expert-') as fixtures:
             subprocess.run([str(cache), fixtures], check=True, env=environment, timeout=300)
+            subprocess.run([str(probe), fixtures], check=True, env=environment, timeout=300)
             for backend in ('cpu', 'vulkan'):
                 with self.subTest(backend=backend):
                     subprocess.run([str(upload), backend, fixtures], check=True,

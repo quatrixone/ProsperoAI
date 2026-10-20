@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <limits>
+#include <system_error>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -23,7 +24,6 @@ int main(int argc, char **argv) {
     std::string path = std::string(argv[1]) + "/expert-cache-fixture-XXXXXX";
     int fd = mkstemp(path.data());
     assert(fd >= 0);
-    unlink(path.c_str());
     constexpr std::size_t header = 96, expert_bytes = 512, experts = 8;
     std::vector<std::uint8_t> file(header + expert_bytes * experts);
     for (std::size_t i = 0; i < file.size(); ++i) file[i] = (i * 71 + i / 101) % 251;
@@ -86,17 +86,26 @@ int main(int argc, char **argv) {
     rejects<std::runtime_error>([&] { damaged.acquire(extent, 5); });
     assert(damaged.stats().bytes_read == 17 && damaged.stats().pinned_slots == 0);
     assert(pwrite(fd, file.data(), file.size(), 0) == static_cast<ssize_t>(file.size()));
+    const std::string reopened = path;
     auto retried = damaged.acquire(extent, 5);
     assert(damaged.stats().hits == 0 && damaged.stats().misses == 2);
     assert(!std::memcmp(retried.data(), file.data() + header + 5 * expert_bytes, expert_bytes));
 
-    // The lease owns its storage even when its cache and original fd are gone.
+    // A path-constructed cache owns its descriptor, so it needs no dup(), which
+    // PS5 rejects. A lease keeps its bytes after that cache and the file are gone.
     ExpertCache::Lease survivor;
     {
-        ExpertCache temporary(fd, expert_bytes, expert_bytes);
+        ExpertCache owned(reopened.c_str(), expert_bytes, expert_bytes);
+        ExpertCache borrowed(fd, expert_bytes, expert_bytes);
+        survivor = owned.acquire(extent, 2);
+        assert(borrowed.acquire(extent, 2).data() != nullptr);
         close(fd);
-        survivor = temporary.acquire(extent, 2);
+        unlink(reopened.c_str());
     }
+    rejects<std::invalid_argument>([&] { ExpertCache(-1, expert_bytes, expert_bytes); });
+    rejects<std::system_error>([&] {
+        ExpertCache((std::string(argv[1]) + "/absent.gguf").c_str(), expert_bytes, expert_bytes);
+    });
     assert(!std::memcmp(survivor.data(), file.data() + header + 2 * expert_bytes, expert_bytes));
     std::cout << "expert cache: ranges, pins, eviction, cancellation, EOF, concurrency and lifetime passed\n";
 }

@@ -31,13 +31,13 @@ void check(ggml_backend_t backend, ggml_type type, int rows, const char *directo
     std::string path = std::string(directory) + "/expert-upload-fixture-XXXXXX";
     const int fd = mkstemp(path.data());
     assert(fd >= 0);
-    unlink(path.c_str());
     std::array<std::uint8_t, 64> header{};
     assert(write(fd, header.data(), header.size()) == static_cast<ssize_t>(header.size()));
     assert(write(fd, packed.data(), packed.size()) == static_cast<ssize_t>(packed.size()));
     const ExpertExtent extent{header.size(), row_bytes, static_cast<std::uint64_t>(rows), experts};
-    ExpertCache cache(fd, expert_bytes * 2, expert_bytes);
     close(fd);
+    ExpertCache cache(path.c_str(), expert_bytes * 2, expert_bytes);
+    unlink(path.c_str());
 
     auto *ctx = ggml_init({ggml_tensor_overhead() * 16 + ggml_graph_overhead_custom(16, false), nullptr, true});
     assert(ctx);

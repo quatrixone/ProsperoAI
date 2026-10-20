@@ -24,6 +24,9 @@
 #include "prospero_search.hpp"
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
 #include "model_downloader_ps5.hpp"
+#ifdef PROSPERO_EXPERT_STREAM_PROBE
+#include "streaming/expert_probe.hpp"
+#endif
 #endif
 
 #include <cstdint>
@@ -919,6 +922,59 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
     return wanted;
 }
 
+#ifdef PROSPERO_EXPERT_STREAM_PROBE
+// Measures bounded routed-expert reads from a GGUF on this console. It loads no
+// model and allocates no backend memory, so it can run while nothing is loaded.
+void handle_expert_stream_probe(const NetApi &api, int sock, const char *body)
+{
+    const auto j = nlohmann::json::parse(body, nullptr, false);
+    if (!j.is_object())
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_request",
+                     "Expected a probe object.");
+        return;
+    }
+    prospero_streaming::ExpertProbeRequest request;
+    const auto model = j.value("model", std::string());
+    if (model.empty() || model.find("..") != std::string::npos)
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_model",
+                     "Give a model file relative to the model folder.");
+        return;
+    }
+    request.path = model.front() == '/' ? model : std::string(prospero::model_root()) + "/" + model;
+    request.slots = j.value("slots", request.slots);
+    request.tokens = j.value("tokens", request.tokens);
+    request.experts_per_token = j.value("experts_per_token", request.experts_per_token);
+    request.layers = j.value("layers", request.layers);
+    request.seed = j.value("seed", request.seed);
+    const auto result = prospero_streaming::probe_expert_stream(request);
+    if (!result.ok)
+    {
+        send_json(api, sock, nlohmann::json{{"ok", false}, {"error", result.error},
+                                            {"path", request.path}}.dump().c_str());
+        return;
+    }
+    const auto rate = [](std::uint64_t bytes, double ms) {
+        return ms > 0 ? double(bytes) / ms / 1048.576 : 0.0; // MiB/s
+    };
+    send_json(api, sock, nlohmann::json{
+        {"ok", true}, {"path", request.path}, {"architecture", result.architecture},
+        {"file_bytes", result.file_bytes}, {"experts", result.experts},
+        {"experts_used", result.experts_used}, {"routed_layers", result.routed_layers},
+        {"routed_tensors", result.routed_tensors}, {"replayed_layers", result.replayed_layers},
+        {"max_expert_bytes", result.max_expert_bytes}, {"per_token_bytes", result.per_token_bytes},
+        {"tokens", result.tokens}, {"slots", result.slots},
+        {"allocated_bytes", result.allocated_bytes}, {"reads", result.reads},
+        {"hits", result.hits}, {"misses", result.misses}, {"evictions", result.evictions},
+        {"bytes_read", result.bytes_read},
+        {"cold_ms", result.cold_ms}, {"cold_bytes", result.cold_bytes},
+        {"cold_mib_per_sec", rate(result.cold_bytes, result.cold_ms)},
+        {"warm_ms", result.warm_ms}, {"warm_bytes", result.warm_bytes},
+        {"warm_mib_per_sec", rate(result.warm_bytes, result.warm_ms)}}.dump().c_str());
+}
+#endif
+
 void handle_runtime_settings(const NetApi &api, int sock, const char *body = nullptr)
 {
     std::lock_guard<std::mutex> lock(prospero_settings::mutex);
@@ -1744,6 +1800,10 @@ void handle_connection(const NetApi &api, int sock)
         const bool loaded=gpt_runtime_loaded_model(id,sizeof(id),name,sizeof(name));
         send_json(api,sock,nlohmann::json{{"loaded",loaded},{"id",id},{"name",name}}.dump().c_str());
     }
+#ifdef PROSPERO_EXPERT_STREAM_PROBE
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/debug/expert-stream") == 0)
+        handle_expert_stream_probe(api, sock, body);
+#endif
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/v1/models") == 0)
         handle_openai_models(api, sock);
     else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/v1/chat/completions") == 0)

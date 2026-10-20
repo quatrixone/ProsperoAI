@@ -31,8 +31,14 @@ kit=$(bash "$root/tools/prepare-ui-kit.sh" --kit)
 fonts=$(bash "$root/tools/bake-fonts.sh")
 mkdir -p "$work/obj" "$work/stubs" "$app/sce_sys" "$app/sce_module" "$work/generated"
 printf '%s\n' "$label" > "$app/build-label.txt"
+# The bounded expert reader and its HTTP measurement endpoint are built only for
+# the streaming experiment, so a release app links neither.
+streaming_sources=()
+streaming_definitions=()
 if [[ ${PROSPERO_GEMMA4_STREAMING:-0} == 1 ]]; then
     : > "$app/gemma4_streaming.txt"
+    streaming_sources=(inference/streaming/expert_cache.cpp inference/streaming/expert_probe.cpp)
+    streaming_definitions=(-DPROSPERO_EXPERT_STREAM_PROBE=1)
 fi
 python3 "$root/tools/prepare-vulkan-ui-shaders.py" --kit "$kit_stage/src" --output "$work/generated"
 version=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["contentVersion"])' "$root/sce_sys/param.json")
@@ -55,6 +61,7 @@ sources=(src/kv_budget.cpp src/prefix_reuse.cpp src/main.cpp src/native_app.cpp 
  src/native_ui_update.cpp vulkan/update_ps5.cpp
  inference/adapters/llama/vulkan.cpp vulkan/http_server.cpp vulkan/model_downloader_ps5.cpp
  vulkan/ui/backend.cpp vulkan/ui/program.cpp)
+sources+=("${streaming_sources[@]}")
 media_definitions=()
 # Speech is kokoro.cpp on the shared ggml/Vulkan backend (inference/adapters/media/kokoro_ps5.cpp); the
 # prebuilt OpenCL archive it replaces is no longer linked.
@@ -76,7 +83,7 @@ update_definitions=()
 for relative in "${sources[@]}"; do
  media_includes=()
  abi_definitions=()
- abi_definitions+=(-DGGML_MAX_NAME=160)
+ abi_definitions+=(-DGGML_MAX_NAME=160 "${streaming_definitions[@]}")
  case "$relative" in
   inference/adapters/media/stable_diffusion_ps5.cpp)
    media_includes=(-I "$root/.deps/stable-diffusion-vulkan/include");;

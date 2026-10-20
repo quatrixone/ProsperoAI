@@ -170,6 +170,56 @@ Host verification (`bash tools/build-vulkan-runtime.sh host`, then
   cache slots for eight experts.
 
 This proves the reader and the upload path in isolation. It does not touch the
-production loader, so the PS5 mmap guard stays in place, and it does not measure
-PS5 memory, bandwidth or Gemma inference. S2 still needs the scheduler
-integration described in the constraints above; S3 and S4 remain open.
+production loader, so the PS5 mmap guard stays in place. S2 still needs the
+scheduler integration described in the constraints above; S3 and S4 remain open.
+
+## Console measurement endpoint
+
+The streaming experiment build (`PROSPERO_GEMMA4_STREAMING=1`) compiles
+`inference/streaming/expert_probe.cpp` and answers
+`POST /api/debug/expert-stream`. A release build links neither. The body takes
+`model` (relative to the model folder), `slots`, `tokens`, `experts_per_token`,
+`layers` and `seed`; the reply reports the file's routed layout and what the
+reads cost. The probe loads no model and allocates no backend memory, so it runs
+while nothing is loaded, and its routing is a deterministic uniform stand-in:
+real Gemma 4 routing is skewed, so a measured hit rate here is a lower bound.
+
+### `dup()` is not available to a PS5 title
+
+The first console run crashed the HTTP thread immediately:
+`PPRBUG-22859: the process pid=105 directly issued a syscall 41`, then
+`exception: 0xa002030a (SYSTEM_ILLEGAL_FUNCTION_CALL)` in thread
+`prosperoai-http-conn`. FreeBSD syscall 41 is `dup`, which the clean-room libc
+issues directly and the kernel rejects; nothing else in the app had used it.
+`ExpertCache` now opens and owns the file when constructed from a path, and the
+descriptor constructor borrows without duplicating. The host tests cover both.
+
+## Bounded expert reads on PS5 — measured, 2026-10-20
+
+Test title PPSA99023, `eboot.bin` built with `PROSPERO_GEMMA4_STREAMING=1`,
+NEEDED list and PIE program-header shape identical to the verified guard build.
+Model `gemma4/gemma-4-26B-A4B-it-Q4_K_M.gguf` on console storage.
+
+The probe found 30 routed layers and 90 per-expert tensors (fused gate/up, down,
+and the rank-1 `ffn_down_exps.scale` vectors), 128 experts with 8 used, and a
+largest single expert extent of 2,230,272 bytes. Its uncached per-token total,
+945,636,288 bytes, matches `tools/gguf-stream-budget.py` on the host byte for
+byte, so the console reader and the S0 estimate agree on the layout.
+
+| slots | cache bytes | tokens | reads | evictions | cold | warm |
+| --- | --- | --- | --- | --- | --- | --- |
+| 16 | 35,684,352 | 3 | 2,160 | 2,144 | 1,117.6 ms, 807 MiB/s | 1,746.8 ms, 1,033 MiB/s |
+| 128 | 285,474,816 | 3 | 2,160 | 2,032 | 1,143.6 ms, 789 MiB/s | 1,718.1 ms, 1,050 MiB/s |
+| 8 (1 layer) | 17,842,176 | 4 | 96 | 88 | 36.0 ms, 919 MiB/s | 81.7 ms, 1,215 MiB/s |
+
+What this establishes: the reader works on the console, its allocation stays at
+`slots x max_expert_bytes` regardless of how many reads and evictions follow,
+and PS5 storage serves these extents at roughly 0.8 GiB/s cold and 1.0-1.2 GiB/s
+warm. At that rate one token's uncached routed-expert reads cost about 0.9-1.1 s,
+so expert I/O alone caps decode near 1 token/s unless the cache hits.
+
+What it does not establish: hit rates under real routing (the stand-in is
+uniform, and every run above recorded zero hits), inference correctness, decode
+speed, or the 5 GiB Vulkan ceiling. No model was loaded and no expert bytes
+reached the GPU on the console. The title stayed alive and responsive through
+every run, and was stopped and unmounted afterwards.
