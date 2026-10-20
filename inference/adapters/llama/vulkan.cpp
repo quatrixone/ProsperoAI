@@ -260,12 +260,20 @@ bool prepare() {
                         "Gemma 4 lazy streaming enabled, but selected model name is not Gemma 4\n", nullptr);
             return false;
         }
+#ifdef PROSPERO_PRISM_RUNTIME
+        // The pinned Prism fork has no llama_model_params::lazy_mode. Fail closed:
+        // loading every routed expert eagerly is what this mode exists to avoid.
+        log_message(GGML_LOG_LEVEL_ERROR,
+                    "Gemma 4 lazy streaming is not available in the Prism runtime build\n", nullptr);
+        return false;
+#else
         // Retain INFO diagnostics through tensor planning. The PS5 source hook
         // rejects lazy file mappings before weight allocation until bounded
         // expert reads replace the unbounded whole-file mapping experiment.
         mp.lazy_mode = LLAMA_LAZY_MODE_ON;
         log_message(GGML_LOG_LEVEL_INFO,
                     "Gemma 4 diagnostic mode: planning tensors; lazy file mapping is blocked\n", nullptr);
+#endif
     }
     if (!model) {
         model_load_free_bytes = free_before_model;
