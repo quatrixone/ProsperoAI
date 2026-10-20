@@ -139,12 +139,13 @@ int main(int argc, char **argv) {
     };
 
     for (const auto &route : routes) {
+        stream.begin_graph(1);        // one shape throughout: residency may persist
         run(streamed, a, route);
         run(resident, b, route);
         // Comparing two silent zeros is not parity: require real output first.
-        double energy = 0;
-        for (std::size_t i = 0; i < a.size(); ++i) energy += std::abs(b[i]);
-        assert(energy > 1e-3 * double(a.size()));
+        double route_energy = 0;
+        for (std::size_t i = 0; i < a.size(); ++i) route_energy += std::abs(b[i]);
+        assert(route_energy > 1e-3 * double(a.size()));
         for (std::size_t i = 0; i < a.size(); ++i) {
             assert(std::isfinite(a[i]) && std::isfinite(b[i]));
             assert(std::abs(a[i] - b[i]) <= 1e-4f * std::max(1.0f, std::abs(b[i])));
@@ -153,20 +154,48 @@ int main(int argc, char **argv) {
     const auto served = stream.stats();
     const auto cached = cache.stats();
     assert(served.copies > 0 && served.experts > 0 && served.bytes == served.experts * expert_bytes);
-    assert(cached.hits > 0 && cached.misses > 0);       // the repeat route must hit
+    // The second route repeats the first, so those experts must not be uploaded
+    // again, and parity above proves the skipped ones were really still there.
+    assert(served.skipped >= selected);
+    assert(served.skipped_bytes == served.skipped * expert_bytes);
+
+    // A different graph key means the scheduler may have moved its copies: every
+    // expert must be uploaded again, even the ones just sent.
+    const auto before_invalidation = stream.stats();
+    stream.begin_graph(2);
+    run(streamed, a, routes.front());
+    run(resident, b, routes.front());
+    stream.drain();
+    const auto after_invalidation = stream.stats();
+    assert(cache.stats().pinned_slots == 0);
+    assert(after_invalidation.experts >= before_invalidation.experts + selected);
+    assert(after_invalidation.skipped == before_invalidation.skipped);
+    double energy = 0;
+    for (std::size_t i = 0; i < a.size(); ++i) energy += std::abs(b[i]);
+    assert(energy > 1e-3 * double(a.size()));
+    for (std::size_t i = 0; i < a.size(); ++i)
+        assert(std::abs(a[i] - b[i]) <= 1e-4f * std::max(1.0f, std::abs(b[i])));
+    // The cache may record no hits at all now: a repeated expert is skipped
+    // before it is asked for, which is the point of the GPU-side record.
+    assert(cached.misses > 0 && cached.hits + cached.misses <= served.experts + served.skipped);
     assert(cached.allocated_bytes <= 4 * expert_bytes + 64);
-    assert(cached.pinned_slots == 0);
+    stream.drain();                                     // in-flight copies hold their leases
+    assert(cache.stats().pinned_slots == 0);
 
     // With the hook uninstalled the scheduler would read the fake address, so a
     // run without it must not be attempted; check the counter instead.
     ExpertStream::uninstall();
-    assert(stream.stats().copies == served.copies);
+    assert(stream.stats().copies == after_invalidation.copies);
 
-    std::printf("expert stream: routed parity through the scheduler with %llu experts fetched in "
-                "%llu copies, cache %zu bytes, %llu hits / %llu misses\n",
-                (unsigned long long) served.experts, (unsigned long long) served.copies,
-                cached.allocated_bytes, (unsigned long long) cached.hits,
-                (unsigned long long) cached.misses);
+    std::printf("expert stream: routed parity through the scheduler; %llu experts uploaded, "
+                "%llu skipped as already resident on the GPU, %llu copies, cache %zu bytes, "
+                "%llu hits / %llu misses, events=%s, stalls=%llu\n",
+                (unsigned long long) after_invalidation.experts,
+                (unsigned long long) after_invalidation.skipped,
+                (unsigned long long) after_invalidation.copies, cached.allocated_bytes,
+                (unsigned long long) cached.hits, (unsigned long long) cached.misses,
+                after_invalidation.events ? "yes" : "no",
+                (unsigned long long) after_invalidation.stalls);
     ggml_backend_sched_free(sched);
     ggml_backend_buffer_free(streamed_buffer);
     ggml_backend_buffer_free(resident_buffer);

@@ -54,9 +54,23 @@ public:
     void install();
     static void uninstall();
 
+    // Call before each graph compute. A different key drops what this believes
+    // the GPU already holds: the scheduler may move its copy tensors when the
+    // graph shape changes, so trusting the previous contents would feed a kernel
+    // the wrong expert. The same key means the same layout, and experts already
+    // uploaded are not uploaded again.
+    void begin_graph(std::uint64_t key);
+
+    // Waits for every submitted copy and releases the leases it was holding.
+    // Required before the cache goes away, and after the last decode of a model.
+    void drain();
+
     struct Stats {
-        std::uint64_t copies = 0, experts = 0, bytes = 0;  // scheduler requests served
-        std::uint64_t rejected = 0;                        // requests for unknown tensors
+        std::uint64_t copies = 0, experts = 0, bytes = 0;    // scheduler requests served
+        std::uint64_t rejected = 0;                          // requests for unknown tensors
+        std::uint64_t skipped = 0, skipped_bytes = 0;        // already on the GPU
+        std::uint64_t retired = 0, stalls = 0;               // lease retirement, blocking waits
+        bool events = false;                                 // false means every copy blocks
     };
     Stats stats() const;
 

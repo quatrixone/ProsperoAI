@@ -180,11 +180,23 @@ void scan_models() {
 }
 void release_model() {
     prospero_runtime::set_model_resident(false);
+#ifdef PROSPERO_EXPERT_STREAM
+    // Copies in flight hold cache leases, and the buffer type outlives nothing.
+    if (expert_stream) expert_stream->drain();
+#endif
     if (context) llama_free(context);
     if (model) llama_model_free(model);
     context = nullptr;
     model = nullptr;
     model_load_free_bytes = 0;
+#ifdef PROSPERO_EXPERT_STREAM
+    if (expert_stream) {
+        prospero_streaming::ExpertStream::uninstall();
+        expert_stream.reset();
+    }
+    expert_cache.reset();
+    expert_overrides.clear();
+#endif
     // The KV cache that previous_tokens describes no longer exists once the context is
     // freed; keeping it would make the next call "reuse" a prefix that was never decoded
     // into the new context.
@@ -657,6 +669,11 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         for (int pos = static_cast<int>(reused); pos < n; ) {
             int batch_count = std::min(n - pos, static_cast<int>(llama_n_batch(context)));
             auto batch = llama_batch_get_one(tokens.data() + pos, batch_count);
+#ifdef PROSPERO_EXPERT_STREAM
+            // Experts already uploaded stay valid only while the graph keeps its
+            // shape, because the scheduler may move its copy tensors otherwise.
+            if (expert_stream) expert_stream->begin_graph(static_cast<std::uint64_t>(batch_count));
+#endif
             if (llama_decode(context, batch) != 0) { previous_tokens.clear(); return 1; }
             previous_tokens.insert(previous_tokens.end(), tokens.begin() + pos, tokens.begin() + pos + batch_count);
             pos += batch_count;
@@ -701,6 +718,9 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
             if (progress) progress(output);
             if (i + 1 < limit) {
                 auto batch = llama_batch_get_one(&token, 1);
+#ifdef PROSPERO_EXPERT_STREAM
+                if (expert_stream) expert_stream->begin_graph(1);
+#endif
                 if (llama_decode(context, batch) != 0) { previous_tokens.clear(); result = 1; break; }
                 previous_tokens.push_back(token);
             }
