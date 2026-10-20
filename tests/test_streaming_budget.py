@@ -34,7 +34,45 @@ def fixture(path, kind=2, offset=32, dimension=32):
     path.write_bytes(data)
 
 
+def routed_fixture(path):
+    # Each expert matrix has 32x64 Q4_0 values per expert, with four
+    # experts packed in dimension 2. Three tensors make up gate/up/down.
+    entries = [
+        ('general.architecture', 8, string('gemma4')),
+        ('gemma4.expert_count', 4, struct.pack('<I', 4)),
+        ('gemma4.expert_used_count', 4, struct.pack('<I', 2)),
+    ]
+    data = b'GGUF' + struct.pack('<IQQ', 3, 3, len(entries))
+    for key, kind, value in entries:
+        data += string(key) + struct.pack('<I', kind) + value
+    tensor_bytes = 32 * 64 * 4 // 32 * 18
+    tensors = [('blk.0.ffn_gate_exps.weight', 0),
+               ('blk.0.ffn_up_exps.weight', tensor_bytes),
+               ('blk.0.ffn_down_exps.weight', tensor_bytes * 2)]
+    for name, offset in tensors:
+        data += string(name) + struct.pack('<IQQQI', 3, 32, 64, 4, 2)
+        data += struct.pack('<Q', offset)
+    data += bytes((-len(data)) % 32)
+    data += bytes(tensor_bytes * len(tensors))
+    path.write_bytes(data)
+
+
 class StreamingBudgetTests(unittest.TestCase):
+    def test_routed_expert_extents_estimate_uncached_bytes_per_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'gemma4.gguf'
+            routed_fixture(path)
+            result = budget.inspect(path)
+            self.assertEqual(result['expert_count'], 4)
+            self.assertEqual(result['expert_used_count'], 2)
+            self.assertEqual(len(result['routed_expert_layers']), 1)
+            layer = result['routed_expert_layers'][0]
+            self.assertEqual(layer['experts'], 4)
+            self.assertEqual(layer['tensors'], 3)
+            self.assertEqual(layer['bytes_per_expert'], 32 * 64 // 32 * 18 * 3)
+            self.assertEqual(result['routed_expert_bytes_per_token_without_cache'],
+                             layer['bytes_per_expert'] * 2)
+
     def test_prism_private_type_is_not_a_stock_quantization_alias(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'model.gguf'
