@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Enable mmap-backed lazy reads for Gemma 4 routed experts in pinned llama.cpp."""
+"""Plan Gemma 4 lazy experts and block unsafe PS5 file mappings before allocation."""
 
 from pathlib import Path
 import argparse
@@ -51,3 +51,21 @@ replace(loader,
     }''')
 
 print(f'{model}: routed Gemma 4 expert matrices use lazy mmap reads')
+
+# The lazy tensor path bypasses LLAMA_LOAD_MODE_NONE and maps the entire GGUF.
+# On PS5 this experiment caused system services to become unavailable while the
+# HTTP/UI threads stayed alive. Until bounded positional reads replace it, stop
+# before mapping or allocating backend weights, rather than retrying that path.
+replace(loader,
+        '''void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps) {
+''',
+        '''void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps) {
+#ifdef PROSPERO_PS5_MODEL_IO
+    if (lazy.any()) {
+        throw std::runtime_error(
+            "PS5 lazy file mapping is disabled: bounded expert reads are required. "
+            "Stopped before mapping the GGUF or allocating model weight buffers.");
+    }
+#endif
+''')
+print(f'{loader}: PS5 lazy file mappings fail closed before weight allocation')

@@ -1,9 +1,10 @@
 # Gemma 4 26B-A4B bounded-memory inference on PS5
 
 The goal is to run Gemma 4 26B-A4B through ProsperoAI's pinned llama.cpp and
-Vulkan runtime with about 2 GB of measured model memory. This is a target, not
-a result. Model files still need roughly 15 GB of storage, and total process
-memory also includes KV, activations, Vulkan staging and runtime allocations.
+Vulkan runtime with a Vulkan working set around 5 GiB. This is a target, not a
+result. It does not cap total process RAM: mmap pages, KV, activations, Vulkan
+staging and runtime allocations also consume system memory. The model file
+still needs roughly 15 GiB of storage.
 
 TurboFieldfare reaches its Mac memory target by keeping the shared model core
 resident, keeping a bounded routed-expert cache, and reading expert misses from
@@ -19,16 +20,17 @@ reuse. ProsperoAI should keep GGUF and its Vulkan quantized kernels.
    tensor extents and `expert_used_count` metadata. This is an I/O lower-bound
    input, not a memory or speed result. Measure actual Gemma 4 routing and
    expert-cache hit rates before choosing a cache size.
-2. **S1: prove lazy expert residency first.** The pinned llama.cpp already has
+2. **S1: lazy expert experiment — blocked on PS5.** The pinned llama.cpp already has
    mmap-backed lazy tensors. Mark Gemma 4 routed expert matrices lazy and run
    them on the CPU backend, while the other tensors stay on Vulkan. This keeps
    full expert matrices out of eager backend allocations and gives us a first
    PS5 memory/correctness measurement. This is an opt-in experiment; it does not
    yet provide a bounded cache or guarantee a physical-memory ceiling.
    Build the test title with `PROSPERO_GEMMA4_STREAMING=1`; this opts that
-   build into Gemma 4 lazy mmap mode. The selected model name must include
-   `gemma4` or `gemma-4`, and the loader fails if mmap is unavailable.
-3. **S2: add an explicit bounded expert cache if S1 needs it.** Keep embeddings,
+   build into Gemma 4 tensor planning. The selected model name must include
+   `gemma4` or `gemma-4`. The PS5 loader now rejects lazy mappings before mapping
+   the GGUF or allocating weight buffers; this build cannot run Gemma inference.
+3. **S2: replace the blocked path with explicit bounded expert reads.** Keep embeddings,
    attention, routers, shared experts and KV resident. Read only routed expert
    extents into a fixed number of aligned Vulkan-visible slots. Do not allocate
    full expert tensors. Add slot lifetime tracking so a Vulkan submission cannot
@@ -40,12 +42,13 @@ reuse. ProsperoAI should keep GGUF and its Vulkan quantized kernels.
    layouts used by the selected Gemma 4 file.
 5. **S4: measure on a PS5 test title.** Report physical memory by category,
    uncached and warm read bandwidth, expert-cache hit rate, prefill, time to first
-   token and decode speed. A 2 GB claim requires total measured inference memory,
-   not only the expert cache or Vulkan allocation. Do not advertise the target
-   until these measurements pass.
+   token and decode speed. Report Vulkan allocation separately from process RSS
+   and system memory. Do not advertise the 5 GiB Vulkan target until these
+   measurements pass.
 
-This PR adds S1 as an opt-in PS5 experiment and keeps S0's GGUF budget report.
-It does not yet add the bounded expert cache or claim Gemma 4 runs in 2 GB.
+This PR keeps S0's GGUF budget report and S1's opt-in tensor planning diagnostics.
+It does not yet add the bounded expert cache or claim Gemma 4 fits in 5 GiB of
+Vulkan memory.
 
 ## Initial Q4_K_M size probe
 
@@ -73,5 +76,66 @@ was not captured, so the close race is a strong lead, not a proven root cause.
 The test build now ignores `dev/request.txt` when the Gemma streaming marker is present.
 The UI also blocks app close while an HTTP generation is active, and the main loop waits
 for active generations before teardown. These are crash-risk guards; they do not make
-Gemma's memory use safe, and S1 remains unverified. Do not retry Gemma loading until the
-console has restarted and the guarded build is installed on the test title.
+Gemma's memory use safe, and S1 remains unverified. Retry only on the test title with the
+guarded build and monitor title process, Vulkan memory, trace and klog during each stage.
+
+## S1 guarded PS5 retry — loader stalled, 2026-10-20
+
+After restarting the console, the guarded build was deployed to PPSA99023 and
+confirmed running. The stale `dev/request.txt` was present on disk, but its
+script did not run. Vulkan reported 11,905,269,760 bytes free of 12,280,922,112
+before loading, then entered Gemma 4 lazy mmap mode. GGUF token metadata was
+read, but the model never reached a loaded state. A one-token request produced
+no response within 180 seconds; `/api/models/memory` continued to report
+`loaded:false`. The observed title RSS rose from about 570 MiB at idle to about
+2.1 GiB during loading; this is process memory, not a Vulkan allocation
+measurement. No 5 GiB Vulkan result was reached.
+
+After the stalled load, FTP refused connections, P5 Manager returned 502, and
+agent/process and ShadowMount queries stopped responding. The HTTP API still
+answered, and `agent kill PPSA99023` returned without output or confirmation.
+The title's final process/mount state could not be verified. No reboot was
+performed. This attempt still does not prove inference or identify the precise
+cause of the control-service failure; further Gemma load attempts need a safer
+loading strategy and a way to bound/cancel model loading before retrying.
+
+## Guarded tensor planning — passed, 2026-10-20
+
+Source inspection found that `LLAMA_LAZY_MODE_ON` bypasses
+`LLAMA_LOAD_MODE_NONE`: `init_mappings()` maps every model file when lazy tensors
+exist. PS5's `prospero_posix_madvise` returns `ENOSYS`, so the lazy-range advice
+is unavailable. The earlier VM-size increase of roughly 16,024 MiB matches the
+GGUF size. These facts identify an unbounded path; they do not prove the exact
+kernel or allocator failure behind the service outage.
+
+The source-preparation hook now rejects PS5 lazy mappings in `init_mappings()`,
+before the mmap call and backend weight allocations. The adapter retains INFO
+logs during Gemma loading. Previously these were filtered, so the last visible
+token warning did not locate the stalled phase.
+
+The guarded build (`eboot.bin` SHA-256
+`060eabcd22152a4968ebd678fb3abed344a61cdc08bb2a3cb8895f2bba7271b9`)
+was cross-built and deployed to PPSA99023 after verifying it was unmounted.
+Its NEEDED dependencies and LOAD/DYNAMIC header layout match the previous build.
+On console, vocabulary loading and all 30 routed-expert layers reached tensor
+planning. The guard raised its expected error at app uptime 9.091 seconds;
+HTTP returned `done:true`, `error:"generation failed"`, with zero generated tokens.
+Afterwards, the title had about 680 MiB RSS and FTP, shell and process control
+still responded. Closing PPSA99023 returned result `0x00000000`, then process
+count zero and `mounted:false`. No agent-initiated reboot was needed.
+
+This verifies rejection and teardown of this load attempt. It does not verify
+Gemma inference, a 5 GiB allocation ceiling, or eliminate every crash cause.
+Local evidence is under `build/gemma4-load-guard/`.
+
+### Constraints for bounded expert reads
+
+The pinned ggml scheduler already copies selected experts for offloaded
+`MUL_MAT_ID` weights, but its copy path directly dereferences
+`input->data + expert_offset`. Merely replacing mmap with a small buffer would
+therefore be incorrect. A bounded reader must supply the selected file extents,
+handle fused gate/up tensors and quantization row strides, and keep upload
+storage alive until GPU transfers complete. Unsupported CPU fallbacks must
+fail explicitly rather than dereference a tensor whose full weights are absent.
+Measure the scheduler's destination buffers as well as the expert cache when
+enforcing the Vulkan budget.

@@ -19,6 +19,7 @@
 #include "llama.h"
 #include "ggml-backend.h"
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +43,7 @@ std::vector<ModelFile> files;
 std::mutex runtime_mutex;
 bool scanned, initialized, context_full;
 bool verbose_logging;
+std::atomic<bool> streaming_load_logging{false};
 bool prefix_cache_enabled = true;
 unsigned selected;
 llama_model *model;
@@ -90,7 +92,8 @@ void backend_log_message(ggml_log_level level, const char *text, void *data) {
     // Kernel debug output is synchronous. llama.cpp emits thousands of debug
     // messages while loading vocabulary/tensors and reserving graphs; keep that
     // diagnostic work out of normal startup, while retaining warnings/errors.
-    if (verbose_logging || level == GGML_LOG_LEVEL_WARN || level == GGML_LOG_LEVEL_ERROR)
+    if (verbose_logging || level == GGML_LOG_LEVEL_WARN || level == GGML_LOG_LEVEL_ERROR ||
+        (streaming_load_logging.load(std::memory_order_relaxed) && level == GGML_LOG_LEVEL_INFO))
         log_message(level, text, data);
 }
 bool media_bundle(const char *name) {
@@ -257,16 +260,18 @@ bool prepare() {
                         "Gemma 4 lazy streaming enabled, but selected model name is not Gemma 4\n", nullptr);
             return false;
         }
-        // Gemma 4 routed expert tensors are marked TENSOR_READ_LAZY in the
-        // pinned source hook. The CPU backend reads only the selected experts
-        // from the GGUF mapping; every other tensor keeps the normal Vulkan path.
+        // Retain INFO diagnostics through tensor planning. The PS5 source hook
+        // rejects lazy file mappings before weight allocation until bounded
+        // expert reads replace the unbounded whole-file mapping experiment.
         mp.lazy_mode = LLAMA_LAZY_MODE_ON;
         log_message(GGML_LOG_LEVEL_INFO,
-                    "Gemma 4 experimental mode: routed expert weights are mmap-backed on demand\n", nullptr);
+                    "Gemma 4 diagnostic mode: planning tensors; lazy file mapping is blocked\n", nullptr);
     }
     if (!model) {
         model_load_free_bytes = free_before_model;
+        streaming_load_logging = gemma4_streaming_requested;
         model = llama_model_load_from_file(files[selected].path.c_str(), mp);
+        streaming_load_logging = false;
         prospero_runtime::set_model_resident(model != nullptr);
         if (!model) model_load_free_bytes = 0;
     }
