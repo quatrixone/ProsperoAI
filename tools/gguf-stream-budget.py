@@ -91,7 +91,9 @@ def inspect(path):
         metadata = {}
         for _ in range(fields):
             key = r.string(True)
-            keep = key in ('general.architecture', 'general.alignment')
+            keep = (key in ('general.architecture', 'general.alignment')
+                    or key.endswith('.expert_count')
+                    or key.endswith('.expert_used_count'))
             value = r.value(r.unpack('I'), keep)
             if keep:
                 metadata[key] = value
@@ -125,9 +127,29 @@ def inspect(path):
             raise ValueError('overlapping or truncated tensor data')
         end = tensor['offset'] + tensor['bytes']
     layers = {}
+    routed_layers = {}
     resident = 0
     for tensor in tensors:
         layer = tensor['layer']
+        # GGUF stores MoE expert matrices as rank-3 tensors with experts in
+        # the final dimension (for example blk.0.ffn_gate_exps.weight).
+        # Keep the estimate based on actual quantized extents, not parameter
+        # counts or a presumed four-bit representation.
+        is_routed_expert = (layer is not None and tensor['name'].startswith('blk.')
+                            and '.ffn_' in tensor['name']
+                            and '_exps' in tensor['name']
+                            and len(tensor['dimensions']) == 3)
+        if is_routed_expert:
+            expert_count = tensor['dimensions'][-1]
+            if tensor['bytes'] % expert_count:
+                raise ValueError(f"routed expert tensor has uneven expert extent: {tensor['name']}")
+            group = routed_layers.setdefault(layer, {
+                'layer': layer, 'experts': expert_count,
+                'expert_weight_bytes': 0, 'tensors': 0})
+            if group['experts'] != expert_count:
+                raise ValueError(f'inconsistent expert count in layer {layer}')
+            group['expert_weight_bytes'] += tensor['bytes']
+            group['tensors'] += 1
         if layer is None:
             resident += tensor['bytes']
         else:
@@ -140,13 +162,32 @@ def inspect(path):
     groups = [dict(v, span_bytes=v['end'] - v['start']) for _, v in sorted(layers.items())]
     largest_span = max((v['span_bytes'] for v in groups), default=0)
     largest_payload = max((v['bytes'] for v in groups), default=0)
+    routed = [dict(v, bytes_per_expert=v['expert_weight_bytes'] // v['experts'])
+              for _, v in sorted(routed_layers.items())]
+    expert_count_metadata = metadata.get(f"{metadata.get('general.architecture', '')}.expert_count")
+    expert_used_count = metadata.get(f"{metadata.get('general.architecture', '')}.expert_used_count")
+    if routed and isinstance(expert_count_metadata, int):
+        if any(layer['experts'] != expert_count_metadata for layer in routed):
+            raise ValueError('GGUF expert_count metadata does not match routed tensor dimensions')
+    active_expert_bytes = None
+    if routed and isinstance(expert_used_count, int):
+        if any(expert_used_count < 1 or expert_used_count > layer['experts'] for layer in routed):
+            raise ValueError('GGUF expert_used_count is outside routed tensor dimensions')
+        active_expert_bytes = sum(layer['bytes_per_expert'] * expert_used_count
+                                  for layer in routed)
     return {'model': path.name, 'file_bytes': size, 'architecture': metadata.get('general.architecture'),
             'data_start': data_start, 'weight_bytes': sum(t['bytes'] for t in tensors),
             'non_layer_weight_bytes': resident, 'layer_weight_bytes': sum(v['bytes'] for v in groups),
             'two_layer_packed_slots_bytes': largest_payload * 2,
             'two_layer_span_slots_bytes': largest_span * 2,
+            'expert_count': expert_count_metadata,
+            'expert_used_count': expert_used_count,
+            'routed_expert_bytes_per_token_without_cache': active_expert_bytes,
+            'routed_expert_layers': routed,
             'requires_prism_runtime': any(t['type'] in (142, 143) for t in tensors),
-            'qualification': 'Weight extents only; no KV, activation, upload or routing estimate.',
+            'qualification': ('Weight extents only. Routed bytes/token assumes the same '
+                              'expert_used_count in every MoE layer and no cache hits; '
+                              'it excludes KV, activations, Vulkan upload and cache residency.'),
             'layers': groups, 'tensors': tensors}
 
 
