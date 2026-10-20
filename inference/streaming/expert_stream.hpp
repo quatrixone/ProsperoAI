@@ -3,11 +3,22 @@
 
 #include "expert_cache.hpp"
 #include "ggml-backend.h"
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
 
 namespace prospero_streaming {
+
+// Reports whether `device` will run MUL_MAT_ID itself for an expert tensor of
+// this type and shape. If it will not, the scheduler computes routed experts on
+// the CPU, which would read weights that are not resident: streaming must then
+// be refused rather than attempted. A Vulkan device refuses MUL_MAT_ID when its
+// shared memory cannot hold the row ids and the result tile.
+bool device_runs_routed_experts(ggml_backend_dev_t device, int type, std::int64_t columns,
+                                 std::int64_t rows, std::int64_t experts,
+                                 std::int64_t experts_used, std::int64_t tokens,
+                                 std::string *reason = nullptr);
 
 // Where one routed expert tensor lives in the model file, and how many of its
 // experts stay resident.

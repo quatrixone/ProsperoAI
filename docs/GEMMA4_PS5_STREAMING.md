@@ -278,3 +278,80 @@ for an honest comparison:
    console's real memory limit rather than the cache allocation alone.
 5. **A longer, more varied trace.** One 12-token prompt and 16 decode steps is a
    thin sample for a cache-policy decision.
+
+## Gemma 4 running on PS5 with experts on disk — 2026-10-20
+
+The reader is now wired into inference. Three pieces make it work:
+
+1. **A ggml buffer type that allocates nothing**
+   (`inference/streaming/expert_stream.cpp`). A tensor placed in it gets address
+   space at a recognizable address and no memory, so a stray dereference faults
+   instead of reading something plausible.
+2. **One hook in the scheduler's expert copy**
+   (`tools/prepare-ggml-expert-stream.py`). The pinned scheduler already copies
+   only the experts a token uses out of an offloaded MoE weight tensor; the hook
+   lets the bounded cache supply those bytes. With no hook installed ggml is
+   unchanged.
+3. **A loader that leaves those tensors unread**
+   (`tools/prepare-llama-ps5-expert-stream.py`), and llama.cpp's own
+   `tensor_buft_overrides` to place `*_exps.weight` in the streaming buffer type.
+   No change to llama's buffer selection was needed.
+
+The app enables this in the `PROSPERO_GEMMA4_STREAMING=1` build; a release build
+links neither the reader nor the probe. `/app0/expert_cache.txt` holds
+"slots[ workers]" — resident experts per tensor, and reader threads.
+
+### What it looks like on the console
+
+`load_tensors: Prospero-ExpertStream model buffer size = 14429.25 MiB` next to
+`Vulkan0 1573.59 MiB` and `Vulkan_Host 577.50 MiB`: the 14.4 GiB of routed
+experts are never allocated. After weights, 7,101 MiB of the Vulkan heap is
+still free, and a 4096-token f16 KV cache takes 660 MiB. The model reaches
+"ready" in 3.5 s.
+
+Decode, prompt "The capital of France is", 16-24 greedy tokens, two reader
+threads:
+
+| experts/tensor | expert cache | decode | prefill (6 tokens) |
+| --- | --- | --- | --- |
+| 16 | 1.76 GiB | 2.53 tok/s | 4.89 s |
+| 32 | 3.52 GiB | 3.65 tok/s | 3.18 s |
+| 48 | 5.28 GiB | 3.89 tok/s | 3.20 s |
+| 64 | 7.05 GiB | 4.54 tok/s | 3.16 s |
+
+Measured decode sits at roughly 70-80% of the replay I/O ceilings above, which
+is what an implementation with no read/compute overlap should give.
+
+### Correctness, and a defect that is not ours
+
+Host parity (`expert-stream-test`) compares MUL_MAT_ID through the scheduler
+against identical fully resident weights over six routes and matches. On the
+console, the streamed run's first tokens (" capital", " of", " France", ".")
+are the same as a **fully resident CPU run of the same GGUF on the host**, and
+both then drift into nonsense (`" capital of France. cmath-_____"` streamed,
+`" capital of France. 맺-"` resident).
+
+So this GGUF produces poor text in the pinned llama.cpp whether or not experts
+are streamed. Two known contributors, both independent of streaming:
+`llama_chat_apply_template` does not know Gemma 4's template (the streaming
+build falls back to the raw prompt and logs a warning), and Gemma 4 support in
+the pinned llama.cpp is not verified beyond loading and decoding. Output quality
+is therefore still unproven; speed and memory are not.
+
+### Two things the integration depends on
+
+- **`GGML_OP_OFFLOAD_MIN_BATCH=1`.** The Vulkan device offloads MUL_MAT_ID only
+  from batch 32, so single-token decode would compute routed experts on the CPU,
+  where the weights are not. The device reads this once, when the backend
+  registry is built, so the streaming build sets it before `main` runs.
+- **A device that will run MUL_MAT_ID for these experts.** Before loading, the
+  app asks the device for every streamed tensor's type and shape and refuses
+  streaming with a clear message otherwise. llvmpipe refuses (32 KiB of shared
+  memory cannot hold the row ids and the result tile), which is why end-to-end
+  verification had to happen on the console; RADV on PS5 accepts.
+
+### Still missing against TurboFieldfare
+
+Read/compute overlap (they compute the resident shared-expert branch while
+their reads run), chunked prefill (6 tokens still cost 3.2 s because every
+token refetches), and a Gemma 4 that produces sensible text at all.

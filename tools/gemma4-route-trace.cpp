@@ -118,6 +118,9 @@ int main(int argc, char **argv) {
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
     for (int generated = 0; generated < steps; ++generated) {
         llama_token next = llama_sampler_sample(sampler, context, -1);
+        char piece[256]{};
+        const int size = llama_token_to_piece(vocab, next, piece, sizeof(piece) - 1, 0, true);
+        std::fprintf(stderr, "[%d]%.*s", next, size > 0 ? size : 0, piece);
         if (llama_vocab_is_eog(vocab, next)) break;
         if (llama_decode(context, llama_batch_get_one(&next, 1)) != 0) {
             std::fprintf(stderr, "decode failed at step %d\n", generated);

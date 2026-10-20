@@ -24,7 +24,7 @@
 #include "prospero_search.hpp"
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
 #include "model_downloader_ps5.hpp"
-#ifdef PROSPERO_EXPERT_STREAM_PROBE
+#ifdef PROSPERO_EXPERT_STREAM
 #include "streaming/expert_probe.hpp"
 #endif
 #endif
@@ -922,7 +922,7 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
     return wanted;
 }
 
-#ifdef PROSPERO_EXPERT_STREAM_PROBE
+#ifdef PROSPERO_EXPERT_STREAM
 // Measures bounded routed-expert reads from a GGUF on this console. It loads no
 // model and allocates no backend memory, so it can run while nothing is loaded.
 void handle_expert_stream_probe(const NetApi &api, int sock, const char *body)
@@ -1817,7 +1817,7 @@ void handle_connection(const NetApi &api, int sock)
         const bool loaded=gpt_runtime_loaded_model(id,sizeof(id),name,sizeof(name));
         send_json(api,sock,nlohmann::json{{"loaded",loaded},{"id",id},{"name",name}}.dump().c_str());
     }
-#ifdef PROSPERO_EXPERT_STREAM_PROBE
+#ifdef PROSPERO_EXPERT_STREAM
     else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/debug/expert-stream") == 0)
         handle_expert_stream_probe(api, sock, body);
 #endif

@@ -37,8 +37,9 @@ streaming_sources=()
 streaming_definitions=()
 if [[ ${PROSPERO_GEMMA4_STREAMING:-0} == 1 ]]; then
     : > "$app/gemma4_streaming.txt"
-    streaming_sources=(inference/streaming/expert_cache.cpp inference/streaming/expert_probe.cpp)
-    streaming_definitions=(-DPROSPERO_EXPERT_STREAM_PROBE=1)
+    streaming_sources=(inference/streaming/expert_cache.cpp inference/streaming/expert_layout.cpp
+        inference/streaming/expert_probe.cpp inference/streaming/expert_stream.cpp)
+    streaming_definitions=(-DPROSPERO_EXPERT_STREAM=1)
 fi
 python3 "$root/tools/prepare-vulkan-ui-shaders.py" --kit "$kit_stage/src" --output "$work/generated"
 version=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["contentVersion"])' "$root/sce_sys/param.json")

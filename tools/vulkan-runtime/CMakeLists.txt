@@ -30,6 +30,7 @@ add_subdirectory("${PROS_LLAMA_SOURCE}" llama)
 # Bounded expert I/O is built on both platforms, but is not connected to the
 # production loader until scheduler integration passes. The PS5 mmap guard stays.
 add_library(prospero-expert-cache STATIC "${PROS_ROOT}/inference/streaming/expert_cache.cpp"
+    "${PROS_ROOT}/inference/streaming/expert_layout.cpp"
     "${PROS_ROOT}/inference/streaming/expert_probe.cpp"
     "${PROS_ROOT}/inference/streaming/expert_stream.cpp")
 target_include_directories(prospero-expert-cache PUBLIC "${PROS_ROOT}/inference/streaming")
@@ -113,6 +114,9 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(expert-stream-test PRIVATE -UNDEBUG)
     add_executable(gemma4-route-trace "${PROS_ROOT}/tools/gemma4-route-trace.cpp")
     target_link_libraries(gemma4-route-trace PRIVATE llama ggml ggml-cpu)
+    add_executable(gemma4-stream-run "${PROS_ROOT}/tools/gemma4-stream-run.cpp")
+    target_link_libraries(gemma4-stream-run PRIVATE prospero-expert-cache llama ggml ggml-cpu ggml-vulkan)
+    target_link_options(gemma4-stream-run PRIVATE -rdynamic)
     add_executable(expert-probe-test "${PROS_ROOT}/tests/expert_probe_test.cpp")
     target_link_libraries(expert-probe-test PRIVATE prospero-expert-cache ggml ggml-cpu)
     target_compile_options(expert-probe-test PRIVATE -UNDEBUG)

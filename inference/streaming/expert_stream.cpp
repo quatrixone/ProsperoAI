@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "expert_stream.hpp"
 #include "ggml-backend-impl.h"
+#include "ggml.h"
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
@@ -16,6 +18,18 @@ std::uint8_t *const stream_base = reinterpret_cast<std::uint8_t *>(0x5452414d530
 constexpr std::size_t stream_alignment = 64;
 std::atomic<ExpertStream::State *> installed{nullptr};
 }
+
+// The Vulkan device reads GGML_OP_OFFLOAD_MIN_BATCH once, when the backend
+// registry is built, and nothing can change it afterwards. Streaming needs the
+// GPU to take routed experts even for a single-token batch, or the scheduler
+// computes them on the CPU, where streamed weights are not resident. Setting it
+// from a load path is too late if any model was loaded earlier in the session,
+// so a build that links this file sets it before main runs. It applies to every
+// model in that build, which is why only the streaming build links it.
+const int offload_min_batch = [] {
+    setenv("GGML_OP_OFFLOAD_MIN_BATCH", "1", 0);   // an explicit setting still wins
+    return 0;
+}();
 
 struct ExpertStream::State {
     ExpertCache &cache;
@@ -127,6 +141,32 @@ bool copy_experts(ggml_backend_t backend, ggml_tensor *destination, const ggml_t
 }
 } // namespace
 
+bool device_runs_routed_experts(ggml_backend_dev_t device, int type, std::int64_t columns,
+                                 std::int64_t rows, std::int64_t experts,
+                                 std::int64_t experts_used, std::int64_t tokens,
+                                 std::string *reason) {
+    if (!device) {
+        if (reason) *reason = "no device";
+        return false;
+    }
+    auto *ctx = ggml_init({ggml_tensor_overhead() * 8, nullptr, true});
+    if (!ctx) {
+        if (reason) *reason = "no context for the probe graph";
+        return false;
+    }
+    auto *weights = ggml_new_tensor_3d(ctx, static_cast<ggml_type>(type), columns, rows, experts);
+    auto *activations = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, columns, experts_used, tokens);
+    auto *ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, experts_used, tokens);
+    auto *node = ggml_mul_mat_id(ctx, weights, activations, ids);
+    const bool supported = ggml_backend_dev_supports_op(device, node);
+    const bool offloads = ggml_backend_dev_offload_op(device, node);
+    if (reason && !(supported && offloads))
+        *reason = supported ? "the backend declines to take this batch size"
+                            : "the backend cannot run MUL_MAT_ID for this expert type and shape";
+    ggml_free(ctx);
+    return supported && offloads;
+}
+
 ExpertStream::ExpertStream(ExpertCache &cache, Resolver resolve)
     : state_(std::make_unique<State>(cache, std::move(resolve))) {
     state_->buffer_type.iface = {
@@ -155,11 +195,15 @@ ggml_backend_buffer_type_t ExpertStream::buffer_type() { return &state_->buffer_
 void ExpertStream::install() {
     installed.store(state_.get());
     ggml_backend_set_expert_copy(copy_experts, state_.get());
+    // Also tell the loader not to write these tensors: without this it reads the
+    // whole tensor into address space that was never mapped.
+    ggml_backend_set_streamed_buft(&state_->buffer_type);
 }
 
 void ExpertStream::uninstall() {
     installed.store(nullptr);
     ggml_backend_set_expert_copy(nullptr, nullptr);
+    ggml_backend_set_streamed_buft(nullptr);
 }
 
 ExpertStream::Stats ExpertStream::stats() const {

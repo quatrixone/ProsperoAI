@@ -18,9 +18,11 @@ args = parser.parse_args()
 source = args.source
 
 
-def replace(path, before, after, expected=1):
+def replace(path, before, after, marker, expected=1):
+    """Applies one edit once. `marker` is a token the edit introduces, so an
+    already-patched tree is left alone even if the edit is later extended."""
     text = path.read_text()
-    if after in text:
+    if marker in text:
         return False
     if text.count(before) != expected:
         raise SystemExit(f'{path}: expert-stream hook no longer matches pinned ggml')
@@ -40,7 +42,13 @@ replace(header,
             ggml_backend_t backend, struct ggml_tensor * destination,
             const struct ggml_tensor * weights, int32_t first_id, int32_t last_id,
             size_t expert_size, void * user_data);
-    GGML_API void ggml_backend_set_expert_copy(ggml_backend_expert_copy_t callback, void * user_data);''')
+    GGML_API void ggml_backend_set_expert_copy(ggml_backend_expert_copy_t callback, void * user_data);
+
+    // Marks a buffer type whose tensors hold no data of their own: a loader must
+    // not write their bytes, and the expert-copy callback supplies them instead.
+    GGML_API void ggml_backend_set_streamed_buft(ggml_backend_buffer_type_t buft);
+    GGML_API bool ggml_backend_buft_is_streamed(ggml_backend_buffer_type_t buft);''',
+        marker='ggml_backend_expert_copy_t')
 
 backend = source / 'src/ggml-backend.cpp'
 replace(backend,
@@ -55,7 +63,18 @@ void ggml_backend_set_expert_copy(ggml_backend_expert_copy_t callback, void * us
     g_expert_copy_user_data = user_data;
 }
 
-// scheduler''')
+static ggml_backend_buffer_type_t g_streamed_buft = NULL;
+
+void ggml_backend_set_streamed_buft(ggml_backend_buffer_type_t buft) {
+    g_streamed_buft = buft;
+}
+
+bool ggml_backend_buft_is_streamed(ggml_backend_buffer_type_t buft) {
+    return buft != NULL && buft == g_streamed_buft;
+}
+
+// scheduler''',
+        marker='g_expert_copy')
 
 replace(backend,
         '''                    auto copy_experts = [&](int32_t first_id, int32_t last_id) {
@@ -66,6 +85,7 @@ replace(backend,
                                                            g_expert_copy_user_data)) {
                             return;
                         }
-                        const size_t expert_offset = first_id * expert_size;''')
+                        const size_t expert_offset = first_id * expert_size;''',
+        marker='g_expert_copy_user_data))')
 
 print(f'{backend}: offloaded MoE experts can be supplied by a reader')

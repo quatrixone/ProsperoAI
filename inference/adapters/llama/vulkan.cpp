@@ -33,6 +33,11 @@
 
 #include <vector>
 
+#ifdef PROSPERO_EXPERT_STREAM
+#include "streaming/expert_layout.hpp"
+#include "streaming/expert_stream.hpp"
+#endif
+
 #ifdef PROSPERO_VULKAN_RUNTIME
 namespace prospero_vulkan {
 #endif
@@ -44,6 +49,28 @@ std::mutex runtime_mutex;
 bool scanned, initialized, context_full;
 bool verbose_logging;
 std::atomic<bool> streaming_load_logging{false};
+
+#ifdef PROSPERO_EXPERT_STREAM
+// Routed experts are read per token, so the cache, its buffer type and the
+// layout they were built from live as long as the model does.
+prospero_streaming::RoutedExpertLayout expert_layout;
+std::unique_ptr<prospero_streaming::ExpertCache> expert_cache;
+std::unique_ptr<prospero_streaming::ExpertStream> expert_stream;
+std::vector<llama_model_tensor_buft_override> expert_overrides;
+unsigned expert_stream_slots = 16;
+
+// Optional tuning from the app folder: one line, "slots[ workers]". Defaults
+// stay in place when the file is absent or unreadable.
+void read_streaming_tuning(unsigned &slots, unsigned &workers) {
+    std::FILE *file = std::fopen("/app0/expert_cache.txt", "r");
+    if (!file) return;
+    unsigned read_slots = 0, read_workers = 0;
+    const int fields = std::fscanf(file, "%u %u", &read_slots, &read_workers);
+    std::fclose(file);
+    if (fields >= 1 && read_slots >= 1 && read_slots <= 128) slots = read_slots;
+    if (fields >= 2 && read_workers >= 1 && read_workers <= 8) workers = read_workers;
+}
+#endif
 bool prefix_cache_enabled = true;
 unsigned selected;
 llama_model *model;
@@ -260,19 +287,77 @@ bool prepare() {
                         "Gemma 4 lazy streaming enabled, but selected model name is not Gemma 4\n", nullptr);
             return false;
         }
-#ifdef PROSPERO_PRISM_RUNTIME
-        // The pinned Prism fork has no llama_model_params::lazy_mode. Fail closed:
-        // loading every routed expert eagerly is what this mode exists to avoid.
-        log_message(GGML_LOG_LEVEL_ERROR,
-                    "Gemma 4 lazy streaming is not available in the Prism runtime build\n", nullptr);
-        return false;
+#ifdef PROSPERO_EXPERT_STREAM
+        // Routed experts stay on disk: their tensors get address space from the
+        // streaming buffer type, and the scheduler's expert copy reads the ones a
+        // token selects out of the bounded cache. Everything else loads normally.
+        try {
+            const auto &path = files[selected].path;
+            expert_layout = prospero_streaming::read_routed_expert_layout(path);
+            unsigned slots = 16, workers = 2;
+            read_streaming_tuning(slots, workers);
+
+            std::uint64_t budget = 0;
+            unsigned streamed = 0;
+            std::string reason;
+            for (const auto &tensor : expert_layout.tensors) {
+                if (!tensor.expert_major) continue;   // per-expert scalars stay resident
+                const auto type = static_cast<ggml_type>(tensor.type);
+                const auto columns = static_cast<std::int64_t>(
+                    tensor.extent.row_bytes / ggml_type_size(type) * ggml_blck_size(type));
+                if (!prospero_streaming::device_runs_routed_experts(
+                        devices[0], tensor.type, columns,
+                        static_cast<std::int64_t>(tensor.extent.rows_per_expert),
+                        static_cast<std::int64_t>(tensor.extent.experts),
+                        std::max(1u, expert_layout.experts_used), 1, &reason)) {
+                    char line[256];
+                    std::snprintf(line, sizeof(line),
+                                  "Gemma 4 streaming needs the GPU to run routed experts: %s\n",
+                                  reason.c_str());
+                    log_message(GGML_LOG_LEVEL_ERROR, line, nullptr);
+                    return false;
+                }
+                budget += ((tensor.bytes_per_expert + 63) & ~std::uint64_t(63))
+                          * std::min<std::uint64_t>(slots, tensor.extent.experts);
+                ++streamed;
+            }
+            expert_cache = std::make_unique<prospero_streaming::ExpertCache>(
+                path.c_str(), static_cast<std::size_t>(budget), workers);
+            expert_stream = std::make_unique<prospero_streaming::ExpertStream>(
+                *expert_cache, [](const std::string &name,
+                                  prospero_streaming::StreamedTensor &out) {
+                    for (const auto &tensor : expert_layout.tensors)
+                        if (tensor.expert_major && tensor.name == name) {
+                            out.extent = tensor.extent;
+                            out.slots = expert_stream_slots;
+                            return true;
+                        }
+                    return false;
+                });
+            expert_stream_slots = slots;
+            expert_stream->install();
+            expert_overrides = {{"_exps\\.weight$", expert_stream->buffer_type()},
+                                {nullptr, nullptr}};
+            mp.tensor_buft_overrides = expert_overrides.data();
+            char line[256];
+            std::snprintf(line, sizeof(line),
+                          "Gemma 4 streaming: %u routed layers, %u streamed tensors, "
+                          "%u experts (%u used), cache %llu MiB for %u experts per tensor\n",
+                          expert_layout.layers, streamed, expert_layout.experts,
+                          expert_layout.experts_used,
+                          (unsigned long long) (budget / (1024 * 1024)), slots);
+            log_message(GGML_LOG_LEVEL_INFO, line, nullptr);
+        } catch (const std::exception &failure) {
+            char line[256];
+            std::snprintf(line, sizeof(line), "Gemma 4 streaming setup failed: %s\n",
+                          failure.what());
+            log_message(GGML_LOG_LEVEL_ERROR, line, nullptr);
+            return false;
+        }
 #else
-        // Retain INFO diagnostics through tensor planning. The PS5 source hook
-        // rejects lazy file mappings before weight allocation until bounded
-        // expert reads replace the unbounded whole-file mapping experiment.
-        mp.lazy_mode = LLAMA_LAZY_MODE_ON;
-        log_message(GGML_LOG_LEVEL_INFO,
-                    "Gemma 4 diagnostic mode: planning tensors; lazy file mapping is blocked\n", nullptr);
+        log_message(GGML_LOG_LEVEL_ERROR,
+                    "This build cannot stream Gemma 4 routed experts\n", nullptr);
+        return false;
 #endif
     }
     if (!model) {
@@ -516,11 +601,30 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
             for (unsigned i = 0; i < count; ++i)
                 if (messages[i].role && messages[i].content) chat.push_back({messages[i].role, messages[i].content});
             int n = llama_chat_apply_template(tmpl, chat.data(), chat.size(), true, nullptr, 0);
-            if (n <= 0) { std::snprintf(output, capacity, "Unsupported model chat template."); return 1; }
+            if (n <= 0) {
+#ifdef PROSPERO_EXPERT_STREAM
+                // The pinned llama.cpp does not know Gemma 4's template. The
+                // streaming experiment measures decode, not instruction
+                // following, so fall back to the raw user text and say so.
+                if (access("/app0/gemma4_streaming.txt", F_OK) == 0) {
+                    log_message(GGML_LOG_LEVEL_WARN,
+                                "Unknown chat template; sending the raw prompt instead\n", nullptr);
+                    for (unsigned i = count; i > 0; --i)
+                        if (messages[i - 1].content && messages[i - 1].role &&
+                            !std::strcmp(messages[i - 1].role, "user")) {
+                            prompt = messages[i - 1].content;
+                            break;
+                        }
+                } else
+#endif
+                { std::snprintf(output, capacity, "Unsupported model chat template."); return 1; }
+            }
+            if (n > 0) {
             std::vector<char> text(n + 1);
             n = llama_chat_apply_template(tmpl, chat.data(), chat.size(), true, text.data(), n);
             if (n <= 0 || n >= (int)text.size()) return 1;
             prompt.assign(text.data(), n);
+            }
         } else {
             for (unsigned i = count; i > 0; --i)
                 if (messages[i - 1].content && messages[i - 1].role && !std::strcmp(messages[i - 1].role, "user")) {

@@ -17,6 +17,7 @@ python3 "$root/tools/prepare-bonsai-ggml.py" --ggml-source "$ggml_source" --pris
 python3 "$root/tools/prepare-bonsai-llama.py" --llama-source "$source_tree" --prism-source "$prism_source"
 python3 "$root/tools/prepare-ggml-graph-setter.py" --source "$ggml_source"
 python3 "$root/tools/prepare-ggml-expert-stream.py" --source "$ggml_source"
+python3 "$root/tools/prepare-llama-ps5-expert-stream.py" --source "$source_tree"
 python3 "$root/tools/prepare-audio-cpp-sa3.py" --source "$root/build/audio-cpp-upstream" --ggml-source "$ggml_source"
 if [[ $mode == ps5 ]]; then
     python3 "$root/tools/prepare-llama-ps5-io.py" --source "$source_tree" --ggml-source "$ggml_source"
@@ -34,6 +35,6 @@ fi
 cmake -S "$root/tools/vulkan-runtime" -B "$build_tree" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release "${options[@]}"
 targets=(llama stable-diffusion kokoro audiocpp)
-[[ $mode != host ]] || targets+=(vulkan-runtime-abi-test vulkan-runtime-media-test expert-cache-test expert-upload-test expert-probe-test expert-stream-test gemma4-route-trace)
+[[ $mode != host ]] || targets+=(vulkan-runtime-abi-test vulkan-runtime-media-test expert-cache-test expert-upload-test expert-probe-test expert-stream-test gemma4-route-trace gemma4-stream-run)
 cmake --build "$build_tree" --target "${targets[@]}" \
     --parallel "${BUILD_JOBS:-4}"
