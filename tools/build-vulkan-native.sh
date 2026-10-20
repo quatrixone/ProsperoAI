@@ -31,6 +31,9 @@ kit=$(bash "$root/tools/prepare-ui-kit.sh" --kit)
 fonts=$(bash "$root/tools/bake-fonts.sh")
 mkdir -p "$work/obj" "$work/stubs" "$app/sce_sys" "$app/sce_module" "$work/generated"
 printf '%s\n' "$label" > "$app/build-label.txt"
+if [[ ${PROSPERO_GEMMA4_STREAMING:-0} == 1 ]]; then
+    : > "$app/gemma4_streaming.txt"
+fi
 python3 "$root/tools/prepare-vulkan-ui-shaders.py" --kit "$kit_stage/src" --output "$work/generated"
 version=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["contentVersion"])' "$root/sce_sys/param.json")
 printf '#define PROSPERO_VERSION "%s"\n#define PROSPERO_BUILD_LABEL "%s"\n' "$version" "$label" > "$work/generated/prospero_build.h"

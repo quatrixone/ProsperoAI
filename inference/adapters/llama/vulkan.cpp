@@ -248,6 +248,22 @@ bool prepare() {
     mp.devices = devices;
     mp.n_gpu_layers = 99;
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
+    const bool gemma4_streaming_requested = access("/app0/gemma4_streaming.txt", F_OK) == 0;
+    if (gemma4_streaming_requested) {
+        const auto & model_id = files[selected].id;
+        if (model_id.find("gemma4") == std::string::npos &&
+            model_id.find("gemma-4") == std::string::npos) {
+            log_message(GGML_LOG_LEVEL_ERROR,
+                        "Gemma 4 lazy streaming enabled, but selected model name is not Gemma 4\n", nullptr);
+            return false;
+        }
+        // Gemma 4 routed expert tensors are marked TENSOR_READ_LAZY in the
+        // pinned source hook. The CPU backend reads only the selected experts
+        // from the GGUF mapping; every other tensor keeps the normal Vulkan path.
+        mp.lazy_mode = LLAMA_LAZY_MODE_ON;
+        log_message(GGML_LOG_LEVEL_INFO,
+                    "Gemma 4 experimental mode: routed expert weights are mmap-backed on demand\n", nullptr);
+    }
     if (!model) {
         model_load_free_bytes = free_before_model;
         model = llama_model_load_from_file(files[selected].path.c_str(), mp);

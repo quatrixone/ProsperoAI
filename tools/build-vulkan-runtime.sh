@@ -20,6 +20,7 @@ python3 "$root/tools/prepare-audio-cpp-sa3.py" --source "$root/build/audio-cpp-u
 if [[ $mode == ps5 ]]; then
     python3 "$root/tools/prepare-llama-ps5-io.py" --source "$source_tree" --ggml-source "$ggml_source"
     python3 "$root/tools/prepare-llama-ps5-vulkan.py" --source "$source_tree" --ggml-source "$ggml_source"
+    python3 "$root/tools/prepare-llama-ps5-gemma4-streaming.py" --source "$source_tree"
     python3 "$root/tools/prepare-llama-ps5-cpu-buffer.py" --source "$source_tree" --ggml-source "$ggml_source"
     python3 "$root/tools/prepare-kokoro-ps5.py" --source "$root/.deps/kokoro.cpp"
     mkdir -p "$root/build/llama-vulkan/include-shim/spirv"

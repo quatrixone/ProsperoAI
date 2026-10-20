@@ -19,20 +19,30 @@ reuse. ProsperoAI should keep GGUF and its Vulkan quantized kernels.
    tensor extents and `expert_used_count` metadata. This is an I/O lower-bound
    input, not a memory or speed result. Measure actual Gemma 4 routing and
    expert-cache hit rates before choosing a cache size.
-2. **S1: build a bounded expert-I/O prototype.** Keep embeddings, attention,
-   routers, shared experts and KV resident. Read only routed expert extents into
-   a fixed number of aligned Vulkan-visible slots. Do not allocate full expert
-   tensors. Add slot lifetime tracking so a Vulkan submission cannot read a slot
-   while it is being refilled. Keep the resident llama.cpp path as the reference.
-3. **S2: prove host correctness.** Compare logits and greedy tokens against the
+2. **S1: prove lazy expert residency first.** The pinned llama.cpp already has
+   mmap-backed lazy tensors. Mark Gemma 4 routed expert matrices lazy and run
+   them on the CPU backend, while the other tensors stay on Vulkan. This keeps
+   full expert matrices out of eager backend allocations and gives us a first
+   PS5 memory/correctness measurement. This is an opt-in experiment; it does not
+   yet provide a bounded cache or guarantee a physical-memory ceiling.
+   Build the test title with `PROSPERO_GEMMA4_STREAMING=1`; this opts that
+   build into Gemma 4 lazy mmap mode. The selected model name must include
+   `gemma4` or `gemma-4`, and the loader fails if mmap is unavailable.
+3. **S2: add an explicit bounded expert cache if S1 needs it.** Keep embeddings,
+   attention, routers, shared experts and KV resident. Read only routed expert
+   extents into a fixed number of aligned Vulkan-visible slots. Do not allocate
+   full expert tensors. Add slot lifetime tracking so a Vulkan submission cannot
+   read a slot while it is being refilled. Keep the resident llama.cpp path as
+   the reference.
+4. **S3: prove host correctness.** Compare logits and greedy tokens against the
    resident path for short prompts, repeated experts, cache eviction, failures,
    cancellation and model/context teardown. Validate all GGUF quantization
    layouts used by the selected Gemma 4 file.
-4. **S3: measure on a PS5 test title.** Report physical memory by category,
+5. **S4: measure on a PS5 test title.** Report physical memory by category,
    uncached and warm read bandwidth, expert-cache hit rate, prefill, time to first
    token and decode speed. A 2 GB claim requires total measured inference memory,
    not only the expert cache or Vulkan allocation. Do not advertise the target
    until these measurements pass.
 
-The first PR only adds S0 expert extent accounting. It does not change model
-loading or inference and does not claim Gemma 4 runs in 2 GB.
+This PR adds S1 as an opt-in PS5 experiment and keeps S0's GGUF budget report.
+It does not yet add the bounded expert cache or claim Gemma 4 runs in 2 GB.
