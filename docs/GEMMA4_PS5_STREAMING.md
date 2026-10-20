@@ -355,3 +355,62 @@ is therefore still unproven; speed and memory are not.
 Read/compute overlap (they compute the resident shared-expert branch while
 their reads run), chunked prefill (6 tokens still cost 3.2 s because every
 token refetches), and a Gemma 4 that produces sensible text at all.
+
+## Where this stands, and how to continue
+
+Verified: the reader, the scheduler integration and the measurements above.
+Unverified: output quality (broken for reasons outside streaming), and the
+GPU-side upload skip plus non-blocking copies, which pass their host test but
+were never measured on the console — the console went into rest mode first.
+
+### Reproducing the console measurements
+
+```bash
+source tools/ps5-env.sh                       # PS5_HOST, PROSPERO_TEST_TITLE
+python3 tools/ps5ctl.py status                 # expect 9021 and 2120 open
+PROSPERO_GEMMA4_STREAMING=1 make vulkan-runtime
+python3 tools/ps5ctl.py agent kill  "$PROSPERO_TEST_TITLE"
+python3 tools/ps5ctl.py shadow info "$PROSPERO_TEST_TITLE"   # mounted:false
+python3 tools/ps5ctl.py ftp put build/vulkan-runtime/$PROSPERO_TEST_TITLE/eboot.bin \
+    /data/homebrew/$PROSPERO_TEST_TITLE/eboot.bin
+python3 tools/ps5ctl.py ftp chmod 755 /data/homebrew/$PROSPERO_TEST_TITLE/eboot.bin
+printf '64 2\n' > expert_cache.txt            # experts per tensor, reader threads
+python3 tools/ps5ctl.py ftp put expert_cache.txt \
+    /data/homebrew/$PROSPERO_TEST_TITLE/expert_cache.txt
+python3 tools/ps5ctl.py agent launch "$PROSPERO_TEST_TITLE"
+curl -s -X POST "http://<PS5-IP>:11434/api/generate" -H 'content-type: application/json' \
+  -d '{"model":"gemma4/gemma-4-26B-A4B-it-Q4_K_M.gguf","prompt":"The capital of France is",
+       "stream":false,"options":{"num_predict":24}}'
+```
+
+`POST /api/debug/expert-stream` measures reads without loading a model; it takes
+`model`, `slots`, `tokens`, `experts_per_token`, `layers`, `seed`,
+`read_workers` and `trace` (a recording from `gemma4-route-trace`, uploaded
+beside the models). `/app0/vulkan_verbose_logging.txt` turns on full backend
+logging in the trace, which is how the scheduler's assignment was read.
+
+### Next, in the order the numbers justify
+
+1. **Measure the upload skip and non-blocking copies on the console** (commit
+   "Stop re-uploading experts the GPU already holds"). The expectation from the
+   measured decomposition — I/O 146 ms, upload and compute 74 ms per token at 64
+   experts per tensor — is 5.5-6.8 tok/s against 4.54 today. `ExpertStream::Stats`
+   separates `skipped`, `stalls` and `events`, so a miss tells which half failed.
+2. **Chunked prefill.** Six prompt tokens still cost 3.2 s because each token
+   refetches its experts; one fetch should serve a whole chunk.
+3. **Fewer bytes per expert.** The file is a mix: gate/up is q4_K, down is q5_0
+   or q8_0 by layer. Requantizing the routed experts alone is about 1.2x, 3-bit
+   about 1.6x, 2-bit about 2x, and it shrinks the upload as well as the read.
+   Quality cannot be judged until the item below is fixed, so this is blind for now.
+4. **Gemma 4 text quality**, which is not a streaming problem: the pinned
+   llama.cpp does not know this model's chat template, and support beyond
+   loading and decoding is unverified.
+
+### What the streaming path cannot reach
+
+With a perfect cache (no reads at all) the per-token upload of about 900 MiB
+still caps decode near 13.5 tok/s, and the measured path tops out around 5-7.
+Numbers in the 30s need the model resident, which means fitting under about
+11 GB of the 12.28 GB Vulkan heap: Q4_K_M (16.8 GB) and Q3_K_M (12.6 GB) do not,
+a 2-bit quantization would. That is a different experiment, not an optimization
+of this one.
