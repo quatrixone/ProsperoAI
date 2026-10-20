@@ -196,30 +196,85 @@ descriptor constructor borrows without duplicating. The host tests cover both.
 
 ## Bounded expert reads on PS5 — measured, 2026-10-20
 
-Test title PPSA99023, `eboot.bin` built with `PROSPERO_GEMMA4_STREAMING=1`,
-NEEDED list and PIE program-header shape identical to the verified guard build.
-Model `gemma4/gemma-4-26B-A4B-it-Q4_K_M.gguf` on console storage.
+Test title PPSA99023, `eboot.bin` built with `PROSPERO_GEMMA4_STREAMING=1`, NEEDED
+list and PIE program-header shape identical to the verified guard build. Model
+`gemma4/gemma-4-26B-A4B-it-Q4_K_M.gguf` on console storage.
 
 The probe found 30 routed layers and 90 per-expert tensors (fused gate/up, down,
 and the rank-1 `ffn_down_exps.scale` vectors), 128 experts with 8 used, and a
 largest single expert extent of 2,230,272 bytes. Its uncached per-token total,
-945,636,288 bytes, matches `tools/gguf-stream-budget.py` on the host byte for
-byte, so the console reader and the S0 estimate agree on the layout.
+945,636,288 bytes (902 MiB), matches `tools/gguf-stream-budget.py` byte for byte.
 
-| slots | cache bytes | tokens | reads | evictions | cold | warm |
-| --- | --- | --- | --- | --- | --- | --- |
-| 16 | 35,684,352 | 3 | 2,160 | 2,144 | 1,117.6 ms, 807 MiB/s | 1,746.8 ms, 1,033 MiB/s |
-| 128 | 285,474,816 | 3 | 2,160 | 2,032 | 1,143.6 ms, 789 MiB/s | 1,718.1 ms, 1,050 MiB/s |
-| 8 (1 layer) | 17,842,176 | 4 | 96 | 88 | 36.0 ms, 919 MiB/s | 81.7 ms, 1,215 MiB/s |
+### What the first console measurements changed in the design
 
-What this establishes: the reader works on the console, its allocation stays at
-`slots x max_expert_bytes` regardless of how many reads and evictions follow,
-and PS5 storage serves these extents at roughly 0.8 GiB/s cold and 1.0-1.2 GiB/s
-warm. At that rate one token's uncached routed-expert reads cost about 0.9-1.1 s,
-so expert I/O alone caps decode near 1 token/s unless the cache hits.
+A single pool of uniformly wide slots measured 0% hits at every size up to 1 GiB,
+and two reasons showed up in the numbers:
 
-What it does not establish: hit rates under real routing (the stand-in is
-uniform, and every run above recorded zero hits), inference correctness, decode
-speed, or the 5 GiB Vulkan ceiling. No model was loaded and no expert bytes
-reached the GPU on the console. The title stayed alive and responsive through
-every run, and was stopped and unmounted afterwards.
+- Every slot was as wide as the widest tensor, so a 4-byte `scale` expert cost
+  2.23 MB of cache.
+- One pool of LRU slots is swept clean while the other 29 layers are read: the
+  reuse distance is one token's whole working set, 720 entries, so nothing
+  survived until the next token.
+
+The cache now keeps **one pool per routed tensor, each slot exactly one expert
+wide**, which is what TurboFieldfare's per-layer cache does. `slots` is resident
+experts per tensor. Reads of one expert are split across a fixed set of reader
+threads (`read_workers`).
+
+### Real routing instead of a uniform stand-in
+
+`tools/gemma4-route-trace.cpp` (host target `gemma4-route-trace`) records the
+router's own top-8 per layer per step through llama.cpp's eval callback on the
+`ffn_moe_topk` nodes, writing `step layer id id ...`. The probe replays that
+trace with `"trace": "<file in the model folder>"`.
+
+A 12-token prompt plus 16 greedy decode steps gave 44.1% expert overlap between
+consecutive steps and 1,165 distinct (layer, expert) pairs of 3,840. Replaying it
+on the console reproduced a host simulation of the same trace to within rounding
+(decode hit rate by bytes 31.7% / 57.6% / 71.5% at 8 / 16 / 32 experts per
+tensor, against 32.0% / 58.1% / 71.8% simulated).
+
+### Measured on the console
+
+Decode figures are per step, averaged over the trace's 16 decode steps. The hit
+rate is by bytes, so it is the share of the 902 MiB per token that was not read.
+
+| experts/tensor | cache | workers | decode hit | ms/token | MiB/token | MiB/s | I/O ceiling |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 | 0.88 GiB | 1 | 31.7% | 389 | 382 | 981 | 2.57 tok/s |
+| 16 | 1.76 GiB | 1 | 57.6% | 389 | 382 | 981 | 2.57 tok/s |
+| 16 | 1.76 GiB | 2 | 57.6% | 321 | 382 | 1,190 | 3.12 tok/s |
+| 16 | 1.76 GiB | 4 | 57.6% | 344 | 382 | 1,110 | 2.91 tok/s |
+| 32 | 3.52 GiB | 2 | 71.5% | 216 | 257 | 1,187 | 4.62 tok/s |
+| 48 | 5.28 GiB | 2 | 76.5% | 181 | 212 | 1,170 | 5.52 tok/s |
+| 64 | 7.05 GiB | 2 | 81.5% | 146 | 166 | 1,144 | 6.87 tok/s |
+
+Two reader threads are worth about 21% (981 to 1,190 MiB/s); four and eight are
+slower than two, so PS5 storage saturates near 1.2 GiB/s for these extents.
+Prefill of the 12-token prompt reads 10.8 GiB in 9.1-11.3 s, because the replay
+refetches per token; chunked prefill, where one fetched expert serves many rows,
+is not implemented.
+
+The 7.05 GiB allocation succeeded and the title stayed alive and responsive
+through every run. Precise title RSS was not captured (klog was not streaming at
+the time), so the full-system footprint with core weights and KV is still unmeasured.
+
+### How this compares, and what is still missing
+
+TurboFieldfare reports 5.1-6.3 tok/s on an 8 GB M2 MacBook Air. Our 6.87 tok/s at
+64 experts per tensor is the same ballpark, but it is **not the same claim**: it is
+an I/O ceiling for expert reads replayed from a trace, not a decode rate. Missing
+for an honest comparison:
+
+1. **The ggml scheduler integration.** Nothing streams during real inference yet.
+   The pinned scheduler dereferences `input->data + expert_offset` for offloaded
+   `MUL_MAT_ID` weights, so the reader has to be wired into that path before a
+   token can be produced this way. The PS5 lazy mmap guard stays until then.
+2. **Read/compute overlap.** `upload_expert` synchronizes around the copy.
+   TurboFieldfare computes the resident shared-expert branch while its reads run;
+   we do not, so the measured I/O time is fully exposed.
+3. **Chunked prefill**, which would stop prefill from refetching per token.
+4. **Core residency and KV**, measured together with the cache, against the
+   console's real memory limit rather than the cache allocation alone.
+5. **A longer, more varied trace.** One 12-token prompt and 16 decode steps is a
+   thin sample for a cache-policy decision.

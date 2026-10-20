@@ -55,6 +55,7 @@ std::string write_fixture(const char *directory) {
 int main(int argc, char **argv) {
     assert(argc == 2);
     const auto path = write_fixture(argv[1]);
+    constexpr std::uint64_t scale_bytes = sizeof(float);                   // one scale per expert
     const auto gate_bytes = static_cast<std::uint64_t>(ggml_row_size(GGML_TYPE_Q4_K, columns)) * rows;
     const auto down_bytes = static_cast<std::uint64_t>(ggml_row_size(GGML_TYPE_Q6_K, columns)) * rows;
 
@@ -69,9 +70,12 @@ int main(int argc, char **argv) {
     assert(result.routed_layers == layers && result.routed_tensors == layers * 4); // matrices + scale
     assert(result.replayed_layers == layers && result.tokens == 3);
     assert(result.max_expert_bytes == down_bytes);                      // the widest tensor sizes a slot
-    constexpr std::uint64_t scale_bytes = sizeof(float);                   // one scale per expert
     assert(result.per_token_bytes == (2 * gate_bytes + down_bytes + scale_bytes) * used * layers);
-    assert(result.slots == 4 && result.allocated_bytes >= 4 * down_bytes);
+    // Four resident experts in every pool, each slot exactly one expert wide.
+    const auto aligned = [](std::uint64_t bytes) { return (bytes + 63) & ~std::uint64_t(63); };
+    assert(result.pools == layers * 4 && result.slots == result.pools * 4);
+    assert(result.allocated_bytes ==
+           4u * layers * (2 * aligned(gate_bytes) + aligned(down_bytes) + aligned(scale_bytes)));
     assert(result.reads == static_cast<std::uint64_t>(layers) * 4 * used * 3);
     assert(result.hits + result.misses == result.reads);
     assert(result.bytes_read >= result.misses * scale_bytes &&
@@ -87,12 +91,43 @@ int main(int argc, char **argv) {
     // One slot per layer tensor set forces eviction; a wide budget removes it.
     request.slots = 1;
     auto narrow = probe_expert_stream(request);
-    assert(narrow.ok && narrow.evictions > 0 && narrow.slots == 1);
+    assert(narrow.ok && narrow.evictions > 0 && narrow.slots == narrow.pools);
     request.slots = 64;
     request.layers = 1;
     auto wide = probe_expert_stream(request);
     assert(wide.ok && wide.replayed_layers == 1 && wide.evictions == 0);
     assert(wide.per_token_bytes == (2 * gate_bytes + down_bytes + scale_bytes) * used);
+
+    // A recorded routing trace replaces the stand-in and produces hits when it
+    // repeats an expert, which uniform routing rarely does.
+    const std::string trace_path = std::string(argv[1]) + "/probe-fixture.trace";
+    {
+        std::FILE *trace = std::fopen(trace_path.c_str(), "w");
+        assert(trace);
+        for (int step = 0; step < 3; ++step)
+            for (int layer = 0; layer < layers; ++layer)
+                std::fprintf(trace, "%d %d 5 6\n", step, layer); // the same two experts every step
+        std::fclose(trace);
+    }
+    request = ExpertProbeRequest{};
+    request.path = path;
+    request.slots = 8;
+    request.trace_path = trace_path;
+    auto replay = probe_expert_stream(request);
+    assert(replay.ok && replay.replayed_trace && replay.tokens == 3);
+    assert(replay.reads == static_cast<std::uint64_t>(layers) * 4 * 2 * 3);
+    assert(replay.slowest_step_ms >= 0);
+    // Eight slots hold both experts of two layers only, so a wide cache is what
+    // turns the repeat into hits: with one layer replayed everything after the
+    // first step must hit.
+    request.layers = 1;
+    auto focused = probe_expert_stream(request);
+    assert(focused.ok && focused.hits == focused.reads * 2 / 3 && focused.evictions == 0);
+    assert(focused.warm_bytes == 0 && focused.cold_bytes > 0);
+    request.layers = 0;
+    request.trace_path = std::string(argv[1]) + "/missing.trace";
+    assert(!probe_expert_stream(request).ok);
+    std::remove(trace_path.c_str());
 
     // Rejections and failures are reported, never thrown.
     request = ExpertProbeRequest{};

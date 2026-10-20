@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -18,6 +19,7 @@ namespace {
 struct RoutedTensor {
     ExpertExtent extent;
     std::uint64_t bytes_per_expert;
+    std::size_t pool = 0;   // handle inside the cache
 };
 
 struct RoutedLayer {
@@ -73,10 +75,48 @@ struct Routing {
     }
 };
 
+// One replay step: the experts the router picked, grouped by layer.
+using TraceStep = std::vector<std::pair<int, std::vector<std::uint64_t>>>;
+
+std::vector<TraceStep> read_trace(const std::string &path, unsigned experts) {
+    std::FILE *file = std::fopen(path.c_str(), "r");
+    if (!file) throw std::runtime_error("Cannot read the routing trace: " + path);
+    struct Closer { std::FILE *file; ~Closer() { std::fclose(file); } } closer{file};
+    std::vector<TraceStep> steps;
+    char line[4096];
+    long previous_step = -1;
+    while (std::fgets(line, sizeof(line), file)) {
+        const char *cursor = line;
+        int consumed = 0;
+        long step = 0, layer = 0;
+        if (std::sscanf(cursor, "%ld %ld%n", &step, &layer, &consumed) != 2)
+            throw std::runtime_error("Malformed routing trace line: " + path);
+        if (step < 0 || layer < 0) throw std::runtime_error("Negative step or layer in the trace");
+        cursor += consumed;
+        std::vector<std::uint64_t> ids;
+        long id = 0;
+        while (std::sscanf(cursor, "%ld%n", &id, &consumed) == 1) {
+            if (id < 0 || static_cast<unsigned long>(id) >= experts)
+                throw std::runtime_error("Expert id in the trace is outside the file's expert count");
+            ids.push_back(static_cast<std::uint64_t>(id));
+            cursor += consumed;
+        }
+        if (ids.empty()) continue;
+        if (step != previous_step) {
+            steps.emplace_back();
+            previous_step = step;
+        }
+        steps.back().emplace_back(static_cast<int>(layer), std::move(ids));
+    }
+    if (steps.empty()) throw std::runtime_error("The routing trace holds no steps");
+    return steps;
+}
+
 ExpertProbeResult run(const ExpertProbeRequest &request) {
     ExpertProbeResult result;
-    if (request.slots < 1 || request.slots > 256) throw std::invalid_argument("slots must be 1..256");
-    if (request.tokens < 1 || request.tokens > 64) throw std::invalid_argument("tokens must be 1..64");
+    if (request.slots < 1 || request.slots > 4096) throw std::invalid_argument("slots must be 1..4096");
+    if (request.trace_path.empty() && (request.tokens < 1 || request.tokens > 64))
+        throw std::invalid_argument("tokens must be 1..64");
 
     GgufHandle gguf;
     gguf.ctx = gguf_init_from_file(request.path.c_str(), gguf_init_params{true, nullptr});
@@ -148,28 +188,58 @@ ExpertProbeResult run(const ExpertProbeRequest &request) {
     struct stat info{};
     if (stat(request.path.c_str(), &info) == 0) result.file_bytes = static_cast<std::uint64_t>(info.st_size);
 
-    // One slot must hold the widest expert, so the budget is slots * that width.
-    // The cache opens and owns the file: PS5 rejects a dup() of a descriptor.
-    ExpertCache cache(request.path.c_str(),
-                      static_cast<std::size_t>(request.slots) * result.max_expert_bytes,
-                      static_cast<std::size_t>(result.max_expert_bytes));
+    // `slots` is resident experts per tensor, as TurboFieldfare's per-layer cache
+    // is: every routed tensor of a layer keeps that many experts, each slot
+    // exactly one expert wide. The cache opens and owns the file, because PS5
+    // rejects a dup() of a descriptor.
+    std::size_t budget = 0;
+    for (const auto &layer : layers)
+        for (const auto &tensor : layer.tensors)
+            budget += ((static_cast<std::size_t>(tensor.bytes_per_expert) + 63) & ~std::size_t(63))
+                      * std::min<std::uint64_t>(request.slots, tensor.extent.experts);
+    ExpertCache cache(request.path.c_str(), budget, request.read_workers);
+    for (auto &layer : layers)
+        for (auto &tensor : layer.tensors)
+            tensor.pool = cache.add_extent(tensor.extent, request.slots);
+    // A trace replays the router's own choices; otherwise the stand-in routing
+    // draws uniformly, which understates the hit rate of real, skewed routing.
+    std::vector<TraceStep> trace;
+    if (!request.trace_path.empty()) {
+        trace = read_trace(request.trace_path, result.experts);
+        result.replayed_trace = true;
+    }
     Routing routing(request.seed);
     std::vector<std::uint64_t> selected;
-    for (unsigned token = 0; token < request.tokens; ++token) {
+    const std::size_t total_steps = trace.empty() ? request.tokens : trace.size();
+    for (std::size_t step = 0; step < total_steps; ++step) {
         const auto before_bytes = cache.stats().bytes_read;
         const auto start = std::chrono::steady_clock::now();
-        for (const auto &layer : layers) {
-            routing.select(result.experts, used, selected);
-            for (const auto expert : selected)
-                for (const auto &tensor : layer.tensors) {
-                    auto lease = cache.acquire(tensor.extent, expert);
-                    ++result.reads;
-                }
+        if (trace.empty()) {
+            for (auto &layer : layers) {
+                routing.select(result.experts, used, selected);
+                for (const auto expert : selected)
+                    for (const auto &tensor : layer.tensors) {
+                        auto lease = cache.acquire(tensor.pool, expert);
+                        ++result.reads;
+                    }
+            }
+        } else {
+            for (const auto &row : trace[step]) {
+                const auto found = std::find_if(layers.begin(), layers.end(),
+                    [&](const RoutedLayer &candidate) { return candidate.index == row.first; });
+                if (found == layers.end()) continue; // a dense layer, or outside a narrowed replay
+                for (const auto expert : row.second)
+                    for (const auto &tensor : found->tensors) {
+                        auto lease = cache.acquire(tensor.pool, expert);
+                        ++result.reads;
+                    }
+            }
         }
         const double elapsed = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - start).count();
         const auto read_bytes = cache.stats().bytes_read - before_bytes;
-        if (token == 0) {
+        result.slowest_step_ms = std::max(result.slowest_step_ms, elapsed);
+        if (step == 0) {
             result.cold_ms = elapsed;
             result.cold_bytes = read_bytes;
         } else {
@@ -180,6 +250,8 @@ ExpertProbeResult run(const ExpertProbeRequest &request) {
     }
     const auto stats = cache.stats();
     result.slots = stats.slots;
+    result.pools = stats.pools;
+    result.read_workers = stats.read_workers;
     result.allocated_bytes = stats.allocated_bytes;
     result.hits = stats.hits;
     result.misses = stats.misses;

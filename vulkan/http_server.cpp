@@ -948,6 +948,19 @@ void handle_expert_stream_probe(const NetApi &api, int sock, const char *body)
     request.experts_per_token = j.value("experts_per_token", request.experts_per_token);
     request.layers = j.value("layers", request.layers);
     request.seed = j.value("seed", request.seed);
+    request.read_workers = j.value("read_workers", request.read_workers);
+    const auto trace = j.value("trace", std::string());
+    if (!trace.empty())
+    {
+        if (trace.find("..") != std::string::npos)
+        {
+            openai_error(api, sock, "400 Bad Request", "invalid_trace",
+                         "Give a routing trace relative to the model folder.");
+            return;
+        }
+        request.trace_path = trace.front() == '/' ? trace
+                                                  : std::string(prospero::model_root()) + "/" + trace;
+    }
     const auto result = prospero_streaming::probe_expert_stream(request);
     if (!result.ok)
     {
@@ -964,14 +977,18 @@ void handle_expert_stream_probe(const NetApi &api, int sock, const char *body)
         {"experts_used", result.experts_used}, {"routed_layers", result.routed_layers},
         {"routed_tensors", result.routed_tensors}, {"replayed_layers", result.replayed_layers},
         {"max_expert_bytes", result.max_expert_bytes}, {"per_token_bytes", result.per_token_bytes},
-        {"tokens", result.tokens}, {"slots", result.slots},
+        {"tokens", result.tokens}, {"slots", result.slots}, {"pools", result.pools},
+        {"read_workers", result.read_workers},
         {"allocated_bytes", result.allocated_bytes}, {"reads", result.reads},
         {"hits", result.hits}, {"misses", result.misses}, {"evictions", result.evictions},
         {"bytes_read", result.bytes_read},
         {"cold_ms", result.cold_ms}, {"cold_bytes", result.cold_bytes},
         {"cold_mib_per_sec", rate(result.cold_bytes, result.cold_ms)},
         {"warm_ms", result.warm_ms}, {"warm_bytes", result.warm_bytes},
-        {"warm_mib_per_sec", rate(result.warm_bytes, result.warm_ms)}}.dump().c_str());
+        {"warm_mib_per_sec", rate(result.warm_bytes, result.warm_ms)},
+        {"replayed_trace", result.replayed_trace},
+        {"slowest_step_ms", result.slowest_step_ms},
+        {"hit_rate", result.reads ? double(result.hits) / double(result.reads) : 0.0}}.dump().c_str());
 }
 #endif
 

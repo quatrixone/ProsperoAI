@@ -12,11 +12,16 @@ namespace prospero_streaming {
 // only: it loads no model, allocates no backend buffers and runs no inference.
 struct ExpertProbeRequest {
     std::string path;                // GGUF to read
-    unsigned slots = 8;              // cache slots, each max_expert_bytes wide
+    unsigned slots = 8;              // resident experts per routed tensor
     unsigned tokens = 2;             // routing steps to replay
     unsigned experts_per_token = 0;  // 0 takes the file's expert_used_count
     unsigned layers = 0;             // 0 takes every routed layer
     std::uint64_t seed = 1;          // routing is deterministic for a seed
+    unsigned read_workers = 1;       // threads per expert read
+    // A recorded routing trace from tools/gemma4-route-trace.cpp: one line per
+    // step and layer, "step layer id id ...". When set, it replaces the uniform
+    // stand-in and `tokens`, `experts_per_token`, `layers` and `seed` are ignored.
+    std::string trace_path;
 };
 
 struct ExpertProbeResult {
@@ -28,11 +33,14 @@ struct ExpertProbeResult {
     std::uint64_t file_bytes = 0, max_expert_bytes = 0, per_token_bytes = 0;
     // Replay
     unsigned replayed_layers = 0, tokens = 0;
-    std::size_t slots = 0, allocated_bytes = 0;
+    std::size_t slots = 0, pools = 0, allocated_bytes = 0;
+    unsigned read_workers = 1;
     std::uint64_t reads = 0, hits = 0, misses = 0, evictions = 0, bytes_read = 0;
-    // First token reads nothing warm; later tokens can reuse pinned-free slots.
+    // The first step is cold; later steps can reuse what the cache still holds.
     double cold_ms = 0, warm_ms = 0;
     std::uint64_t cold_bytes = 0, warm_bytes = 0;
+    bool replayed_trace = false;     // true when a recorded routing trace was used
+    double slowest_step_ms = 0;      // the worst single step, which bounds decode
 };
 
 // Never throws: a rejected request or a read failure comes back in `error`.

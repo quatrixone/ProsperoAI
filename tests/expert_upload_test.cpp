@@ -36,7 +36,8 @@ void check(ggml_backend_t backend, ggml_type type, int rows, const char *directo
     assert(write(fd, packed.data(), packed.size()) == static_cast<ssize_t>(packed.size()));
     const ExpertExtent extent{header.size(), row_bytes, static_cast<std::uint64_t>(rows), experts};
     close(fd);
-    ExpertCache cache(path.c_str(), expert_bytes * 2, expert_bytes);
+    ExpertCache cache(path.c_str(), expert_bytes * 2);
+    const auto pool = cache.add_extent(extent, 2);   // two resident experts of eight
     unlink(path.c_str());
 
     auto *ctx = ggml_init({ggml_tensor_overhead() * 16 + ggml_graph_overhead_custom(16, false), nullptr, true});
@@ -64,7 +65,7 @@ void check(ggml_backend_t backend, ggml_type type, int rows, const char *directo
     for (const auto &route : routes) {
         ggml_backend_tensor_set(ids, route.data(), 0, sizeof(route));
         for (auto id : route)
-            upload_expert(cache, extent, id, backend, streamed, id * expert_bytes);
+            upload_expert(cache, pool, id, backend, streamed, id * expert_bytes);
         assert(ggml_backend_graph_compute(backend, graph) == GGML_STATUS_SUCCESS);
         ggml_backend_tensor_get(actual, a.data(), 0, a.size() * sizeof(float));
         ggml_backend_tensor_get(expected, b.data(), 0, b.size() * sizeof(float));
@@ -74,16 +75,17 @@ void check(ggml_backend_t backend, ggml_type type, int rows, const char *directo
         }
     }
     auto stats = cache.stats();
-    assert(stats.pinned_slots == 0 && stats.allocated_bytes <= 2 * expert_bytes);
+    assert(stats.pinned_slots == 0 && stats.allocated_bytes <= 2 * expert_bytes + 128);
+    assert(stats.pools == 1 && stats.slots == 2);
     assert(stats.hits >= 3 && stats.evictions > 0);
     assert(stats.bytes_read == stats.misses * expert_bytes);
     bool rejected = false;
-    try { upload_expert(cache, extent, 0, backend, streamed, packed.size()); }
+    try { upload_expert(cache, pool, 0, backend, streamed, packed.size()); }
     catch (const std::invalid_argument &) { rejected = true; }
     assert(rejected && cache.stats().pinned_slots == 0);
     std::atomic<bool> cancel{true};
     rejected = false;
-    try { upload_expert(cache, extent, 0, backend, streamed, 0, &cancel); }
+    try { upload_expert(cache, pool, 0, backend, streamed, 0, &cancel); }
     catch (const ReadCancelled &) { rejected = true; }
     assert(rejected && cache.stats().pinned_slots == 0);
     std::cout << ggml_backend_name(backend) << " " << ggml_type_name(type)
