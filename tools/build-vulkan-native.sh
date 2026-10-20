@@ -97,6 +97,11 @@ for relative in "${sources[@]}"; do
   inference/adapters/media/kokoro_ps5.cpp)
    media_includes=(-I "$root/.deps/kokoro.cpp/include"
     -I "$root/build/ggml-upstream/include");;
+  inference/streaming/*.cpp)
+   # The streaming buffer type implements a ggml buffer type, so it compiles
+   # against the headers of the ggml tree the runtime libraries are built from.
+   media_includes=(-I "$root/build/ggml-upstream/include"
+    -I "$root/build/ggml-upstream/src");;
  esac
  object="$work/obj/${relative//\//_}.o"
  ninja_inputs=("$root/$relative" "$root/tooling/prospero-clang18")

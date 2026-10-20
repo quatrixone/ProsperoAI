@@ -30,8 +30,11 @@ add_subdirectory("${PROS_LLAMA_SOURCE}" llama)
 # Bounded expert I/O is built on both platforms, but is not connected to the
 # production loader until scheduler integration passes. The PS5 mmap guard stays.
 add_library(prospero-expert-cache STATIC "${PROS_ROOT}/inference/streaming/expert_cache.cpp"
-    "${PROS_ROOT}/inference/streaming/expert_probe.cpp")
+    "${PROS_ROOT}/inference/streaming/expert_probe.cpp"
+    "${PROS_ROOT}/inference/streaming/expert_stream.cpp")
 target_include_directories(prospero-expert-cache PUBLIC "${PROS_ROOT}/inference/streaming")
+# ggml-backend-impl.h: the streaming buffer type implements a ggml buffer type.
+target_include_directories(prospero-expert-cache PRIVATE "${PROS_GGML_SOURCE}/src")
 target_compile_features(prospero-expert-cache PUBLIC cxx_std_17)
 target_link_libraries(prospero-expert-cache PUBLIC ggml-base)
 set(SD_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -104,6 +107,10 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_executable(expert-upload-test "${PROS_ROOT}/tests/expert_upload_test.cpp")
     target_link_libraries(expert-upload-test PRIVATE prospero-expert-cache ggml ggml-cpu ggml-vulkan)
     target_compile_options(expert-upload-test PRIVATE -UNDEBUG)
+    add_executable(expert-stream-test "${PROS_ROOT}/tests/expert_stream_test.cpp")
+    target_link_libraries(expert-stream-test PRIVATE prospero-expert-cache ggml ggml-cpu ggml-vulkan)
+    target_include_directories(expert-stream-test PRIVATE "${PROS_GGML_SOURCE}/src")
+    target_compile_options(expert-stream-test PRIVATE -UNDEBUG)
     add_executable(gemma4-route-trace "${PROS_ROOT}/tools/gemma4-route-trace.cpp")
     target_link_libraries(gemma4-route-trace PRIVATE llama ggml ggml-cpu)
     add_executable(expert-probe-test "${PROS_ROOT}/tests/expert_probe_test.cpp")

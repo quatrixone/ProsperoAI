@@ -69,6 +69,10 @@ void check(ggml_backend_t backend, ggml_type type, int rows, const char *directo
         assert(ggml_backend_graph_compute(backend, graph) == GGML_STATUS_SUCCESS);
         ggml_backend_tensor_get(actual, a.data(), 0, a.size() * sizeof(float));
         ggml_backend_tensor_get(expected, b.data(), 0, b.size() * sizeof(float));
+        // Comparing two silent zeros is not parity: require real output first.
+        double energy = 0;
+        for (std::size_t i = 0; i < a.size(); ++i) energy += std::abs(b[i]);
+        assert(energy > 1e-3 * double(a.size()));
         for (std::size_t i = 0; i < a.size(); ++i) {
             assert(std::isfinite(a[i]) && std::isfinite(b[i]));
             assert(std::abs(a[i] - b[i]) <= 1e-5f * std::max(1.0f, std::abs(b[i])));

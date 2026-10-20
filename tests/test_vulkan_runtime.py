@@ -43,8 +43,8 @@ class VulkanRuntimeTests(unittest.TestCase):
 
     def test_bounded_expert_cache_and_routed_upload(self):
         """Bounded expert reads must match fully resident weights on CPU and Vulkan."""
-        cache, upload, probe = self.require('expert-cache-test', 'expert-upload-test',
-                                            'expert-probe-test')
+        cache, upload, probe, stream = self.require('expert-cache-test', 'expert-upload-test',
+                                                    'expert-probe-test', 'expert-stream-test')
         environment = host_environment()
         with tempfile.TemporaryDirectory(prefix='prospero-expert-') as fixtures:
             subprocess.run([str(cache), fixtures], check=True, env=environment, timeout=300)
@@ -53,6 +53,9 @@ class VulkanRuntimeTests(unittest.TestCase):
                 with self.subTest(backend=backend):
                     subprocess.run([str(upload), backend, fixtures], check=True,
                                    env=environment, timeout=900)
+            # Routed experts reaching Vulkan through the scheduler's expert hook,
+            # with the weight tensor never resident.
+            subprocess.run([str(stream), fixtures], check=True, env=environment, timeout=900)
 
     def test_required_build_cannot_skip_missing_artifacts(self):
         with mock.patch.dict(os.environ, {'PROSPERO_REQUIRE_VULKAN_RUNTIME': '1'}), \
