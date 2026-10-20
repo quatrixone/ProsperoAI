@@ -46,3 +46,13 @@ reuse. ProsperoAI should keep GGUF and its Vulkan quantized kernels.
 
 This PR adds S1 as an opt-in PS5 experiment and keeps S0's GGUF budget report.
 It does not yet add the bounded expert cache or claim Gemma 4 runs in 2 GB.
+
+## Initial Q4_K_M size probe
+
+The text GGUF `SoAIHQ/gemma-4-26B-A4B-it-GGUF`, file
+`gemma-4-26B-A4B-it-Q4_K_M.gguf`, is 16,796,018,080 bytes with SHA-256
+`d13ab520dd546f6392bdcdcebba45efa73a43a36ace9a387f223f5d87b906cac`.
+The S0 parser found 128 experts, 8 used per token and 30 routed-expert layers.
+The uncached expert-read lower bound is 945,635,328 bytes per token, with a
+largest single expert extent of about 4.14 MiB. These are file-layout estimates;
+they do not measure the OS page cache, CPU residency, Vulkan memory or latency.
