@@ -56,3 +56,22 @@ The S0 parser found 128 experts, 8 used per token and 30 routed-expert layers.
 The uncached expert-read lower bound is 945,635,328 bytes per token, with a
 largest single expert extent of about 4.14 MiB. These are file-layout estimates;
 they do not measure the OS page cache, CPU residency, Vulkan memory or latency.
+
+## S1 first PS5 attempt — failed, 2026-10-20
+
+The opt-in build discovered the GGUF and entered Gemma 4 lazy mode. A one-token
+generation request did not return, and `/api/models/memory` never reported a loaded
+model. This does not prove successful model loading or inference.
+
+The test folder also contained an old `dev/request.txt` UI script from a MiniCPM5
+test. It switched models, timed out waiting for readiness, then requested app close
+while the HTTP generation was still running. The app trace recorded `HUI quit requested`;
+klog recorded a fatal user-thread signal and `SCE_SYSCORE_EVENT_APP_CRASH`. The
+console became unresponsive and required a restart. The exact fatal signal/backtrace
+was not captured, so the close race is a strong lead, not a proven root cause.
+
+The test build now ignores `dev/request.txt` when the Gemma streaming marker is present.
+The UI also blocks app close while an HTTP generation is active, and the main loop waits
+for active generations before teardown. These are crash-risk guards; they do not make
+Gemma's memory use safe, and S1 remains unverified. Do not retry Gemma loading until the
+console has restarted and the guarded build is installed on the test title.
