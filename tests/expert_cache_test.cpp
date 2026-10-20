@@ -13,13 +13,22 @@
 
 using namespace prospero_streaming;
 
-template<class E, class F> void rejects(F f) {
+template <class E, class F> void rejects(F f)
+{
     bool caught = false;
-    try { f(); } catch (const E &) { caught = true; }
+    try
+    {
+        f();
+    }
+    catch (const E &)
+    {
+        caught = true;
+    }
     assert(caught);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     assert(argc == 2);
     std::string path = std::string(argv[1]) + "/expert-cache-fixture-XXXXXX";
     int fd = mkstemp(path.data());
@@ -27,11 +36,12 @@ int main(int argc, char **argv) {
     constexpr std::size_t header = 96, expert_bytes = 512, experts = 8;
     constexpr std::size_t scale_bytes = 4, matrix_end = header + expert_bytes * experts;
     std::vector<std::uint8_t> file(matrix_end + scale_bytes * experts);
-    for (std::size_t i = 0; i < file.size(); ++i) file[i] = (i * 71 + i / 101) % 251;
+    for (std::size_t i = 0; i < file.size(); ++i)
+        file[i] = (i * 71 + i / 101) % 251;
     assert(write(fd, file.data(), file.size()) == static_cast<ssize_t>(file.size()));
     assert(lseek(fd, 17, SEEK_SET) == 17);
 
-    const ExpertExtent matrix{header, 128, 4, experts};          // 512 bytes per expert
+    const ExpertExtent matrix{header, 128, 4, experts};            // 512 bytes per expert
     const ExpertExtent scale{matrix_end, scale_bytes, 1, experts}; // 4 bytes per expert
     const auto *matrix_data = file.data() + header;
     const auto *scale_data = file.data() + matrix_end;
@@ -46,7 +56,7 @@ int main(int argc, char **argv) {
     assert(cache.bytes_per_expert(scale_pool) == scale_bytes);
     assert(cache.stats().allocated_bytes == 2 * expert_bytes + 4 * 64);
     assert(cache.stats().slots == 6 && cache.stats().pools == 2);
-    rejects<CacheBudgetExceeded>([&] { cache.add_extent(matrix, 1); });  // budget is spent
+    rejects<CacheBudgetExceeded>([&] { cache.add_extent(matrix, 1); }); // budget is spent
     rejects<std::invalid_argument>([&] { cache.add_extent(matrix, 0); });
     rejects<std::invalid_argument>([&] { cache.bytes_per_expert(7); });
 
@@ -60,7 +70,8 @@ int main(int argc, char **argv) {
     assert(same.data() == original);
 
     // Pools are independent: reading every scale expert evicts no matrix slot.
-    for (std::uint64_t expert = 0; expert < experts; ++expert) {
+    for (std::uint64_t expert = 0; expert < experts; ++expert)
+    {
         auto lease = cache.acquire(scale_pool, expert);
         assert(lease.size() == scale_bytes);
         assert(!std::memcmp(lease.data(), scale_data + expert * scale_bytes, scale_bytes));
@@ -72,7 +83,7 @@ int main(int argc, char **argv) {
     first = {};
     rejects<CacheBusy>([&] { cache.acquire(matrix_pool, 7); }); // `same` still pins expert 3
     second = {};
-    auto seventh = cache.acquire(matrix_pool, 7);               // evicts expert 0, the oldest
+    auto seventh = cache.acquire(matrix_pool, 7); // evicts expert 0, the oldest
     assert(same.data() == original);
     assert(cache.stats().pinned_slots == 2);
     same = {};
@@ -81,13 +92,19 @@ int main(int argc, char **argv) {
 
     // Concurrent clients may share a lease, but a pinned slot is never evicted.
     std::vector<std::thread> clients;
-    for (int i = 0; i < 8; ++i) clients.emplace_back([&] {
-        for (int j = 0; j < 100; ++j) {
-            auto lease = cache.acquire(matrix_pool, 7);
-            assert(!std::memcmp(lease.data(), matrix_data + 7 * expert_bytes, expert_bytes));
-        }
-    });
-    for (auto &client : clients) client.join();
+    for (int i = 0; i < 8; ++i)
+        clients.emplace_back(
+            [&]
+            {
+                for (int j = 0; j < 100; ++j)
+                {
+                    auto lease = cache.acquire(matrix_pool, 7);
+                    assert(
+                        !std::memcmp(lease.data(), matrix_data + 7 * expert_bytes, expert_bytes));
+                }
+            });
+    for (auto &client : clients)
+        client.join();
     const auto busy = cache.stats();
     // One hit for the repeated expert 3, then 800 from the threads. The scale
     // sweep of eight experts through four slots is eight misses and four
@@ -99,12 +116,10 @@ int main(int argc, char **argv) {
     rejects<std::invalid_argument>([&] { cache.acquire(9, 0); });
     rejects<std::invalid_argument>([&] { cache.add_extent({header, 0, 4, experts}, 1); });
     rejects<std::invalid_argument>([&] { cache.add_extent({header, 1 << 20, 4, experts}, 1); });
-    rejects<std::invalid_argument>([&] {
-        cache.add_extent({std::numeric_limits<std::uint64_t>::max(), 128, 4, experts}, 1);
-    });
-    rejects<std::invalid_argument>([&] {
-        cache.add_extent({0, std::numeric_limits<std::uint64_t>::max(), 4, experts}, 1);
-    });
+    rejects<std::invalid_argument>(
+        [&] { cache.add_extent({std::numeric_limits<std::uint64_t>::max(), 128, 4, experts}, 1); });
+    rejects<std::invalid_argument>(
+        [&] { cache.add_extent({0, std::numeric_limits<std::uint64_t>::max(), 4, experts}, 1); });
     std::atomic<bool> cancelled{true};
     rejects<ReadCancelled>([&] { cache.acquire(matrix_pool, 7, &cancelled); }); // hits also cancel
     rejects<ReadCancelled>([&] { cache.acquire(matrix_pool, 1, &cancelled); });
@@ -134,9 +149,8 @@ int main(int argc, char **argv) {
     }
     assert(!std::memcmp(survivor.data(), matrix_data + 2 * expert_bytes, expert_bytes));
     rejects<std::invalid_argument>([&] { ExpertCache(-1, expert_bytes); });
-    rejects<std::system_error>([&] {
-        ExpertCache((std::string(argv[1]) + "/absent.gguf").c_str(), expert_bytes);
-    });
+    rejects<std::system_error>(
+        [&] { ExpertCache((std::string(argv[1]) + "/absent.gguf").c_str(), expert_bytes); });
     // Parallel reads must return the same bytes, and a cancelled or failed range
     // must not publish a slot. Workers are rejected outside 1..32.
     rejects<std::invalid_argument>([&] { ExpertCache(path.c_str(), expert_bytes, 0); });
@@ -145,17 +159,20 @@ int main(int argc, char **argv) {
         const std::string parallel_path = std::string(argv[1]) + "/expert-cache-parallel";
         const int parallel_fd = open(parallel_path.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0600);
         assert(parallel_fd >= 0);
-        constexpr std::size_t wide_rows = 8192;                    // 1 MiB per expert
+        constexpr std::size_t wide_rows = 8192; // 1 MiB per expert
         std::vector<std::uint8_t> wide(header + 128 * wide_rows * experts);
-        for (std::size_t i = 0; i < wide.size(); ++i) wide[i] = (i * 37 + i / 97) % 253;
+        for (std::size_t i = 0; i < wide.size(); ++i)
+            wide[i] = (i * 37 + i / 97) % 253;
         assert(write(parallel_fd, wide.data(), wide.size()) == static_cast<ssize_t>(wide.size()));
         const ExpertExtent extent{header, 128, wide_rows, experts};
         const auto expert_width = 128 * wide_rows;
-        for (const unsigned workers : {1u, 2u, 4u, 8u}) {
+        for (const unsigned workers : {1u, 2u, 4u, 8u})
+        {
             ExpertCache parallel(parallel_fd, 2 * expert_width, workers);
             assert(parallel.stats().read_workers == workers);
             const auto pool = parallel.add_extent(extent, 2);
-            for (std::uint64_t expert : {5u, 2u, 5u}) {
+            for (std::uint64_t expert : {5u, 2u, 5u})
+            {
                 auto lease = parallel.acquire(pool, expert);
                 assert(lease.size() == expert_width);
                 assert(!std::memcmp(lease.data(), wide.data() + header + expert * expert_width,
@@ -165,7 +182,7 @@ int main(int argc, char **argv) {
             std::atomic<bool> stop{true};
             rejects<ReadCancelled>([&] { parallel.acquire(pool, 7, &stop); });
             assert(parallel.stats().pinned_slots == 0);
-            auto after_cancel = parallel.acquire(pool, 7);        // the cancelled slot is refilled
+            auto after_cancel = parallel.acquire(pool, 7); // the cancelled slot is refilled
             assert(!std::memcmp(after_cancel.data(), wide.data() + header + 7 * expert_width,
                                 expert_width));
         }

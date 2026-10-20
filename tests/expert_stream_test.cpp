@@ -20,11 +20,13 @@
 
 using namespace prospero_streaming;
 
-namespace {
+namespace
+{
 constexpr int columns = 256, rows = 64, experts = 16, selected = 4;
 
 std::string write_weights(const char *directory, ggml_type type, std::vector<std::uint8_t> &packed,
-                          std::uint64_t header) {
+                          std::uint64_t header)
+{
     std::vector<float> values(std::size_t(columns) * rows * experts);
     for (std::size_t i = 0; i < values.size(); ++i)
         values[i] = std::sin(float(i) * .011f) * .6f + std::cos(float(i) * .003f) * .3f;
@@ -42,7 +44,8 @@ std::string write_weights(const char *directory, ggml_type type, std::vector<std
 }
 } // namespace
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     assert(argc == 2);
     constexpr std::uint64_t header = 128;
     const auto type = GGML_TYPE_Q4_K;
@@ -63,13 +66,16 @@ int main(int argc, char **argv) {
     const ExpertExtent extent{header, static_cast<std::uint64_t>(ggml_row_size(type, columns)),
                               rows, experts};
     unsigned resolved = 0;
-    ExpertStream stream(cache, [&](const std::string &name, StreamedTensor &out) {
-        if (name != "streamed_experts") return false;
-        out.extent = extent;
-        out.slots = 4;
-        ++resolved;
-        return true;
-    });
+    ExpertStream stream(cache,
+                        [&](const std::string &name, StreamedTensor &out)
+                        {
+                            if (name != "streamed_experts")
+                                return false;
+                            out.extent = extent;
+                            out.slots = 4;
+                            ++resolved;
+                            return true;
+                        });
     stream.install();
 
     // Room for both graphs: one graph's worth of context silently aliased them.
@@ -84,8 +90,8 @@ int main(int argc, char **argv) {
     auto *resident = ggml_new_tensor_3d(weights_ctx, type, columns, rows, experts);
     ggml_set_name(resident, "resident_experts");
 
-    auto *streamed_buffer = ggml_backend_buft_alloc_buffer(stream.buffer_type(),
-                                                           ggml_nbytes(streamed) + 64);
+    auto *streamed_buffer =
+        ggml_backend_buft_alloc_buffer(stream.buffer_type(), ggml_nbytes(streamed) + 64);
     assert(streamed_buffer);
     ggml_backend_buffer_set_usage(streamed_buffer, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
     auto allocator = ggml_tallocr_new(streamed_buffer);
@@ -106,18 +112,24 @@ int main(int argc, char **argv) {
     assert(sched);
 
     std::array<float, columns> x{};
-    for (int i = 0; i < columns; ++i) x[i] = std::sin(i * .21f);
+    for (int i = 0; i < columns; ++i)
+        x[i] = std::sin(i * .21f);
     std::vector<float> a(std::size_t(rows) * selected), b(a.size());
-    const std::array<std::array<std::int32_t, selected>, 6> routes{{
-        {0, 1, 2, 3}, {0, 1, 2, 3}, {12, 13, 14, 15}, {3, 7, 11, 15}, {1, 2, 3, 4}, {15, 0, 8, 4}}};
+    const std::array<std::array<std::int32_t, selected>, 6> routes{{{0, 1, 2, 3},
+                                                                    {0, 1, 2, 3},
+                                                                    {12, 13, 14, 15},
+                                                                    {3, 7, 11, 15},
+                                                                    {1, 2, 3, 4},
+                                                                    {15, 0, 8, 4}}};
 
     // One MUL_MAT_ID per graph: the scheduler replaces the expert copy only when
     // the streamed weights are src[0] of the split's first node, which is the
     // shape of llama.cpp's MoE graphs.
     const auto run = [&](ggml_tensor *weights, std::vector<float> &out,
-                         const std::array<std::int32_t, selected> &route) {
-        auto *ctx = ggml_init({ggml_tensor_overhead() * 8 + ggml_graph_overhead_custom(8, false),
-                               nullptr, true});
+                         const std::array<std::int32_t, selected> &route)
+    {
+        auto *ctx = ggml_init(
+            {ggml_tensor_overhead() * 8 + ggml_graph_overhead_custom(8, false), nullptr, true});
         assert(ctx);
         auto *input = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, columns, 1, 1);
         ggml_set_name(input, "input");
@@ -138,22 +150,26 @@ int main(int argc, char **argv) {
         ggml_free(ctx);
     };
 
-    for (const auto &route : routes) {
-        stream.begin_graph(1);        // one shape throughout: residency may persist
+    for (const auto &route : routes)
+    {
+        stream.begin_graph(1); // one shape throughout: residency may persist
         run(streamed, a, route);
         run(resident, b, route);
         // Comparing two silent zeros is not parity: require real output first.
         double route_energy = 0;
-        for (std::size_t i = 0; i < a.size(); ++i) route_energy += std::abs(b[i]);
+        for (std::size_t i = 0; i < a.size(); ++i)
+            route_energy += std::abs(b[i]);
         assert(route_energy > 1e-3 * double(a.size()));
-        for (std::size_t i = 0; i < a.size(); ++i) {
+        for (std::size_t i = 0; i < a.size(); ++i)
+        {
             assert(std::isfinite(a[i]) && std::isfinite(b[i]));
             assert(std::abs(a[i] - b[i]) <= 1e-4f * std::max(1.0f, std::abs(b[i])));
         }
     }
     const auto served = stream.stats();
     const auto cached = cache.stats();
-    assert(served.copies > 0 && served.experts > 0 && served.bytes == served.experts * expert_bytes);
+    assert(served.copies > 0 && served.experts > 0 &&
+           served.bytes == served.experts * expert_bytes);
     // The second route repeats the first, so those experts must not be uploaded
     // again, and parity above proves the skipped ones were really still there.
     assert(served.skipped >= selected);
@@ -171,7 +187,8 @@ int main(int argc, char **argv) {
     assert(after_invalidation.experts >= before_invalidation.experts + selected);
     assert(after_invalidation.skipped == before_invalidation.skipped);
     double energy = 0;
-    for (std::size_t i = 0; i < a.size(); ++i) energy += std::abs(b[i]);
+    for (std::size_t i = 0; i < a.size(); ++i)
+        energy += std::abs(b[i]);
     assert(energy > 1e-3 * double(a.size()));
     for (std::size_t i = 0; i < a.size(); ++i)
         assert(std::abs(a[i] - b[i]) <= 1e-4f * std::max(1.0f, std::abs(b[i])));
@@ -179,7 +196,7 @@ int main(int argc, char **argv) {
     // before it is asked for, which is the point of the GPU-side record.
     assert(cached.misses > 0 && cached.hits + cached.misses <= served.experts + served.skipped);
     assert(cached.allocated_bytes <= 4 * expert_bytes + 64);
-    stream.drain();                                     // in-flight copies hold their leases
+    stream.drain(); // in-flight copies hold their leases
     assert(cache.stats().pinned_slots == 0);
 
     // With the hook uninstalled the scheduler would read the fake address, so a
@@ -190,12 +207,12 @@ int main(int argc, char **argv) {
     std::printf("expert stream: routed parity through the scheduler; %llu experts uploaded, "
                 "%llu skipped as already resident on the GPU, %llu copies, cache %zu bytes, "
                 "%llu hits / %llu misses, events=%s, stalls=%llu\n",
-                (unsigned long long) after_invalidation.experts,
-                (unsigned long long) after_invalidation.skipped,
-                (unsigned long long) after_invalidation.copies, cached.allocated_bytes,
-                (unsigned long long) cached.hits, (unsigned long long) cached.misses,
+                (unsigned long long)after_invalidation.experts,
+                (unsigned long long)after_invalidation.skipped,
+                (unsigned long long)after_invalidation.copies, cached.allocated_bytes,
+                (unsigned long long)cached.hits, (unsigned long long)cached.misses,
                 after_invalidation.events ? "yes" : "no",
-                (unsigned long long) after_invalidation.stalls);
+                (unsigned long long)after_invalidation.stalls);
     ggml_backend_sched_free(sched);
     ggml_backend_buffer_free(streamed_buffer);
     ggml_backend_buffer_free(resident_buffer);
