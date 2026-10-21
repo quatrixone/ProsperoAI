@@ -47,7 +47,10 @@ sources=(src/kv_budget.cpp src/prefix_reuse.cpp src/main.cpp src/native_app.cpp 
  src/agc_lifecycle.cpp inference/router.cpp inference/adapters/registry.cpp
  inference/adapters/media/stable_diffusion_ps5.cpp inference/adapters/media/stable_audio_ps5.cpp
  inference/adapters/media/kokoro_ps5.cpp inference/adapters/media/ace_step_ps5.cpp
- inference/adapters/media/chatterbox_ps5.cpp
+ inference/adapters/media/chatterbox_ps5.cpp inference/adapters/media/yue2_ps5.cpp
+ inference/adapters/media/sheetsage_ps5.cpp
+ inference/adapters/media/stems_ps5.cpp
+ tools/yue2-ggml-compat.cpp
  vulkan/storage.cpp vulkan/storage_paths.cpp vulkan/elevation/elevation.cpp vulkan/debug_tee.cpp src/debug_log.cpp
  src/native_ui_update.cpp vulkan/update_ps5.cpp
  inference/adapters/llama/vulkan.cpp vulkan/http_server.cpp vulkan/model_downloader_ps5.cpp
@@ -81,12 +84,20 @@ for relative in "${sources[@]}"; do
    media_includes=(-I "$root/build/audio-cpp-upstream/include");;
   inference/adapters/media/ace_step_ps5.cpp)
    media_includes=(-I "$root/build/audio-cpp-upstream/include");;
+  inference/adapters/media/yue2_ps5.cpp)
+   media_includes=(-I "$root/build/audio-cpp-upstream/include");;
+  inference/adapters/media/sheetsage_ps5.cpp)
+   media_includes=(-I "$root/build/audio-cpp-upstream/include");;
+  inference/adapters/media/stems_ps5.cpp)
+   media_includes=(-I "$root/build/audio-cpp-upstream/include");;
   inference/adapters/media/chatterbox_ps5.cpp)
    media_includes=(-I "$root/build/audio-cpp-upstream/include"
     -I "$root/.deps/pacbrew/v0.40.2/sysroot/user/homebrew/include");;
   inference/adapters/media/kokoro_ps5.cpp)
    media_includes=(-I "$root/.deps/kokoro.cpp/include"
     -I "$root/build/ggml-upstream/include");;
+  tools/yue2-ggml-compat.cpp)
+   media_includes=(-I "$root/build/ggml-upstream/include");;
  esac
  object="$work/obj/${relative//\//_}.o"
  ninja_inputs=("$root/$relative" "$root/tooling/prospero-clang18")

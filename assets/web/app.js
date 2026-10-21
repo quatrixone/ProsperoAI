@@ -281,13 +281,17 @@ function extractMedia(text){const paths=[...text.matchAll(/\/download0\/[^\s]+\.
 function decodeTGA(buffer){const d=new DataView(buffer);if(d.getUint8(2)!==2||d.getUint8(16)!==32)return null;const idLength=d.getUint8(0),colorMapType=d.getUint8(1),colorMapLength=d.getUint16(5,true),colorMapDepth=d.getUint8(7),width=d.getUint16(12,true),height=d.getUint16(14,true),topToBottom=(d.getUint8(17)&0x20)!==0;const colorMapBytes=colorMapType?Math.ceil(colorMapDepth/8)*colorMapLength:0,offset=18+idLength+colorMapBytes;if(width<=0||height<=0||offset+width*height*4>buffer.byteLength)return null;const out=new Uint8ClampedArray(width*height*4);for(let y=0;y<height;y++){const row=topToBottom?y:height-1-y;for(let x=0;x<width;x++){const si=offset+(y*width+x)*4,di=(row*width+x)*4;out[di]=d.getUint8(si+2);out[di+1]=d.getUint8(si+1);out[di+2]=d.getUint8(si);out[di+3]=d.getUint8(si+3);}}return{width,height,data:out};}
 function renderImageMedia(el,blob,path){const url=URL.createObjectURL(blob),filename=path.split('/').at(-1)||'prosperoai-image.png';if(path.endsWith('.png')){const image=new Image();image.src=url;image.alt='Generated image';image.className='message-media';el.append(image);const link=document.createElement('a');link.href=url;link.download=filename;link.className='message-media-link';link.textContent='Download image';el.append(link);return;}blob.arrayBuffer().then(buf=>{const decoded=decodeTGA(buf);if(!decoded)return;const canvas=document.createElement('canvas');canvas.width=decoded.width;canvas.height=decoded.height;canvas.className='message-media';canvas.getContext('2d').putImageData(new ImageData(decoded.data,decoded.width,decoded.height),0,0);el.append(canvas);canvas.toBlob(png=>{if(!png)return;const link=document.createElement('a');link.href=URL.createObjectURL(png);link.download=filename.replace(/\.tga$/i,'.png');link.className='message-media-link';link.textContent='Download image';el.append(link);});}).catch(()=>{});}
 function renderAudioMedia(el,blob,path){const url=URL.createObjectURL(blob);const audio=document.createElement('audio');audio.controls=true;audio.src=url;audio.className='message-media';el.append(audio);const link=document.createElement('a');link.href=url;link.download=path.split('/').at(-1)||'prosperoai-audio.wav';link.className='message-media-link';link.textContent='Download audio';el.append(link);}
-function appendMedia(el,media){api(media.path).then(r=>r.blob()).then(blob=>{if(media.kind==='image')renderImageMedia(el,blob,media.path);else renderAudioMedia(el,blob,media.path);}).catch(()=>{});}
-function addMessage(message){const el=document.createElement('div');el.className=`message ${message.role==='user'?'user':'assistant'}`;const media=message.role!=='user'&&extractMedia(message.content||'');if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media);}else el.textContent=message.content||'';$('messages').append(el);return el;}
+function appendMedia(el,media,text){api(media.path).then(r=>r.blob()).then(blob=>{if(media.kind==='image')renderImageMedia(el,blob,media.path);else renderAudioMedia(el,blob,media.path);}).catch(()=>{});if(text)appendArtifacts(el,text,media.path);}
+// Runs can attach extra files next to the main media (YuE2 score.abc, semantic.json).
+// They are listed in the response text; render a plain download link for each.
+function extractArtifacts(text,primary){return [...new Set([...text.matchAll(/\/download0\/[^\s,]+\.(?:abc|json|mid)/g)].map(m=>m[0]))].filter(p=>p!==primary);}
+function appendArtifacts(el,text,primary){for(const path of extractArtifacts(text,primary))api(path).then(r=>r.ok?r.blob():Promise.reject()).then(blob=>{const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=path.split('/').at(-1)||'artifact';link.className='message-media-link';link.textContent='Download '+(path.split('/').at(-1));el.append(link);}).catch(()=>{});}
+function addMessage(message){const el=document.createElement('div');el.className=`message ${message.role==='user'?'user':'assistant'}`;const media=message.role!=='user'&&extractMedia(message.content||'');if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,message.content||'');}else el.textContent=message.content||'';$('messages').append(el);return el;}
 function showGenerationStats(el,usage,isText,fallbackSeconds){const rate=Number(usage?.tokens_per_second),seconds=Number(usage?.generation_time_ms)/1000||fallbackSeconds;if(isText&&Number.isFinite(rate)&&rate>0){const meta=document.createElement('div');meta.className='message-metrics';meta.textContent=`${rate.toFixed(1)} tok/s · ${seconds.toFixed(1)} s`;el.append(meta);}else if(!isText&&Number.isFinite(seconds)&&seconds>0){const meta=document.createElement('div');meta.className='message-metrics';meta.textContent=`Generated in ${seconds.toFixed(1)} s`;el.append(meta);}}
 function renderMessages(){$('messages').replaceChildren();for(const message of current?.messages||[])addMessage(message);$('messages').scrollTop=$('messages').scrollHeight;}
 $('prompt').oninput=()=>{if($('prompt').value.trim()&&currentModelChosen)void prepareConversationModel().catch(error=>{$('feedback').textContent=error.message;});$('prompt').style.height='auto';$('prompt').style.height=Math.min(180,$('prompt').scrollHeight)+'px';};$('prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&matchMedia('(min-width:701px)').matches){e.preventDefault();$('composer').requestSubmit();}};
 $('composer').onsubmit=async e=>{e.preventDefault();if(controller){controller.abort();return;}const text=$('prompt').value.trim();if(!text)return;if(!current)newConversation();if(!currentModelChosen){if(!modelChooser.value){$('feedback').textContent='Choose a model for this conversation before sending.';modelChooser.focus();return;}await chooseInstalledModel(modelChooser.value);if(!currentModelChosen)return;}if(submitting)return;submitting=true;const conversation=current;try{await prepareConversationModel();}catch(error){$('feedback').textContent=error.message;return;}finally{submitting=false;}if(current!==conversation)return;if(!conversations.includes(conversation))conversations.unshift(conversation);conversation.messages.push({role:'user',content:text});if(conversation.messages.length===1)conversation.title=text.slice(0,70);conversation.updatedAt=Date.now();$('prompt').value='';$('prompt').style.height='auto';openChat();renderHistory();addMessage(conversation.messages.at(-1));const answer={role:'assistant',content:''};const el=addMessage(answer);controller=new AbortController();$('send').textContent='■';$('send').setAttribute('aria-label','Stop response');$('prompt').disabled=true;$('feedback').textContent='Thinking…';const start=performance.now();const selectedModel=models.find(model=>model.id===conversation.model);const isTextModel=!selectedModel?.purpose||modelKind(selectedModel)===0;let usage=null,received=false,requestMessages=conversation.messages;try{await persistConversation(conversation);requestMessages=await prosperoPrepareSearch(text,requestMessages,isTextModel);const response=await api('/v1/chat/completions',{method:'POST',signal:controller.signal,body:JSON.stringify({model:conversation.model,messages:requestMessages,stream:isTextModel,stream_options:isTextModel?{include_usage:true}:undefined,temperature:preferences.temperature})});if(!response.headers.get('Content-Type')?.includes('text/event-stream')){
-    const result=await response.json();usage=result.usage||null;answer.content=result.choices?.[0]?.message?.content||'';received=Boolean(answer.content);const media=extractMedia(answer.content);if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media);}else el.textContent=answer.content;
+    const result=await response.json();usage=result.usage||null;answer.content=result.choices?.[0]?.message?.content||'';received=Boolean(answer.content);const media=extractMedia(answer.content);if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,answer.content);}else el.textContent=answer.content;
 }else{
 const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';const event=block=>{const data=block.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');if(!data||data==='[DONE]')return;const part=JSON.parse(data);if(part.error)throw Error(part.error.message||'The response could not be completed.');if(part.usage)usage=part.usage;const token=part.choices?.[0]?.delta?.content;if(typeof token==='string'){received=true;answer.content+=token;el.textContent=answer.content;const log=$('messages');if(log.scrollHeight-log.scrollTop-log.clientHeight<180)log.scrollTop=log.scrollHeight;}};while(true){const {value,done}=await reader.read();pending+=decoder.decode(value||new Uint8Array(),{stream:!done}).replace(/\r\n/g,'\n');let split;while((split=pending.indexOf('\n\n'))>=0){event(pending.slice(0,split));pending=pending.slice(split+2);}if(done){if(pending.trim())event(pending);break;}}}
 if(!received)throw Error('The model returned an empty response.');showGenerationStats(el,usage,isTextModel,(performance.now()-start)/1000);$('feedback').textContent=`Completed · ${((performance.now()-start)/1000).toFixed(1)}s`;}catch(error){$('feedback').textContent=error.name==='AbortError'?'Response stopped.':error.message;if(!received)el.remove();}finally{if(answer.content)conversation.messages.push(answer);conversation.updatedAt=Date.now();save('prospero-conversations',conversations.slice(0,50));controller=null;$('send').textContent='↑';$('send').setAttribute('aria-label','Send message');$('prompt').disabled=false;renderHistory();void persistConversation(conversation);}};
@@ -300,7 +304,7 @@ document.addEventListener('click',e=>{if(e.target.closest('button'))sound();});
 for(const button of document.querySelectorAll('[data-category]'))button.onclick=()=>{for(const b of document.querySelectorAll('[data-category]')){const chosen=b===button;b.classList.toggle('selected',chosen);b.setAttribute('aria-selected',String(chosen));$('setting-'+b.dataset.category).hidden=!chosen;}};
 $('preview-send').onclick=()=>{newConversation();$('prompt').value='Tell me a story.';$('prompt').focus();};
 
-let savedKokoroVoice='af_heart',savedChatterboxVoice='cemo',savedChatterboxLanguage='en',customChatterboxVoiceAvailable=false,savedAudioDuration=0,savedAudioSeed=42,savedSdSeed=42,savedSdSize='0,0',savedSdUpscale=false;
+let savedKokoroVoice='af_heart',savedChatterboxVoice='cemo',savedChatterboxLanguage='en',customChatterboxVoiceAvailable=false,savedAudioDuration=0,savedAudioSeed=42,savedAudioOptions='',savedSdSeed=42,savedSdSize='0,0',savedSdUpscale=false;
 let savedWebSearch=false,savedWebSearchTimeout=15,savedSearchScopes=511;
 // Scope bit order follows the search engine: web through image.
 const SEARCH_SCOPES=[['web','General web'],['code','Code hosting'],['video','Video'],['reference','Reference'],['qa','Question sites'],['package','Packages'],['paper','Papers'],['music','Music'],['image','Images']];
@@ -311,7 +315,7 @@ function currentSearchScopeMask(){const checked={};for(const [id] of SEARCH_SCOP
 let runtimeSettingsQueue=Promise.resolve();
 function runtimeSettings(change){const result=runtimeSettingsQueue.then(()=>applyRuntimeSettings(change));runtimeSettingsQueue=result.catch(()=>{});return result;}
 async function applyRuntimeSettings(change) {
-  const controls = ['runtime-context','length','runtime-thinking','runtime-idle-unload','audio-duration','audio-seed','sd-seed','sd-size','sd-upscale','kokoro-voice','workspace-voice','web-search-enabled','web-search-timeout'].map($).filter(Boolean);
+  const controls = ['runtime-context','length','runtime-thinking','runtime-idle-unload','audio-duration','audio-seed','audio-options','sd-seed','sd-size','sd-upscale','kokoro-voice','workspace-voice','web-search-enabled','web-search-timeout'].map($).filter(Boolean);
   controls.forEach(el => el.disabled = true);
   try {
     const response = await api('/api/settings/runtime', change ? {method:'POST',body:JSON.stringify(change)} : {});
@@ -325,6 +329,8 @@ async function applyRuntimeSettings(change) {
     savedAudioDuration=Number(settings.audio_duration_sec)||0;
     if($('audio-seed'))$('audio-seed').value=String(settings.audio_seed??42);
     savedAudioSeed=Number(settings.audio_seed??42);
+    if($('audio-options'))$('audio-options').value=settings.audio_options||'';
+    savedAudioOptions=settings.audio_options||'';
     if($('sd-seed'))$('sd-seed').value=String(settings.sd_seed??42);
     savedSdSeed=Number(settings.sd_seed??42);
     if($('sd-size')){const size=`${Number(settings.sd_width)||0},${Number(settings.sd_height)||0}`;if(![...$('sd-size').options].some(option=>option.value===size))$('sd-size').add(new Option(`${settings.sd_width} × ${settings.sd_height}`,size));$('sd-size').value=size;savedSdSize=size;}
@@ -347,6 +353,7 @@ async function applyRuntimeSettings(change) {
   } catch (error) {
     if(change?.audio_duration_sec!==undefined&&$('audio-duration'))$('audio-duration').value=String(savedAudioDuration);
     if(change?.audio_seed!==undefined&&$('audio-seed'))$('audio-seed').value=String(savedAudioSeed);
+    if(change?.audio_options!==undefined&&$('audio-options'))$('audio-options').value=savedAudioOptions;
     if(change?.sd_seed!==undefined&&$('sd-seed'))$('sd-seed').value=String(savedSdSeed);
     if((change?.sd_width!==undefined||change?.sd_height!==undefined)&&$('sd-size'))$('sd-size').value=savedSdSize;
     if(change?.sd_upscale!==undefined&&$('sd-upscale'))$('sd-upscale').checked=savedSdUpscale;
@@ -389,6 +396,19 @@ audioSeedHint.textContent='Reuse a seed to retry similar audio with the same mod
 $('runtime-feedback').before(audioSeedLabel,audioSeedHint);
 audioSeedLabel.hidden=true;
 audioSeedHint.hidden=true;
+const audioOptionsLabel=document.createElement('label');
+audioOptionsLabel.textContent='Music engine options (advanced)';
+const audioOptions=document.createElement('textarea');
+audioOptions.id='audio-options';
+audioOptions.rows=4;audioOptions.spellcheck=false;
+audioOptions.placeholder='cot=full\nsemantic_temperature=1.1\nstop_after=abc';
+audioOptionsLabel.append(audioOptions);
+const audioOptionsHint=document.createElement('small');
+audioOptionsHint.className='muted';
+audioOptionsHint.textContent='YuE2 songs. One key=value per line: cot (off/melody/full), stop_after (abc/semantic/audio), export_semantic, guidance_scale, num_inference_steps, semantic_* and abc_* sampling, abc, semantic_prefix_file and nar_noise_file (files under work/, e.g. from a previous song). Leave empty for model defaults.';
+$('runtime-feedback').before(audioOptionsLabel,audioOptionsHint);
+audioOptionsLabel.hidden=true;
+audioOptionsHint.hidden=true;
 const sdSeedLabel=document.createElement('label');
 sdSeedLabel.textContent='Image seed (0 = random)';
 const sdSeed=document.createElement('input');
@@ -424,9 +444,10 @@ sdUpscaleHint.textContent='Optional post-processing. Requires RealESRGAN_x4plus.
 $('runtime-feedback').before(sdUpscaleLabel,sdUpscaleHint);
 sdUpscaleLabel.hidden=true;
 sdUpscaleHint.hidden=true;
-function syncAudioDurationVisibility(){const model=models.find(item=>item.id===(current?.model||selectedModel));const audioVisible=Boolean(model&&modelKind(model)===2),imageVisible=Boolean(model&&modelKind(model)===1);audioDurationLabel.hidden=!audioVisible;audioDurationHint.hidden=!audioVisible;audioSeedLabel.hidden=!audioVisible;audioSeedHint.hidden=!audioVisible;sdSeedLabel.hidden=!imageVisible;sdSeedHint.hidden=!imageVisible;sdSizeLabel.hidden=!imageVisible;sdSizeHint.hidden=!imageVisible;sdUpscaleLabel.hidden=!imageVisible;sdUpscaleHint.hidden=!imageVisible;}
+function syncAudioDurationVisibility(){const model=models.find(item=>item.id===(current?.model||selectedModel));const audioVisible=Boolean(model&&modelKind(model)===2),imageVisible=Boolean(model&&modelKind(model)===1);audioDurationLabel.hidden=!audioVisible;audioDurationHint.hidden=!audioVisible;audioSeedLabel.hidden=!audioVisible;audioSeedHint.hidden=!audioVisible;audioOptionsLabel.hidden=!audioVisible;audioOptionsHint.hidden=!audioVisible;sdSeedLabel.hidden=!imageVisible;sdSeedHint.hidden=!imageVisible;sdSizeLabel.hidden=!imageVisible;sdSizeHint.hidden=!imageVisible;sdUpscaleLabel.hidden=!imageVisible;sdUpscaleHint.hidden=!imageVisible;}
 audioDuration.onchange=()=>runtimeSettings({audio_duration_sec:Number(audioDuration.value)});
 audioSeed.onchange=()=>{const value=Number(audioSeed.value);if(!Number.isInteger(value)||value<0||value>4294967295){audioSeed.value=String(savedAudioSeed);$('runtime-feedback').textContent='Enter a whole seed from 0 to 4294967295.';return;}runtimeSettings({audio_seed:value});};
+audioOptions.onchange=()=>runtimeSettings({audio_options:audioOptions.value});
 sdSeed.onchange=()=>{const value=Number(sdSeed.value);if(!Number.isInteger(value)||value<0||value>4294967295){sdSeed.value=String(savedSdSeed);$('runtime-feedback').textContent='Enter a whole seed from 0 to 4294967295.';return;}runtimeSettings({sd_seed:value});};
 sdSize.onchange=()=>{const [width,height]=sdSize.value.split(',').map(Number);runtimeSettings({sd_width:width,sd_height:height});};
 sdUpscale.onchange=()=>runtimeSettings({sd_upscale:sdUpscale.checked});

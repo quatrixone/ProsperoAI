@@ -36,3 +36,5 @@ input:not([type=checkbox]):not([type=range]):focus,select:focus,textarea:focus{o
 input[type=search],input[type=password],input[type=text]{-webkit-appearance:none;appearance:none}
 #composer textarea:focus{box-shadow:none}
 #composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 10px 34px #00000028}
+
+nav #music-link{font-size:24px;font-weight:600;height:70px;display:flex;align-items:center;padding:10px 4px;color:var(--accent);white-space:nowrap}@media(max-width:1100px){nav #music-link{font-size:20px}}@media(max-width:700px){nav #music-link{font-size:17px;height:58px}}

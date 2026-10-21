@@ -147,6 +147,30 @@ extern "C"
         std::snprintf(out, n, "ace-step.wav");
         return 0;
     }
+    void ps5_yue2_release()
+    {
+    }
+    int ps5_yue2_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                          gpt_runtime_progress_fn)
+    {
+        return 1;
+    }
+    void ps5_sheetsage_release()
+    {
+    }
+    int ps5_sheetsage_transcribe(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                                 gpt_runtime_progress_fn)
+    {
+        return 1;
+    }
+    void ps5_stems_release()
+    {
+    }
+    int ps5_stems_separate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                           gpt_runtime_progress_fn)
+    {
+        return 1;
+    }
     int ps5_sd_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
                         gpt_runtime_progress_fn)
     {

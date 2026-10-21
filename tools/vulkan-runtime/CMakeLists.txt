@@ -77,7 +77,7 @@ add_subdirectory("${PROS_ROOT}/.deps/kokoro.cpp" kokoro)
 set(AUDIOCPP_BUILD_C_API ON CACHE BOOL "Build audio.cpp C API" FORCE)
 set(AUDIOCPP_DEPLOYMENT_BUILD ON CACHE BOOL "Embed audio.cpp model specs" FORCE)
 set(AUDIOCPP_MODEL_SET custom CACHE STRING "audio.cpp models for ProsperoAI" FORCE)
-set(AUDIOCPP_MODELS "stable_audio,ace_step,chatterbox" CACHE STRING "audio.cpp model targets" FORCE)
+set(AUDIOCPP_MODELS "stable_audio,ace_step,chatterbox,yue2,sheetsage2,demucs" CACHE STRING "audio.cpp model targets" FORCE)
 set(AUDIOCPP_GGML_SOURCE_DIR "${PROS_GGML_SOURCE}" CACHE PATH "Shared upstream GGML" FORCE)
 set(AUDIOCPP_BUILD_EXAMPLES OFF CACHE BOOL "Disable audio.cpp examples" FORCE)
 set(AUDIOCPP_BUILD_TESTS OFF CACHE BOOL "Disable audio.cpp tests" FORCE)
@@ -87,6 +87,15 @@ set(ENGINE_ENABLE_VULKAN ON CACHE BOOL "Use shared Vulkan backend" FORCE)
 set(ENGINE_ENABLE_OPENMP OFF CACHE BOOL "PS5 runtime uses fixed worker counts" FORCE)
 set(ENGINE_ENABLE_NATIVE_CPU OFF CACHE BOOL "Use portable CPU kernels" FORCE)
 set(SPM_NO_THREADLOCAL ON CACHE BOOL "Avoid sentencepiece TLS on PS5" FORCE)
+# The YuE2 sources call ggml_round_bf16, which exists only in the ggml fork
+# audio.cpp vendors; declare it for the shared pinned ggml and link the cast
+# round-trip definition from tools/yue2-ggml-compat.cpp where the symbol is
+# consumed (native eboot objects, media test below). The copy into the build
+# tree makes the -include path independent of the checkout layout and fails
+# the configure step early when the header is missing.
+configure_file("${CMAKE_CURRENT_LIST_DIR}/../yue2-ggml-compat.hpp"
+    "${CMAKE_BINARY_DIR}/yue2-ggml-compat.hpp" COPYONLY)
+add_compile_options("-include${CMAKE_BINARY_DIR}/yue2-ggml-compat.hpp")
 add_subdirectory("${PROS_ROOT}/build/audio-cpp-upstream" audio-cpp)
 
 include("${CMAKE_CURRENT_LIST_DIR}/sd-portability.cmake")
@@ -97,7 +106,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(vulkan-runtime-abi-test PRIVATE -UNDEBUG
         "-include${CMAKE_CURRENT_LIST_DIR}/sd-constant-tls.hpp")
     add_executable(vulkan-runtime-media-test "${PROS_ROOT}/tests/media_vulkan_test.cpp"
-        "${PROS_ROOT}/inference/backends/vulkan/media_bridge.cpp")
+        "${PROS_ROOT}/inference/backends/vulkan/media_bridge.cpp"
+        "${PROS_ROOT}/tools/yue2-ggml-compat.cpp")
     target_include_directories(vulkan-runtime-media-test BEFORE PRIVATE
         "${PROS_GGML_SOURCE}/include" "${PROS_ROOT}/include" "${PROS_ROOT}/vendor/include")
     target_compile_options(vulkan-runtime-media-test PRIVATE -UNDEBUG)

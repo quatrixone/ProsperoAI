@@ -1,451 +1,594 @@
 [
-  {
-    "id": "sd-turbo-fp16",
-    "name": "SD-Turbo FP16",
-    "kind": 1,
-    "repository": "blackbearreloaded/ProsperoAI-SD-Turbo-FP16-PS5",
-    "revision": "77d748daee145ea432a0cc20744ba18b5ef4c137",
-    "files": [
-      {
-        "source": "LICENSE.md",
-        "path": "licenses/LICENSE.md",
-        "size": 11852,
-        "sha256": "d6f6b1a4dce5c852bd6d7d9482d002baf0ccdb71e662250b73be9eec8764ee8d"
-      },
-      {
-        "source": "NOTICE",
-        "path": "licenses/NOTICE",
-        "size": 568,
-        "sha256": "2b3ebfd1ca02b5f00e1ff32cd1930c0f4613b60f738aff8cf738388e44164873"
-      },
-      {
-        "source": "README.md",
-        "path": "licenses/README.md",
-        "size": 2735,
-        "sha256": "44d7a675149cf15dce8e5f235ee4ce91963d331ac7e6ba3336302111b68e0b33"
-      },
-      {
-        "source": "provenance/model-preparation.json",
-        "path": "licenses/provenance/model-preparation.json",
-        "size": 3364,
-        "sha256": "07b3174feb89b14ba3c00ff725313445fd8d64e744072875b32ba0be495e0a91"
-      },
-      {
-        "source": "sd-turbo-fp16/model.json",
-        "path": "model.json",
-        "size": 101,
-        "sha256": "6463a4f697337621a2e990da97a080edd0006e54af2c48397e073ec9eeda53dc"
-      },
-      {
-        "source": "sd-turbo-fp16/text_encoder/model.safetensors",
-        "path": "text_encoder/model.safetensors",
-        "size": 680820392,
-        "sha256": "bc1827c465450322616f06dea41596eac7d493f4e95904dcb51f0fc745c4e13f"
-      },
-      {
-        "source": "sd-turbo-fp16/unet/diffusion_pytorch_model.safetensors",
-        "path": "unet/diffusion_pytorch_model.safetensors",
-        "size": 1731904736,
-        "sha256": "40ec400881e27d1376c7c95c5bd495f407b33756e80eb6365e301c33a07af6e5"
-      },
-      {
-        "source": "sd-turbo-fp16/vae/diffusion_pytorch_model.safetensors",
-        "path": "vae/diffusion_pytorch_model.safetensors",
-        "size": 167335342,
-        "sha256": "3e4c08995484ee61270175e9e7a072b66a6e4eeb5f0c266667fe1f45b90daf9a"
-      }
-    ]
-  },
-  {
-    "id": "realistic-vision-v51-fp16",
-    "name": "Realistic Vision v5.1 FP16",
-    "kind": 1,
-    "repository": "SG161222/Realistic_Vision_V5.1_noVAE",
-    "revision": "305469dfd7d7410cff6299d34727e237374b5f36",
-    "files": [
-      {
-        "source": "Realistic_Vision_V5.1_fp16-no-ema.safetensors",
-        "path": "Realistic_Vision_V5.1_fp16-no-ema.safetensors",
-        "size": 2132625894,
-        "sha256": "99a75a901f4fec732056930a89fa34cf360f6f72d75ce5bf333ddf82adf8dd2a"
-      },
-      {
-        "source": "vae/diffusion_pytorch_model.safetensors",
-        "path": "vae.safetensors",
-        "size": 334643276,
-        "sha256": "68a430f8a51413e80ecec6c13fff4b6b63e57600a2ec661a016a14fd1037fa4b"
-      }
-    ]
-  },
-  {
-    "id": "stable-audio-3-small-sfx-vulkan",
-    "name": "Stable Audio 3 Small SFX (Vulkan)",
-    "kind": 2,
-    "repository": "audio-cpp/audio.cpp-gguf",
-    "revision": "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5",
-    "files": [
-      {
-        "source": "Stable-Audio-3-Small-SFX-GGUF/stable-audio-3-small-sfx-q8_0.gguf",
-        "path": "stable-audio-3-small-sfx-q8_0.gguf",
-        "size": 1683570688,
-        "sha256": "5bb1ec653134e63dac46264e336ae198a2590195fc996fcd0605021215e9b26f"
-      }
-    ]
-  },
-  {
-    "id": "ace-step-1.5-turbo-q8-0",
-    "name": "ACE-Step 1.5 Turbo Q8_0 (Vulkan)",
-    "kind": 2,
-    "repository": "audio-cpp/audio.cpp-gguf",
-    "revision": "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5",
-    "files": [
-      {
-        "source": "ACE-Step1.5-GGUF/turbo/ace-step-1.5-turbo-q8_0.gguf",
-        "path": "ace-step-1.5-turbo-q8_0.gguf",
-        "size": 6185460032,
-        "sha256": "cd7bf272588f548d4a253f57483132ef0f8f54a549f26471b09caa72c654270b"
-      },
-      {
-        "source": "Qwen3-Embedding-0.6B/chat_template.jinja",
-        "path": "Qwen3-Embedding-0.6B/chat_template.jinja",
-        "size": 4116,
-        "sha256": "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "Qwen3-Embedding-0.6B/config.json",
-        "path": "Qwen3-Embedding-0.6B/config.json",
-        "size": 1359,
-        "sha256": "bb23c1607cfe059a58d8f0196cf1cebb52082b1056b8e358a579da80a5759420",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "Qwen3-Embedding-0.6B/merges.txt",
-        "path": "Qwen3-Embedding-0.6B/merges.txt",
-        "size": 1671853,
-        "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "Qwen3-Embedding-0.6B/tokenizer.json",
-        "path": "Qwen3-Embedding-0.6B/tokenizer.json",
-        "size": 11423705,
-        "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "Qwen3-Embedding-0.6B/tokenizer_config.json",
-        "path": "Qwen3-Embedding-0.6B/tokenizer_config.json",
-        "size": 5404,
-        "sha256": "443bfa629eb16387a12edbf92a76f6a6f10b2af3b53d87ba1550adfcf45f7fa0",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "Qwen3-Embedding-0.6B/vocab.json",
-        "path": "Qwen3-Embedding-0.6B/vocab.json",
-        "size": 2776833,
-        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "acestep-5Hz-lm-1.7B/chat_template.jinja",
-        "path": "acestep-5Hz-lm-1.7B/chat_template.jinja",
-        "size": 4168,
-        "sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "acestep-5Hz-lm-1.7B/config.json",
-        "path": "acestep-5Hz-lm-1.7B/config.json",
-        "size": 1385,
-        "sha256": "73515ca4bfd86a5b56f28bf680311d1911e159c85d7f7ceb2188e310007c9010",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "acestep-5Hz-lm-1.7B/merges.txt",
-        "path": "acestep-5Hz-lm-1.7B/merges.txt",
-        "size": 1671853,
-        "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "acestep-5Hz-lm-1.7B/tokenizer.json",
-        "path": "acestep-5Hz-lm-1.7B/tokenizer.json",
-        "size": 24321939,
-        "sha256": "35af56c3f5cb3ea2cc578aa28a8937770981d504f183ac5c8c38baf4bbd4af4d",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "acestep-5Hz-lm-1.7B/tokenizer_config.json",
-        "path": "acestep-5Hz-lm-1.7B/tokenizer_config.json",
-        "size": 14072925,
-        "sha256": "6cd70cdd89425971794f5235562edcc608b0629a6c4686ae51a8b8c8b8ba5e95",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "acestep-5Hz-lm-1.7B/vocab.json",
-        "path": "acestep-5Hz-lm-1.7B/vocab.json",
-        "size": 2776833,
-        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "acestep-v15-turbo/config.json",
-        "path": "acestep-v15-turbo/config.json",
-        "size": 1968,
-        "sha256": "74745ff704ea49164c3d2d1c99fc0670f3fc635a869f0aec2d1311e6a52d400a",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      },
-      {
-        "source": "vae/config.json",
-        "path": "vae/config.json",
-        "size": 425,
-        "sha256": "14e019904df567f26df750317a70e2bd08f9f8f3c40ff4a24c97d1cd3f20ccd2",
-        "repository": "ACE-Step/Ace-Step1.5",
-        "revision": "19671f406d603126926c1b7e2adc169acbcade22"
-      }
-    ]
-  },
-  {
-    "id": "kokoro-82m-vulkan",
-    "name": "Kokoro 82M Vulkan",
-    "kind": 3,
-    "repository": "blackbearreloaded/ProsperoAI-Kokoro-82M-FP16-PS5",
-    "revision": "a06dcbed88d1d04f7653d899e95d025daa55f16d",
-    "files": [
-      {
-        "source": "LICENSE-ADRENO-LLMS",
-        "path": "licenses/LICENSE-ADRENO-LLMS",
-        "size": 11278,
-        "sha256": "cc07e69b4e40ee657c2e4562a344b967d88c5a8c622840cf224f5816d2e6186b"
-      },
-      {
-        "source": "LICENSE-ESPEAK-NG",
-        "path": "licenses/LICENSE-ESPEAK-NG",
-        "size": 35149,
-        "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-      },
-      {
-        "source": "LICENSE.md",
-        "path": "licenses/LICENSE.md",
-        "size": 11278,
-        "sha256": "cc07e69b4e40ee657c2e4562a344b967d88c5a8c622840cf224f5816d2e6186b"
-      },
-      {
-        "source": "NOTICE",
-        "path": "licenses/NOTICE",
-        "size": 752,
-        "sha256": "9f60f79dbc6406d7e79f469e4309ee32ad3300153a794ae7487eec89069f8db1"
-      },
-      {
-        "source": "README.md",
-        "path": "licenses/README.md",
-        "size": 2754,
-        "sha256": "907f37b596c16048688faef784f8e2add0a6c02d72b14e1de1f683a1a9ab6bbf"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/en_dict",
-        "path": "assets/espeak-ng-data/en_dict",
-        "size": 168304,
-        "sha256": "7a559766d239f7642632350d421e2b6f2330cc8f56ec4953e1daf37e5dde34e2"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/intonations",
-        "path": "assets/espeak-ng-data/intonations",
-        "size": 2584,
-        "sha256": "c4ff28c76c30cf7d9f07643e08ec39e68769ef648098269b5c0ab7731218e219"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en",
-        "path": "assets/espeak-ng-data/lang/gmw/en",
-        "size": 148,
-        "sha256": "4c8f40ba654a18e2e5d7837f55db5df294eba3a731cd861d421ea52516c16677"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-029",
-        "path": "assets/espeak-ng-data/lang/gmw/en-029",
-        "size": 355,
-        "sha256": "d450cc687501aa1c68466958373f2b3acea7eb7b4be0c4f5d04b02ccaed72b95"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-scotland",
-        "path": "assets/espeak-ng-data/lang/gmw/en-GB-scotland",
-        "size": 312,
-        "sha256": "adbd70bed8594f2ed878121f49a4bd49a41a6564cd1102fc749f92c72c434617"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-x-gbclan",
-        "path": "assets/espeak-ng-data/lang/gmw/en-GB-x-gbclan",
-        "size": 252,
-        "sha256": "3d3caf12aa3abeb3e13836dee250e98acff3cd7f08d252559332a6d91bf500c5"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-x-gbcwmd",
-        "path": "assets/espeak-ng-data/lang/gmw/en-GB-x-gbcwmd",
-        "size": 200,
-        "sha256": "99136e9688eef0ba1ff874f366ee8dff7090e58bd424aa93d22ee2775f16b8c4"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-x-rp",
-        "path": "assets/espeak-ng-data/lang/gmw/en-GB-x-rp",
-        "size": 264,
-        "sha256": "a305a95506b5deef64faf93428690ddfd14da5f3c3f6a23dd0353ccc563e538a"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-Shaw",
-        "path": "assets/espeak-ng-data/lang/gmw/en-Shaw",
-        "size": 124,
-        "sha256": "11b887abe5b3fa11c2bb760fcf545bdbbd053666869f18c67e6ea9f10facec44"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-US",
-        "path": "assets/espeak-ng-data/lang/gmw/en-US",
-        "size": 272,
-        "sha256": "4c5f247313a4206d2d5b2b411b973a007b0617f0633add363a74717aba8d421c"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-US-nyc",
-        "path": "assets/espeak-ng-data/lang/gmw/en-US-nyc",
-        "size": 285,
-        "sha256": "62b13f9a239fee09b8ddc230a171ebdcd0cd2f14c4b198ebe0b6f9682ba2f372"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/phondata",
-        "path": "assets/espeak-ng-data/phondata",
-        "size": 600104,
-        "sha256": "fbf85d4b2d5ed7f0da20e22a3063cfb2ad0bb36cfb322d5e21a2e9710ad509b7"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/phondata-manifest",
-        "path": "assets/espeak-ng-data/phondata-manifest",
-        "size": 22936,
-        "sha256": "e9dd3bee1b8453a45d2fa08684f850bc156f2021b45e4cc5d1919409cb1e0647"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/phonindex",
-        "path": "assets/espeak-ng-data/phonindex",
-        "size": 48270,
-        "sha256": "e38b0e293efa022f0569280576d15fcef0d1e339471e6d4a314d9b5e2b6afa0f"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/phontab",
-        "path": "assets/espeak-ng-data/phontab",
-        "size": 63412,
-        "sha256": "f3158807605f48fe01f5a75ae6d178d1d906a2687166455f458bf1a199ac172d"
-      },
-      {
-        "source": "kokoro-82m-fp16/assets/espeak-ng-data/voices/en-us",
-        "path": "assets/espeak-ng-data/voices/en-us",
-        "size": 272,
-        "sha256": "4c5f247313a4206d2d5b2b411b973a007b0617f0633add363a74717aba8d421c"
-      },
-      {
-        "source": "provenance/model-preparation.json",
-        "path": "licenses/provenance/model-preparation.json",
-        "size": 14562,
-        "sha256": "f9e710c3079daa116b5341964acfb3e1aea5fc21909bfa7745709cdc56b3c996"
-      },
-      {
-        "source": "kokoro-82m-f16.gguf",
-        "path": "kokoro-82m-f16.gguf",
-        "size": 163728096,
-        "sha256": "597926de84f5550e1526ce0abde4e496209d464afc9274d8603d14f3c04d1f67",
-        "repository": "simonfxr/kokoro.cpp-GGUF",
-        "revision": "c64650d0950e0b718b6eeb2f18620e25daf5c90b"
-      }
-    ]
-  },
-  {
-    "id": "minicpm5-2b-q8-0.gguf",
-    "name": "MiniCPM5 2B Q8_0",
-    "kind": 0,
-    "repository": "openbmb/MiniCPM5-2B-GGUF",
-    "revision": "2079a22f3beaa4e306449978533478fe0522f4b3",
-    "files": [
-      {
-        "source": "MiniCPM5-2B-Q8_0.gguf",
-        "path": "",
-        "size": 2679710688,
-        "sha256": "c5415f8989bf88a8288f1b55a3cc371af53c07b0faa220a63bd7a990cfaba078"
-      }
-    ]
-  },
-  {
-    "id": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
-    "name": "Ternary Bonsai 2 27B PTQ1_0",
-    "kind": 0,
-    "runtime": "prism",
-    "repository": "prism-ml/Ternary-Bonsai-2-27B-gguf",
-    "revision": "b072e1d3b35a0a630cece372c2127528e0994386",
-    "files": [
-      {
-        "source": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
-        "path": "",
-        "size": 5946648928,
-        "sha256": "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3"
-      }
-    ]
-  },
-  {
-    "id": "granite-4.0-h-tiny-q4-k-m.gguf",
-    "name": "Granite 4.0 H-Tiny Q4_K_M",
-    "kind": 0,
-    "repository": "ibm-granite/granite-4.0-h-tiny-GGUF",
-    "revision": "08d5a8a9741dd5c1a95d2d39e25253226aa1464e",
-    "files": [
-      {
-        "source": "granite-4.0-h-tiny-Q4_K_M.gguf",
-        "path": "",
-        "size": 4230976352,
-        "sha256": "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd"
-      }
-    ]
-  },
-  {
-    "id": "bohf-12b-moe-3a-q3-k-m.gguf",
-    "name": "BoHF 12B MoE 3A Q3_K_M",
-    "kind": 0,
-    "repository": "theprint/Bohf-12B-MoE-3A-GGUF",
-    "revision": "a0ab1f1455f4bad47f31c8c52f6aec1569699da5",
-    "files": [
-      {
-        "source": "bohf-12b-moe-3a-q3_k_m.gguf",
-        "path": "",
-        "size": 4703718432,
-        "sha256": "a13ef6785d0753fe7270d96c061d8c0f32e1bc2b8c17acf6e28fd021ebb5023b"
-      }
-    ]
-  },
-  {
-    "id": "chatterbox-500m-q8-0",
-    "name": "Chatterbox 500M Q8_0 (Vulkan)",
-    "kind": 3,
-    "repository": "audio-cpp/audio.cpp-gguf",
-    "revision": "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5",
-    "files": [
-      {"source": "Chatterbox-GGUF/chatterbox-q8_0.gguf", "path": "chatterbox-q8_0.gguf", "size": 2088393668, "sha256": "d586dd1aa59613cab8046176fb7ca5ba191c02a9b10ffa5b0d892ed22b470656"},
-      {"source": "tokenizer.json", "path": "tokenizer.json", "size": 25470, "sha256": "d71e3a44eabb1784df9a68e9f95b251ecbf1a7af6a9f50835856b2ca9d8c14a5", "repository": "ResembleAI/chatterbox", "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
-      {"source": "grapheme_mtl_merged_expanded_v1.json", "path": "grapheme_mtl_merged_expanded_v1.json", "size": 69989, "sha256": "69632f47220a788a52ce2661d096453c5655e9bf25289d89a8d832c46ee07dbf", "repository": "ResembleAI/chatterbox", "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
-      {"source": "Cangjie5_TC.json", "path": "Cangjie5_TC.json", "size": 1920163, "sha256": "7073fd9de919443ae88e0bd2449917a65fe54898a4413ed1edcc4b67f28bce8c", "repository": "ResembleAI/chatterbox", "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
-      {"source": "conds.pt", "path": "conds.pt", "size": 107374, "sha256": "6552d70568833628ba019c6b03459e77fe71ca197d5c560cef9411bee9d87f4e", "repository": "ResembleAI/chatterbox", "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
-      {"source": "webui/native/demo_voices/demo_1_man.wav", "path": "voices/chatterbox/demo_1_man.wav", "size": 905294, "sha256": "3e5321095813b09c6b108e9b12dfd988155020b35602ef074498aa0fa771fd39", "repository": "github:0xShug0/audio.cpp", "revision": "886076fc89c09b9902592aa4bfbd12922d4a9e26"},
-      {"source": "voices/alana_jordan.flac", "path": "voices/chatterbox/alana_jordan.flac", "size": 305301, "sha256": "6f4e1266cc39c2b426894bdfcddac5c23a9086b4dcd8fb06320fe3865009538e", "repository": "github:CoisLR/TTS-Reference-Voices", "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"},
-      {"source": "voices/alan_davis_drake.flac", "path": "voices/chatterbox/alan_davis_drake.flac", "size": 227727, "sha256": "7f7c5358f7f38700bdaf6f640e03fae44962fcb6f5c7f8b5d439eb34b219d8d8", "repository": "github:CoisLR/TTS-Reference-Voices", "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"},
-      {"source": "voices/ruth_golding.flac", "path": "voices/chatterbox/ruth_golding.flac", "size": 295300, "sha256": "f381a6ea1e26bcd24f30a61946ec8056cc34eea6bfdbcaad72efd2f72ebd2405", "repository": "github:CoisLR/TTS-Reference-Voices", "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"},
-      {"source": "voices/phil_chenevert.flac", "path": "voices/chatterbox/phil_chenevert.flac", "size": 296237, "sha256": "2c66f024ceee942fec277f9700d07abcffcd5dbccb81e714eb48d95505f117da", "repository": "github:CoisLR/TTS-Reference-Voices", "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"}
-    ]
-  }
+ {
+  "id": "sd-turbo-fp16",
+  "name": "SD-Turbo FP16",
+  "kind": 1,
+  "repository": "blackbearreloaded/ProsperoAI-SD-Turbo-FP16-PS5",
+  "revision": "77d748daee145ea432a0cc20744ba18b5ef4c137",
+  "files": [
+   {
+    "source": "LICENSE.md",
+    "path": "licenses/LICENSE.md",
+    "size": 11852,
+    "sha256": "d6f6b1a4dce5c852bd6d7d9482d002baf0ccdb71e662250b73be9eec8764ee8d"
+   },
+   {
+    "source": "NOTICE",
+    "path": "licenses/NOTICE",
+    "size": 568,
+    "sha256": "2b3ebfd1ca02b5f00e1ff32cd1930c0f4613b60f738aff8cf738388e44164873"
+   },
+   {
+    "source": "README.md",
+    "path": "licenses/README.md",
+    "size": 2735,
+    "sha256": "44d7a675149cf15dce8e5f235ee4ce91963d331ac7e6ba3336302111b68e0b33"
+   },
+   {
+    "source": "provenance/model-preparation.json",
+    "path": "licenses/provenance/model-preparation.json",
+    "size": 3364,
+    "sha256": "07b3174feb89b14ba3c00ff725313445fd8d64e744072875b32ba0be495e0a91"
+   },
+   {
+    "source": "sd-turbo-fp16/model.json",
+    "path": "model.json",
+    "size": 101,
+    "sha256": "6463a4f697337621a2e990da97a080edd0006e54af2c48397e073ec9eeda53dc"
+   },
+   {
+    "source": "sd-turbo-fp16/text_encoder/model.safetensors",
+    "path": "text_encoder/model.safetensors",
+    "size": 680820392,
+    "sha256": "bc1827c465450322616f06dea41596eac7d493f4e95904dcb51f0fc745c4e13f"
+   },
+   {
+    "source": "sd-turbo-fp16/unet/diffusion_pytorch_model.safetensors",
+    "path": "unet/diffusion_pytorch_model.safetensors",
+    "size": 1731904736,
+    "sha256": "40ec400881e27d1376c7c95c5bd495f407b33756e80eb6365e301c33a07af6e5"
+   },
+   {
+    "source": "sd-turbo-fp16/vae/diffusion_pytorch_model.safetensors",
+    "path": "vae/diffusion_pytorch_model.safetensors",
+    "size": 167335342,
+    "sha256": "3e4c08995484ee61270175e9e7a072b66a6e4eeb5f0c266667fe1f45b90daf9a"
+   }
+  ]
+ },
+ {
+  "id": "realistic-vision-v51-fp16",
+  "name": "Realistic Vision v5.1 FP16",
+  "kind": 1,
+  "repository": "SG161222/Realistic_Vision_V5.1_noVAE",
+  "revision": "305469dfd7d7410cff6299d34727e237374b5f36",
+  "files": [
+   {
+    "source": "Realistic_Vision_V5.1_fp16-no-ema.safetensors",
+    "path": "Realistic_Vision_V5.1_fp16-no-ema.safetensors",
+    "size": 2132625894,
+    "sha256": "99a75a901f4fec732056930a89fa34cf360f6f72d75ce5bf333ddf82adf8dd2a"
+   },
+   {
+    "source": "vae/diffusion_pytorch_model.safetensors",
+    "path": "vae.safetensors",
+    "size": 334643276,
+    "sha256": "68a430f8a51413e80ecec6c13fff4b6b63e57600a2ec661a016a14fd1037fa4b"
+   }
+  ]
+ },
+ {
+  "id": "stable-audio-3-small-sfx-vulkan",
+  "name": "Stable Audio 3 Small SFX (Vulkan)",
+  "kind": 2,
+  "repository": "audio-cpp/audio.cpp-gguf",
+  "revision": "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5",
+  "files": [
+   {
+    "source": "Stable-Audio-3-Small-SFX-GGUF/stable-audio-3-small-sfx-q8_0.gguf",
+    "path": "stable-audio-3-small-sfx-q8_0.gguf",
+    "size": 1683570688,
+    "sha256": "5bb1ec653134e63dac46264e336ae198a2590195fc996fcd0605021215e9b26f"
+   }
+  ]
+ },
+ {
+  "id": "ace-step-1.5-turbo-q8-0",
+  "name": "ACE-Step 1.5 Turbo Q8_0 (Vulkan)",
+  "kind": 2,
+  "repository": "audio-cpp/audio.cpp-gguf",
+  "revision": "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5",
+  "files": [
+   {
+    "source": "ACE-Step1.5-GGUF/turbo/ace-step-1.5-turbo-q8_0.gguf",
+    "path": "ace-step-1.5-turbo-q8_0.gguf",
+    "size": 6185460032,
+    "sha256": "cd7bf272588f548d4a253f57483132ef0f8f54a549f26471b09caa72c654270b"
+   },
+   {
+    "source": "Qwen3-Embedding-0.6B/chat_template.jinja",
+    "path": "Qwen3-Embedding-0.6B/chat_template.jinja",
+    "size": 4116,
+    "sha256": "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "Qwen3-Embedding-0.6B/config.json",
+    "path": "Qwen3-Embedding-0.6B/config.json",
+    "size": 1359,
+    "sha256": "bb23c1607cfe059a58d8f0196cf1cebb52082b1056b8e358a579da80a5759420",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "Qwen3-Embedding-0.6B/merges.txt",
+    "path": "Qwen3-Embedding-0.6B/merges.txt",
+    "size": 1671853,
+    "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "Qwen3-Embedding-0.6B/tokenizer.json",
+    "path": "Qwen3-Embedding-0.6B/tokenizer.json",
+    "size": 11423705,
+    "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "Qwen3-Embedding-0.6B/tokenizer_config.json",
+    "path": "Qwen3-Embedding-0.6B/tokenizer_config.json",
+    "size": 5404,
+    "sha256": "443bfa629eb16387a12edbf92a76f6a6f10b2af3b53d87ba1550adfcf45f7fa0",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "Qwen3-Embedding-0.6B/vocab.json",
+    "path": "Qwen3-Embedding-0.6B/vocab.json",
+    "size": 2776833,
+    "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "acestep-5Hz-lm-1.7B/chat_template.jinja",
+    "path": "acestep-5Hz-lm-1.7B/chat_template.jinja",
+    "size": 4168,
+    "sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "acestep-5Hz-lm-1.7B/config.json",
+    "path": "acestep-5Hz-lm-1.7B/config.json",
+    "size": 1385,
+    "sha256": "73515ca4bfd86a5b56f28bf680311d1911e159c85d7f7ceb2188e310007c9010",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "acestep-5Hz-lm-1.7B/merges.txt",
+    "path": "acestep-5Hz-lm-1.7B/merges.txt",
+    "size": 1671853,
+    "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "acestep-5Hz-lm-1.7B/tokenizer.json",
+    "path": "acestep-5Hz-lm-1.7B/tokenizer.json",
+    "size": 24321939,
+    "sha256": "35af56c3f5cb3ea2cc578aa28a8937770981d504f183ac5c8c38baf4bbd4af4d",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "acestep-5Hz-lm-1.7B/tokenizer_config.json",
+    "path": "acestep-5Hz-lm-1.7B/tokenizer_config.json",
+    "size": 14072925,
+    "sha256": "6cd70cdd89425971794f5235562edcc608b0629a6c4686ae51a8b8c8b8ba5e95",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "acestep-5Hz-lm-1.7B/vocab.json",
+    "path": "acestep-5Hz-lm-1.7B/vocab.json",
+    "size": 2776833,
+    "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "acestep-v15-turbo/config.json",
+    "path": "acestep-v15-turbo/config.json",
+    "size": 1968,
+    "sha256": "74745ff704ea49164c3d2d1c99fc0670f3fc635a869f0aec2d1311e6a52d400a",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   },
+   {
+    "source": "vae/config.json",
+    "path": "vae/config.json",
+    "size": 425,
+    "sha256": "14e019904df567f26df750317a70e2bd08f9f8f3c40ff4a24c97d1cd3f20ccd2",
+    "repository": "ACE-Step/Ace-Step1.5",
+    "revision": "19671f406d603126926c1b7e2adc169acbcade22"
+   }
+  ]
+ },
+ {
+  "id": "kokoro-82m-vulkan",
+  "name": "Kokoro 82M Vulkan",
+  "kind": 3,
+  "repository": "blackbearreloaded/ProsperoAI-Kokoro-82M-FP16-PS5",
+  "revision": "a06dcbed88d1d04f7653d899e95d025daa55f16d",
+  "files": [
+   {
+    "source": "LICENSE-ADRENO-LLMS",
+    "path": "licenses/LICENSE-ADRENO-LLMS",
+    "size": 11278,
+    "sha256": "cc07e69b4e40ee657c2e4562a344b967d88c5a8c622840cf224f5816d2e6186b"
+   },
+   {
+    "source": "LICENSE-ESPEAK-NG",
+    "path": "licenses/LICENSE-ESPEAK-NG",
+    "size": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+   },
+   {
+    "source": "LICENSE.md",
+    "path": "licenses/LICENSE.md",
+    "size": 11278,
+    "sha256": "cc07e69b4e40ee657c2e4562a344b967d88c5a8c622840cf224f5816d2e6186b"
+   },
+   {
+    "source": "NOTICE",
+    "path": "licenses/NOTICE",
+    "size": 752,
+    "sha256": "9f60f79dbc6406d7e79f469e4309ee32ad3300153a794ae7487eec89069f8db1"
+   },
+   {
+    "source": "README.md",
+    "path": "licenses/README.md",
+    "size": 2754,
+    "sha256": "907f37b596c16048688faef784f8e2add0a6c02d72b14e1de1f683a1a9ab6bbf"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/en_dict",
+    "path": "assets/espeak-ng-data/en_dict",
+    "size": 168304,
+    "sha256": "7a559766d239f7642632350d421e2b6f2330cc8f56ec4953e1daf37e5dde34e2"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/intonations",
+    "path": "assets/espeak-ng-data/intonations",
+    "size": 2584,
+    "sha256": "c4ff28c76c30cf7d9f07643e08ec39e68769ef648098269b5c0ab7731218e219"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en",
+    "path": "assets/espeak-ng-data/lang/gmw/en",
+    "size": 148,
+    "sha256": "4c8f40ba654a18e2e5d7837f55db5df294eba3a731cd861d421ea52516c16677"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-029",
+    "path": "assets/espeak-ng-data/lang/gmw/en-029",
+    "size": 355,
+    "sha256": "d450cc687501aa1c68466958373f2b3acea7eb7b4be0c4f5d04b02ccaed72b95"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-scotland",
+    "path": "assets/espeak-ng-data/lang/gmw/en-GB-scotland",
+    "size": 312,
+    "sha256": "adbd70bed8594f2ed878121f49a4bd49a41a6564cd1102fc749f92c72c434617"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-x-gbclan",
+    "path": "assets/espeak-ng-data/lang/gmw/en-GB-x-gbclan",
+    "size": 252,
+    "sha256": "3d3caf12aa3abeb3e13836dee250e98acff3cd7f08d252559332a6d91bf500c5"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-x-gbcwmd",
+    "path": "assets/espeak-ng-data/lang/gmw/en-GB-x-gbcwmd",
+    "size": 200,
+    "sha256": "99136e9688eef0ba1ff874f366ee8dff7090e58bd424aa93d22ee2775f16b8c4"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-GB-x-rp",
+    "path": "assets/espeak-ng-data/lang/gmw/en-GB-x-rp",
+    "size": 264,
+    "sha256": "a305a95506b5deef64faf93428690ddfd14da5f3c3f6a23dd0353ccc563e538a"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-Shaw",
+    "path": "assets/espeak-ng-data/lang/gmw/en-Shaw",
+    "size": 124,
+    "sha256": "11b887abe5b3fa11c2bb760fcf545bdbbd053666869f18c67e6ea9f10facec44"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-US",
+    "path": "assets/espeak-ng-data/lang/gmw/en-US",
+    "size": 272,
+    "sha256": "4c5f247313a4206d2d5b2b411b973a007b0617f0633add363a74717aba8d421c"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/lang/gmw/en-US-nyc",
+    "path": "assets/espeak-ng-data/lang/gmw/en-US-nyc",
+    "size": 285,
+    "sha256": "62b13f9a239fee09b8ddc230a171ebdcd0cd2f14c4b198ebe0b6f9682ba2f372"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/phondata",
+    "path": "assets/espeak-ng-data/phondata",
+    "size": 600104,
+    "sha256": "fbf85d4b2d5ed7f0da20e22a3063cfb2ad0bb36cfb322d5e21a2e9710ad509b7"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/phondata-manifest",
+    "path": "assets/espeak-ng-data/phondata-manifest",
+    "size": 22936,
+    "sha256": "e9dd3bee1b8453a45d2fa08684f850bc156f2021b45e4cc5d1919409cb1e0647"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/phonindex",
+    "path": "assets/espeak-ng-data/phonindex",
+    "size": 48270,
+    "sha256": "e38b0e293efa022f0569280576d15fcef0d1e339471e6d4a314d9b5e2b6afa0f"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/phontab",
+    "path": "assets/espeak-ng-data/phontab",
+    "size": 63412,
+    "sha256": "f3158807605f48fe01f5a75ae6d178d1d906a2687166455f458bf1a199ac172d"
+   },
+   {
+    "source": "kokoro-82m-fp16/assets/espeak-ng-data/voices/en-us",
+    "path": "assets/espeak-ng-data/voices/en-us",
+    "size": 272,
+    "sha256": "4c5f247313a4206d2d5b2b411b973a007b0617f0633add363a74717aba8d421c"
+   },
+   {
+    "source": "provenance/model-preparation.json",
+    "path": "licenses/provenance/model-preparation.json",
+    "size": 14562,
+    "sha256": "f9e710c3079daa116b5341964acfb3e1aea5fc21909bfa7745709cdc56b3c996"
+   },
+   {
+    "source": "kokoro-82m-f16.gguf",
+    "path": "kokoro-82m-f16.gguf",
+    "size": 163728096,
+    "sha256": "597926de84f5550e1526ce0abde4e496209d464afc9274d8603d14f3c04d1f67",
+    "repository": "simonfxr/kokoro.cpp-GGUF",
+    "revision": "c64650d0950e0b718b6eeb2f18620e25daf5c90b"
+   }
+  ]
+ },
+ {
+  "id": "minicpm5-2b-q8-0.gguf",
+  "name": "MiniCPM5 2B Q8_0",
+  "kind": 0,
+  "repository": "openbmb/MiniCPM5-2B-GGUF",
+  "revision": "2079a22f3beaa4e306449978533478fe0522f4b3",
+  "files": [
+   {
+    "source": "MiniCPM5-2B-Q8_0.gguf",
+    "path": "",
+    "size": 2679710688,
+    "sha256": "c5415f8989bf88a8288f1b55a3cc371af53c07b0faa220a63bd7a990cfaba078"
+   }
+  ]
+ },
+ {
+  "id": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+  "name": "Ternary Bonsai 2 27B PTQ1_0",
+  "kind": 0,
+  "runtime": "prism",
+  "repository": "prism-ml/Ternary-Bonsai-2-27B-gguf",
+  "revision": "b072e1d3b35a0a630cece372c2127528e0994386",
+  "files": [
+   {
+    "source": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+    "path": "",
+    "size": 5946648928,
+    "sha256": "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3"
+   }
+  ]
+ },
+ {
+  "id": "granite-4.0-h-tiny-q4-k-m.gguf",
+  "name": "Granite 4.0 H-Tiny Q4_K_M",
+  "kind": 0,
+  "repository": "ibm-granite/granite-4.0-h-tiny-GGUF",
+  "revision": "08d5a8a9741dd5c1a95d2d39e25253226aa1464e",
+  "files": [
+   {
+    "source": "granite-4.0-h-tiny-Q4_K_M.gguf",
+    "path": "",
+    "size": 4230976352,
+    "sha256": "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd"
+   }
+  ]
+ },
+ {
+  "id": "bohf-12b-moe-3a-q3-k-m.gguf",
+  "name": "BoHF 12B MoE 3A Q3_K_M",
+  "kind": 0,
+  "repository": "theprint/Bohf-12B-MoE-3A-GGUF",
+  "revision": "a0ab1f1455f4bad47f31c8c52f6aec1569699da5",
+  "files": [
+   {
+    "source": "bohf-12b-moe-3a-q3_k_m.gguf",
+    "path": "",
+    "size": 4703718432,
+    "sha256": "a13ef6785d0753fe7270d96c061d8c0f32e1bc2b8c17acf6e28fd021ebb5023b"
+   }
+  ]
+ },
+ {
+  "id": "chatterbox-500m-q8-0",
+  "name": "Chatterbox 500M Q8_0 (Vulkan)",
+  "kind": 3,
+  "repository": "audio-cpp/audio.cpp-gguf",
+  "revision": "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5",
+  "files": [
+   {
+    "source": "Chatterbox-GGUF/chatterbox-q8_0.gguf",
+    "path": "chatterbox-q8_0.gguf",
+    "size": 2088393668,
+    "sha256": "d586dd1aa59613cab8046176fb7ca5ba191c02a9b10ffa5b0d892ed22b470656"
+   },
+   {
+    "source": "tokenizer.json",
+    "path": "tokenizer.json",
+    "size": 25470,
+    "sha256": "d71e3a44eabb1784df9a68e9f95b251ecbf1a7af6a9f50835856b2ca9d8c14a5",
+    "repository": "ResembleAI/chatterbox",
+    "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
+   },
+   {
+    "source": "grapheme_mtl_merged_expanded_v1.json",
+    "path": "grapheme_mtl_merged_expanded_v1.json",
+    "size": 69989,
+    "sha256": "69632f47220a788a52ce2661d096453c5655e9bf25289d89a8d832c46ee07dbf",
+    "repository": "ResembleAI/chatterbox",
+    "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
+   },
+   {
+    "source": "Cangjie5_TC.json",
+    "path": "Cangjie5_TC.json",
+    "size": 1920163,
+    "sha256": "7073fd9de919443ae88e0bd2449917a65fe54898a4413ed1edcc4b67f28bce8c",
+    "repository": "ResembleAI/chatterbox",
+    "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
+   },
+   {
+    "source": "conds.pt",
+    "path": "conds.pt",
+    "size": 107374,
+    "sha256": "6552d70568833628ba019c6b03459e77fe71ca197d5c560cef9411bee9d87f4e",
+    "repository": "ResembleAI/chatterbox",
+    "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
+   },
+   {
+    "source": "webui/native/demo_voices/demo_1_man.wav",
+    "path": "voices/chatterbox/demo_1_man.wav",
+    "size": 905294,
+    "sha256": "3e5321095813b09c6b108e9b12dfd988155020b35602ef074498aa0fa771fd39",
+    "repository": "github:0xShug0/audio.cpp",
+    "revision": "886076fc89c09b9902592aa4bfbd12922d4a9e26"
+   },
+   {
+    "source": "voices/alana_jordan.flac",
+    "path": "voices/chatterbox/alana_jordan.flac",
+    "size": 305301,
+    "sha256": "6f4e1266cc39c2b426894bdfcddac5c23a9086b4dcd8fb06320fe3865009538e",
+    "repository": "github:CoisLR/TTS-Reference-Voices",
+    "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"
+   },
+   {
+    "source": "voices/alan_davis_drake.flac",
+    "path": "voices/chatterbox/alan_davis_drake.flac",
+    "size": 227727,
+    "sha256": "7f7c5358f7f38700bdaf6f640e03fae44962fcb6f5c7f8b5d439eb34b219d8d8",
+    "repository": "github:CoisLR/TTS-Reference-Voices",
+    "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"
+   },
+   {
+    "source": "voices/ruth_golding.flac",
+    "path": "voices/chatterbox/ruth_golding.flac",
+    "size": 295300,
+    "sha256": "f381a6ea1e26bcd24f30a61946ec8056cc34eea6bfdbcaad72efd2f72ebd2405",
+    "repository": "github:CoisLR/TTS-Reference-Voices",
+    "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"
+   },
+   {
+    "source": "voices/phil_chenevert.flac",
+    "path": "voices/chatterbox/phil_chenevert.flac",
+    "size": 296237,
+    "sha256": "2c66f024ceee942fec277f9700d07abcffcd5dbccb81e714eb48d95505f117da",
+    "repository": "github:CoisLR/TTS-Reference-Voices",
+    "revision": "f6be3bc580483c1027e4a66a887ca8510566ae40"
+   }
+  ]
+ },
+ {
+  "id": "yue2-3b-q8-0",
+  "name": "YuE2 3B Q8_0 (Vulkan)",
+  "kind": 2,
+  "repository": "ngquocvinh/YuE2-3B-GGUF",
+  "revision": "9711e46e444185449185914dfb8694e6ce4069c9",
+  "files": [
+   {
+    "source": "yue2-3b-q8_0.gguf",
+    "path": "yue2-3b-q8_0.gguf",
+    "size": 4264194240,
+    "sha256": "9694dbcdf67c31875eb78abbe94cc30169465ed7f259af98df96b84d999cba1c"
+   },
+   {
+    "source": "yue2-vae-f16.gguf",
+    "path": "yue2-vae-f16.gguf",
+    "size": 265226496,
+    "sha256": "81e05a79e78ce5cb8deb1d87e17b73e5d205b440be2bd510ae62acf37b300ddb"
+   },
+   {
+    "source": "sidecars/yue2-model-config.json",
+    "path": "sidecars/yue2-model-config.json",
+    "size": 959,
+    "sha256": "ad3477bbef890bf98ae196c1e4b44779494a6231c4ab66f32708eabadf265329"
+   },
+   {
+    "source": "sidecars/yue2-generation-config.json",
+    "path": "sidecars/yue2-generation-config.json",
+    "size": 466,
+    "sha256": "203830cebde6e3644eb291925362990d198e66c3b6006cd11f1aaa21904bcc61"
+   },
+   {
+    "source": "sidecars/yue2-vae-config.json",
+    "path": "sidecars/yue2-vae-config.json",
+    "size": 1378,
+    "sha256": "f0191bb9694009956de44e0c361a6f1334760be4c8f848e599bde242a54a0970"
+   },
+   {
+    "source": "sidecars/yue2-qwen.tiktoken",
+    "path": "sidecars/yue2-qwen.tiktoken",
+    "size": 2561218,
+    "sha256": "b2b1b8dfb5cc5f024bafc373121c6aba3f66f9a5a0269e243470a1de16a33186"
+   }
+  ]
+ },
+ {
+  "id": "sheetsage2-orig",
+  "name": "SheetSage2 Cover (Vulkan)",
+  "kind": 2,
+  "repository": "audio-cpp/SheetSage2-GGUF",
+  "revision": "4e88814450385334524e50df43724af583f74206",
+  "files": [
+   {
+    "source": "sheetsage2-orig.gguf",
+    "path": "sheetsage2-orig.gguf",
+    "size": 2708224256,
+    "sha256": "d858bfdf5ac7be16261ac6ee38754d6fca502149131b44a5262b4039fb72876e"
+   }
+  ]
+ },
+ {
+  "id": "htdemucs-q8_0",
+  "name": "HTDemucs Stems Q8_0 (Vulkan)",
+  "kind": 2,
+  "repository": "audio-cpp/audio.cpp-gguf",
+  "revision": "661a224e9d9adbd49c01626f85e426f5f425d771",
+  "files": [
+   {
+    "source": "HTDemucs-GGUF/htdemucs-q8_0.gguf",
+    "path": "htdemucs-q8_0.gguf",
+    "size": 61940768,
+    "sha256": "b0f532ac6e5f373aeb11fa0df73253251e133832d9c8b9942dc58f50bc5b4388"
+   }
+  ]
+ }
 ]

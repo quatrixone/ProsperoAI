@@ -125,6 +125,51 @@ def include_ace_step_dependencies(path: Path) -> None:
     path.write_text(source)
 
 
+def include_yue2_dependencies(path: Path) -> None:
+    """Restore the shared causal-decoder runtime the YuE2 AR model links against."""
+    source = path.read_text()
+    required = (
+        ("src/framework/modules/transformers/causal_decoder.cpp",
+         "    src/framework/modules/transformers/decoder.cpp\n"),
+        ("src/framework/modules/transformers/causal_decoder_runtime.cpp",
+         "    src/framework/modules/transformers/causal_decoder.cpp\n"),
+    )
+    for entry, anchor in required:
+        line = f"    {entry}\n"
+        if line in source:
+            continue
+        if source.count(anchor) != 1:
+            raise SystemExit(f"{path}: cannot restore YuE2 dependency {entry}")
+        source = source.replace(anchor, anchor + line, 1)
+    path.write_text(source)
+
+
+def include_demucs_dependencies(path: Path) -> None:
+    """Restore the fast projection modules HTDemucs builds its separators from."""
+    source = path.read_text()
+    line = "    src/framework/modules/optimizations/fast_projection_modules.cpp\n"
+    if line in source:
+        return
+    anchor = "    src/framework/modules/optimizations/fast_kv_modules.cpp\n"
+    if source.count(anchor) != 1:
+        raise SystemExit(f"{path}: cannot restore demucs dependency {line.strip()}")
+    path.write_text(source.replace(anchor, anchor + line, 1))
+
+
+def adapt_fast_projection_pack4(source: Path, ggml_source: Path) -> None:
+    """The pinned ggml predates ggml_mul_mat_pack4. The module itself refuses
+    non-CUDA/HIP backends at build(), so on the PS5 only the symbols need to
+    link — route the call to plain ggml_mul_mat when the API is absent."""
+    if ggml_has_api(ggml_source, "ggml_mul_mat_pack4"):
+        return
+    replace_once(
+        source / "src/framework/modules/optimizations/fast_projection_modules.cpp",
+        "        ggml_mul_mat_pack4(ctx.ggml, weights.weight.tensor, matrix_input.tensor);",
+        "        ggml_mul_mat(ctx.ggml, weights.weight.tensor, matrix_input.tensor);"
+        " // PS5: pinned ggml predates pack4; build() is CUDA/HIP-only anyway",
+    )
+
+
 def reuse_parent_ggml(path: Path) -> None:
     """Reuse the parent runtime's upstream GGML target when added as a subproject."""
     replace_once(
@@ -415,9 +460,12 @@ def main() -> None:
     omit_cmake_sources(cmake)
     include_sa3_dependencies(cmake)
     include_ace_step_dependencies(cmake)
+    include_yue2_dependencies(cmake)
+    include_demucs_dependencies(cmake)
     reuse_parent_ggml(cmake)
     if not ggml_has_api(ggml_source, "ggml_round_bf16"):
         adapt_ace_step_ggml_round(source)
+    adapt_fast_projection_pack4(source, ggml_source)
     adapt_ace_step_staged_memory(source)
     adapt_chatterbox_s3_tokenizer_arena(source)
     replace_once(
