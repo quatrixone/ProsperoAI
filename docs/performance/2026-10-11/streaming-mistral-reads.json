@@ -1,0 +1,78 @@
+{
+  "runtime": "standalone payload, FW 12.70; PPSA99023 running concurrently",
+  "qualification": "Disk-only, uncontrolled cache state; does not measure Vulkan uploads or inference.",
+  "runs": [
+    {
+      "run": 0,
+      "workers": 1,
+      "offset": 757696,
+      "bytes": 4112531456,
+      "seconds": 3.073213539,
+      "bytes_per_second": 1338186040.056,
+      "staging_bytes": 16777216,
+      "sample": 130844477,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 0,
+      "workers": 4,
+      "offset": 757696,
+      "bytes": 4112531456,
+      "seconds": 2.302483302,
+      "bytes_per_second": 1786128677.861,
+      "staging_bytes": 16777216,
+      "sample": 130844477,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 1,
+      "workers": 1,
+      "offset": 757696,
+      "bytes": 4112531456,
+      "seconds": 3.264300128,
+      "bytes_per_second": 1259850900.572,
+      "staging_bytes": 16777216,
+      "sample": 130844477,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 1,
+      "workers": 4,
+      "offset": 757696,
+      "bytes": 4112531456,
+      "seconds": 2.180066706,
+      "bytes_per_second": 1886424596.404,
+      "staging_bytes": 16777216,
+      "sample": 130844477,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 2,
+      "workers": 1,
+      "offset": 757696,
+      "bytes": 4112531456,
+      "seconds": 2.976580084,
+      "bytes_per_second": 1381629702.525,
+      "staging_bytes": 16777216,
+      "sample": 130844477,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 2,
+      "workers": 4,
+      "offset": 757696,
+      "bytes": 4112531456,
+      "seconds": 2.253633462,
+      "bytes_per_second": 1824844867.342,
+      "staging_bytes": 16777216,
+      "sample": 130844477,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    }
+  ]
+}

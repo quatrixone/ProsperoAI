@@ -430,6 +430,18 @@
     ]
   },
   {
+    "id": "z-image-turbo-q2-k",
+    "name": "Z-Image Turbo Q2_K + Qwen3 4B Q2_K (8-step)",
+    "kind": 1,
+    "repository": "leejet/Z-Image-Turbo-GGUF",
+    "revision": "c61c0e422dc8b541b7548cf33a4ef8302b0f8085",
+    "files": [
+      {"source": "z_image_turbo-Q2_K.gguf", "path": "diffusion_model.gguf", "size": 2592442304, "sha256": "a9cf1b0368e24c2f9d542d2951c01f6f7fc85ed8c9ed39b5b37b15375508d58a"},
+      {"source": "Qwen3-4B-Instruct-2507-Q2_K.gguf", "path": "qwen3-4b-instruct-2507-q2-k.gguf", "size": 1669500000, "sha256": "f7ed2f57713ad29e1a4ec093be0cdf3d7fd31e137e8fd4fc3edcfd04a5267862", "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF", "revision": "1e1094e82febb22ad75c2802fc1cbc94c74f8481"},
+      {"source": "split_files/vae/ae.safetensors", "path": "ae.safetensors", "size": 335304388, "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38", "repository": "Comfy-Org/z_image_turbo", "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5"}
+    ]
+  },
+  {
     "id": "chatterbox-500m-q8-0",
     "name": "Chatterbox 500M Q8_0 (Vulkan)",
     "kind": 3,

@@ -684,9 +684,13 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
             if (expert_stream) expert_stream->begin_graph(static_cast<std::uint64_t>(batch_count));
 #endif
             const int decode_result = llama_decode(context, batch);
-            if (decode_result != 0 || (expert_stream && expert_stream->failed())) {
+            bool expert_stream_failed = false;
+#ifdef PROSPERO_EXPERT_STREAM
+            expert_stream_failed = expert_stream && expert_stream->failed();
+#endif
+            if (decode_result != 0 || expert_stream_failed) {
                 previous_tokens.clear();
-                if (expert_stream && expert_stream->failed())
+                if (expert_stream_failed)
                     std::snprintf(output, capacity, "Expert streaming failed while reading model weights.");
                 release_model();
                 return 1;
@@ -738,9 +742,13 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                 if (expert_stream) expert_stream->begin_graph(1);
 #endif
                 const int decode_result = llama_decode(context, batch);
-                if (decode_result != 0 || (expert_stream && expert_stream->failed())) {
+                bool expert_stream_failed = false;
+#ifdef PROSPERO_EXPERT_STREAM
+                expert_stream_failed = expert_stream && expert_stream->failed();
+#endif
+                if (decode_result != 0 || expert_stream_failed) {
                     previous_tokens.clear();
-                    if (expert_stream && expert_stream->failed())
+                    if (expert_stream_failed)
                         std::snprintf(output, capacity, "Expert streaming failed while reading model weights.");
                     release_model();
                     result = 1;

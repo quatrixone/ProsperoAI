@@ -62,6 +62,7 @@ sources=(src/kv_budget.cpp src/prefix_reuse.cpp src/main.cpp src/native_app.cpp 
  src/native_ui_update.cpp vulkan/update_ps5.cpp
  inference/adapters/llama/vulkan.cpp vulkan/http_server.cpp vulkan/model_downloader_ps5.cpp
  vulkan/ui/backend.cpp vulkan/ui/program.cpp)
+sources+=(inference/adapters/airllm/ps5_streaming.cpp)
 sources+=("${streaming_sources[@]}")
 media_definitions=()
 # Speech is kokoro.cpp on the shared ggml/Vulkan backend (inference/adapters/media/kokoro_ps5.cpp); the
@@ -87,6 +88,8 @@ for relative in "${sources[@]}"; do
  abi_definitions+=(-DGGML_MAX_NAME=160 "${streaming_definitions[@]}")
  case "$relative" in
   inference/adapters/media/stable_diffusion_ps5.cpp)
+   media_includes=(-I "$root/.deps/stable-diffusion-vulkan/include");;
+  inference/adapters/airllm/ps5_streaming.cpp)
    media_includes=(-I "$root/.deps/stable-diffusion-vulkan/include");;
   inference/adapters/media/stable_audio_ps5.cpp)
    media_includes=(-I "$root/build/audio-cpp-upstream/include");;
