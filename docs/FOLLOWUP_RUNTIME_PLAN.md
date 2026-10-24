@@ -12,7 +12,7 @@ probes measured 1.384/1.778 GB/s serial/four workers with uncontrolled cache and
 upload. A full-layer disk-only bound is approximately 0.33 tokens/s. Resident Vulkan
 inference remains the speed and output reference; bounded streaming is a capacity
 feature, not an assumed throughput improvement. See [research](AIRLLM_PS5_RESEARCH.md).
-The detailed historical streaming probe files were removed from this PR.
+The detailed historical streaming probe files are retained under `docs/performance/2026-10-11/`.
 
 ## S1: native bounded residency
 

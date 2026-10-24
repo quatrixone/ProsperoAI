@@ -43,6 +43,15 @@ namespace
 // A scripted run's pictures: half the canvas is enough to compare with the PC's.
 constexpr int kPictureWidth = 960, kPictureHeight = 540;
 
+bool inference_running()
+{
+#ifdef PS5_LLAMA_VULKAN
+    return gpt_runtime_generations_running() != 0;
+#else
+    return false;
+#endif
+}
+
 // The bound framebuffer, bottom row first, as a 24-bit BMP.
 bool save_picture(const std::string &path, int width, int height)
 {
@@ -277,9 +286,11 @@ int main()
     prospero::UiFrame frame;
     frame.glass_texture = renderer.glass_texture();
     hui::ui::Feedback feedback;
-    // A test run written in the install folder's dev/request.txt; nothing without it.
+    // A Gemma streaming run can spend several minutes preparing a large model.
+    // Do not let a leftover UI test script switch models or close that experiment.
     prospero::DevScript script;
-    if (script.load("/app0/dev/request.txt", "/download0/ProsperoAI/dev"))
+    const bool gemma4_streaming_test = access("/app0/gemma4_streaming.txt", F_OK) == 0;
+    if (!gemma4_streaming_test && script.load("/app0/dev/request.txt", "/download0/ProsperoAI/dev"))
         hui::sys::log("[prosperoai] scripted run");
     hui::gfx::Canvas picture;
     auto previous = hui::sys::monotonic_us();
@@ -288,7 +299,9 @@ int main()
         prospero::read_inference_setting("/app0", "ui_sleep_ms.txt", 50, 0, 1000);
 #endif
     bool first_frame = true;
-    while (!ui.quit_requested() && !script.quit())
+    // HTTP requests run on worker threads outside App::busy(). Do not tear down
+    // the Vulkan runtime while one of those generations still owns its model.
+    while (!ui.quit_requested() && (!script.quit() || inference_running()))
     {
         // Animation time runs from frame start to frame start, and is clamped.
         const auto now = hui::sys::monotonic_us();

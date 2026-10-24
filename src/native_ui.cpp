@@ -6,6 +6,9 @@
 #include "chatterbox_languages.hpp"
 #include "runtime_settings.hpp"
 #include "http_server.hpp"
+#ifdef PS5_LLAMA_VULKAN
+#include "gpt_runtime.hpp"
+#endif
 #include "../third_party/qrcodegen/qrcodegen.hpp"
 
 #include "debug_log.hpp"
@@ -44,6 +47,17 @@ constexpr float kBootSeconds = 1.6f; // the opening is never shorter than its ch
 constexpr const char *kTabs[] = {"Workspace", "Models", "Settings", "Mobile"};
 constexpr const char *kCategories[] = {"Appearance", "Sound", "Accessibility", "Diagnostics",
                                        "About"};
+#ifdef PS5_LLAMA_VULKAN
+bool inference_running()
+{
+    return gpt_runtime_generations_running() != 0;
+}
+#else
+bool inference_running()
+{
+    return false;
+}
+#endif
 enum DialogAction
 {
     kUseModel = 1,
@@ -642,7 +656,7 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
                 }
             }
             else if (dialog_action_ == kCloseApp)
-                accepted = quit_ = !app_.busy() && !app_.state().unsaved;
+                accepted = quit_ = !app_.busy() && !inference_running() && !app_.state().unsaved;
             else if (dialog_action_ == kCancelDownload)
                 accepted = cancel_pending_ = prospero_model_download::cancel();
             else if (dialog_action_ == kDeleteVoice)
@@ -675,13 +689,14 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
     }
     else if (input.is_pressed(Action::menu))
     {
-        if (app_.busy() || state.unsaved)
+        const bool still_working = app_.busy() || inference_running();
+        if (still_working || state.unsaved)
         {
             feedback.play(audio::Cue::error, 1.0f, 0.0f, 0.7f);
             toasts_.push(ui::StatusKind::info,
-                         app_.busy() ? "Still working" : "This conversation is not saved yet",
-                         app_.busy() ? "ProsperoAI can close once this is finished."
-                                     : "Retry the save before closing.");
+                         still_working ? "Still working" : "This conversation is not saved yet",
+                         still_working ? "ProsperoAI can close once this is finished."
+                                       : "Retry the save before closing.");
         }
         else
             open_dialog(kCloseApp, -1, "Close ProsperoAI?",

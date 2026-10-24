@@ -1,0 +1,84 @@
+{
+  "model": "Ternary-Bonsai-2-27B-PTQ1_0.gguf",
+  "title_during_probe": "PPSA99023",
+  "firmware": "12.70",
+  "qualification": "Standalone payload, disk-only; cache state uncontrolled. No Vulkan upload or inference measurement.",
+  "runs": [
+    {
+      "run": 0,
+      "workers": 1,
+      "offset": 11120992,
+      "bytes": 5935527936,
+      "seconds": 4.289834614,
+      "bytes_per_second": 1383626286.344,
+      "staging_bytes": 16777216,
+      "sample": 184904565,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 0,
+      "workers": 4,
+      "offset": 11120992,
+      "bytes": 5935527936,
+      "seconds": 3.269269539,
+      "bytes_per_second": 1815551720.405,
+      "staging_bytes": 16777216,
+      "sample": 184904565,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 1,
+      "workers": 1,
+      "offset": 11120992,
+      "bytes": 5935527936,
+      "seconds": 4.420846446,
+      "bytes_per_second": 1342622506.459,
+      "staging_bytes": 16777216,
+      "sample": 184904565,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 1,
+      "workers": 4,
+      "offset": 11120992,
+      "bytes": 5935527936,
+      "seconds": 3.372039023,
+      "bytes_per_second": 1760219231.01,
+      "staging_bytes": 16777216,
+      "sample": 184904565,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 2,
+      "workers": 1,
+      "offset": 11120992,
+      "bytes": 5935527936,
+      "seconds": 4.271119656,
+      "bytes_per_second": 1389688984.166,
+      "staging_bytes": 16777216,
+      "sample": 184904565,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    },
+    {
+      "run": 2,
+      "workers": 4,
+      "offset": 11120992,
+      "bytes": 5935527936,
+      "seconds": 3.337607403,
+      "bytes_per_second": 1778378107.223,
+      "staging_bytes": 16777216,
+      "sample": 184904565,
+      "cache_state": "uncontrolled",
+      "upload_measured": false
+    }
+  ],
+  "median_bytes_per_second": {
+    "1": 1383626286.344,
+    "4": 1778378107.223
+  }
+}

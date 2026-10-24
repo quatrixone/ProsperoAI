@@ -81,9 +81,11 @@ inline constexpr PresetFile preset_files_6[] = {
 inline constexpr PresetFile preset_files_7[] = {
     {"MiniCPM5-2B-Q8_0.gguf", "", "c5415f8989bf88a8288f1b55a3cc371af53c07b0faa220a63bd7a990cfaba078", 2679710688ULL, nullptr, nullptr},
 };
+#ifdef PROSPERO_PRISM_RUNTIME
 inline constexpr PresetFile preset_files_8[] = {
     {"Ternary-Bonsai-2-27B-PTQ1_0.gguf", "", "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3", 5946648928ULL, nullptr, nullptr},
 };
+#endif
 inline constexpr PresetFile preset_files_9[] = {
     {"granite-4.0-h-tiny-Q4_K_M.gguf", "", "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd", 4230976352ULL, nullptr, nullptr},
 };
@@ -91,6 +93,11 @@ inline constexpr PresetFile preset_files_10[] = {
     {"bohf-12b-moe-3a-q3_k_m.gguf", "", "a13ef6785d0753fe7270d96c061d8c0f32e1bc2b8c17acf6e28fd021ebb5023b", 4703718432ULL, nullptr, nullptr},
 };
 inline constexpr PresetFile preset_files_11[] = {
+    {"z_image_turbo-Q2_K.gguf", "diffusion_model.gguf", "a9cf1b0368e24c2f9d542d2951c01f6f7fc85ed8c9ed39b5b37b15375508d58a", 2592442304ULL, nullptr, nullptr},
+    {"Qwen3-4B-Instruct-2507-Q2_K.gguf", "qwen3-4b-instruct-2507-q2-k.gguf", "f7ed2f57713ad29e1a4ec093be0cdf3d7fd31e137e8fd4fc3edcfd04a5267862", 1669500000ULL, "unsloth/Qwen3-4B-Instruct-2507-GGUF", "1e1094e82febb22ad75c2802fc1cbc94c74f8481"},
+    {"split_files/vae/ae.safetensors", "ae.safetensors", "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38", 335304388ULL, "Comfy-Org/z_image_turbo", "6fc90a3b1b653e935a0d175e260736de25b84df5"},
+};
+inline constexpr PresetFile preset_files_12[] = {
     {"Chatterbox-GGUF/chatterbox-q8_0.gguf", "chatterbox-q8_0.gguf", "d586dd1aa59613cab8046176fb7ca5ba191c02a9b10ffa5b0d892ed22b470656", 2088393668ULL, nullptr, nullptr},
     {"tokenizer.json", "tokenizer.json", "d71e3a44eabb1784df9a68e9f95b251ecbf1a7af6a9f50835856b2ca9d8c14a5", 25470ULL, "ResembleAI/chatterbox", "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
     {"grapheme_mtl_merged_expanded_v1.json", "grapheme_mtl_merged_expanded_v1.json", "69632f47220a788a52ce2661d096453c5655e9bf25289d89a8d832c46ee07dbf", 69989ULL, "ResembleAI/chatterbox", "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
@@ -111,10 +118,13 @@ inline constexpr Preset presets[] = {
     {"ace-step-1.5-turbo-q8-0", "ACE-Step 1.5 Turbo Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 2, 6244194798ULL, preset_files_5, 15},
     {"kokoro-82m-vulkan", "Kokoro 82M Vulkan", "blackbearreloaded/ProsperoAI-Kokoro-82M-FP16-PS5", "a06dcbed88d1d04f7653d899e95d025daa55f16d", 3, 167324763ULL, preset_files_6, 28},
     {"minicpm5-2b-q8-0.gguf", "MiniCPM5 2B Q8_0", "openbmb/MiniCPM5-2B-GGUF", "2079a22f3beaa4e306449978533478fe0522f4b3", 0, 2679710688ULL, preset_files_7, 1},
+#ifdef PROSPERO_PRISM_RUNTIME
     {"Ternary-Bonsai-2-27B-PTQ1_0.gguf", "Ternary Bonsai 2 27B PTQ1_0", "prism-ml/Ternary-Bonsai-2-27B-gguf", "b072e1d3b35a0a630cece372c2127528e0994386", 0, 5946648928ULL, preset_files_8, 1},
+#endif
     {"granite-4.0-h-tiny-q4-k-m.gguf", "Granite 4.0 H-Tiny Q4_K_M", "ibm-granite/granite-4.0-h-tiny-GGUF", "08d5a8a9741dd5c1a95d2d39e25253226aa1464e", 0, 4230976352ULL, preset_files_9, 1},
     {"bohf-12b-moe-3a-q3-k-m.gguf", "BoHF 12B MoE 3A Q3_K_M", "theprint/Bohf-12B-MoE-3A-GGUF", "a0ab1f1455f4bad47f31c8c52f6aec1569699da5", 0, 4703718432ULL, preset_files_10, 1},
-    {"chatterbox-500m-q8-0", "Chatterbox 500M Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 3, 2092546523ULL, preset_files_11, 10},
+    {"z-image-turbo-q2-k", "Z-Image Turbo Q2_K + Qwen3 4B Q2_K (8-step)", "leejet/Z-Image-Turbo-GGUF", "c61c0e422dc8b541b7548cf33a4ef8302b0f8085", 1, 4597246692ULL, preset_files_11, 3},
+    {"chatterbox-500m-q8-0", "Chatterbox 500M Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 3, 2092546523ULL, preset_files_12, 10},
 };
 inline constexpr std::size_t preset_count = sizeof(presets) / sizeof(presets[0]);
 }
