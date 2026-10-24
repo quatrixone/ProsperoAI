@@ -12,6 +12,7 @@
 #include "model_paths.hpp"
 #include "model_presets.hpp"
 #include "kv_budget.hpp"
+#include "model_load_budget.hpp"
 #include "direct_memory.hpp"
 #include "prefix_reuse.hpp"
 #include "runtime_settings.hpp"
@@ -249,6 +250,17 @@ bool prepare() {
     mp.n_gpu_layers = 99;
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     if (!model) {
+        struct stat model_stat{};
+        const auto direct_free = prospero_memory::free_total();
+        const auto load_free = direct_free && direct_free <= total_bytes
+            ? direct_free : prospero_kv::validated_free_bytes(free_bytes, total_bytes);
+        if (stat(files[selected].path.c_str(), &model_stat) != 0 || model_stat.st_size <= 0 ||
+            !prospero_memory::resident_model_fits(
+                static_cast<std::uint64_t>(model_stat.st_size), load_free, total_bytes)) {
+            log_message(GGML_LOG_LEVEL_ERROR,
+                        "Model load refused: GGUF weights plus 768 MiB reserve exceed available memory, or memory/file size is unknown.\n", nullptr);
+            return false;
+        }
         model_load_free_bytes = free_before_model;
         model = llama_model_load_from_file(files[selected].path.c_str(), mp);
         prospero_runtime::set_model_resident(model != nullptr);

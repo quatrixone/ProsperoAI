@@ -110,6 +110,10 @@ constexpr std::size_t kMaxActiveConnections = 8;
 constexpr std::size_t kRequestCapacity = 256 * 1024;
 constexpr std::size_t kResponseTextCapacity = prospero_generation::MaxOutputBytes;
 unsigned short kHttpServerPort = 11434;
+std::atomic<bool> server_stopping{false};
+void *server_thread = nullptr; // start/stop are owned by the main thread
+constexpr int kSoSendTimeout = 0x1005;
+constexpr int kSoReceiveTimeout = 0x1006;
 
 // FreeBSD sockaddr_in layout: 1-byte length, 1-byte family, big-endian
 // port/address, 8 bytes of padding. Deliberately not reusing a system
@@ -861,6 +865,8 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
     const char *header_end = nullptr;
     while (total + 1 < capacity)
     {
+        if (server_stopping.load()) return 0;
+        if (server_stopping.load()) return 0;
         const int received = api.recv(sock, buffer + total, capacity - 1 - total, 0);
         if (received <= 0)
             return 0;
@@ -939,6 +945,7 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
     const std::size_t wanted = body_start + content_length;
     while (total < wanted)
     {
+        if (server_stopping.load()) return 0;
         const int received = api.recv(sock, buffer + total, wanted - total, 0);
         if (received <= 0)
             return 0;
@@ -2092,6 +2099,13 @@ void handle_connection(const NetApi &api, int sock)
         return;
     }
 
+    if (server_stopping.load())
+    {
+        send_status(api, sock, "503 Service Unavailable", "application/json",
+                    "{\"error\":\"The application is shutting down.\"}");
+        api.socket_close(sock);
+        return;
+    }
     char method[8] = {};
     char path[256] = {};
     std::sscanf(request, "%7s %255s", method, path);
@@ -2263,7 +2277,13 @@ void handle_connection(const NetApi &api, int sock)
 void *connection_worker(void *argument)
 {
     auto *args = static_cast<ConnectionArgs *>(argument);
-    handle_connection(args->api, args->sock);
+    try {
+        handle_connection(args->api, args->sock);
+    } catch (...) {
+        // Never let a request exception terminate the process. Handler-owned
+        // runtime guards unwind before the worker is marked complete.
+        args->api.socket_close(args->sock);
+    }
     args->done.store(true, std::memory_order_release);
     return nullptr;
 }
@@ -2301,18 +2321,36 @@ void *server_worker(void *)
     address.sin_port = static_cast<std::uint16_t>((kHttpServerPort >> 8) | (kHttpServerPort << 8));
     address.sin_addr = 0; // INADDR_ANY
 
-    log_result("sceNetBind", api.bind(listen_sock, &address, sizeof(address)));
-    log_result("sceNetListen", api.listen(listen_sock, kListenBacklog));
+    // A finite accept timeout lets stop join this thread without closing a
+    // descriptor underneath another thread. Fail closed if it is unsupported.
+    const timeval accept_timeout{1, 0};
+    if (api.setsockopt(listen_sock, kSolSocket, kSoReceiveTimeout,
+                       &accept_timeout, sizeof(accept_timeout)) < 0 ||
+        api.bind(listen_sock, &address, sizeof(address)) < 0 ||
+        api.listen(listen_sock, kListenBacklog) < 0) {
+        log_line("HTTP listener setup failed");
+        api.socket_close(listen_sock);
+        return nullptr;
+    }
     log_line("HTTP server listening");
 
     std::vector<ConnectionArgs *> connections;
-    for (;;)
+    while (!server_stopping.load())
     {
         SceNetSockaddrIn client{};
         unsigned int client_length = sizeof(client);
         const int client_sock = api.accept(listen_sock, &client, &client_length);
         if (client_sock < 0)
             continue;
+        const timeval io_timeout{5, 0};
+        if (server_stopping.load() ||
+            api.setsockopt(client_sock, kSolSocket, kSoReceiveTimeout,
+                           &io_timeout, sizeof(io_timeout)) < 0 ||
+            api.setsockopt(client_sock, kSolSocket, kSoSendTimeout,
+                           &io_timeout, sizeof(io_timeout)) < 0) {
+            api.socket_close(client_sock);
+            continue;
+        }
 
         for (auto it = connections.begin(); it != connections.end();)
         {
@@ -2362,9 +2400,24 @@ void *server_worker(void *)
             delete args;
         }
     }
+    api.socket_close(listen_sock);
+    for (auto *connection : connections) {
+        scePthreadJoin(connection->thread, nullptr);
+        delete connection;
+    }
+    return nullptr;
 }
 
 } // namespace
+
+void prospero_http_server_stop()
+{
+    server_stopping.store(true);
+    if (server_thread) {
+        scePthreadJoin(server_thread, nullptr);
+        server_thread = nullptr;
+    }
+}
 
 void prospero_http_server_last_status(char *text, std::size_t capacity)
 {
@@ -2400,15 +2453,13 @@ int prospero_http_server_auth_status()
 
 bool prospero_http_server_start(unsigned short port)
 {
+    if (server_thread || server_stopping.load()) return false;
     kHttpServerPort = port;
     load_api_key();
-    void *thread = nullptr;
     const int created =
-        scePthreadCreate(&thread, nullptr, server_worker, nullptr, "prosperoai-http-server");
-    if (created != 0)
-        return false;
-    (void)thread;
-    return true;
+        scePthreadCreate(&server_thread, nullptr, server_worker, nullptr, "prosperoai-http-server");
+    if (created != 0) server_thread = nullptr;
+    return created == 0;
 }
 
 asm(".section .text.prosperoai_layout_probe,\"axR\",@progbits\n"

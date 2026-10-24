@@ -31,6 +31,16 @@ replace(source / "llama-mmap.cpp", '            std::size_t ret = std::fread(ptr
 #endif
             std::size_t ret = std::fread(ptr, to_read, 1, fp);''')
 loader = source / 'llama-model-loader.cpp'
+replace(loader, '#include "llama-model-loader.h"',
+        '#include "llama-model-loader.h"\n#ifdef PROSPERO_PS5_MODEL_IO\n#include "ps5-model-io.hpp"\n#endif')
+# Prism has lazy tensors; stock upstream does not. Never enable that path on PS5.
+if 'lazy.any()' in loader.read_text():
+    replace(loader,
+            'void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps) {\n',
+            'void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps) {\n'
+            '#ifdef PROSPERO_PS5_MODEL_IO\n'
+            '    if (lazy.any()) throw std::runtime_error("PS5 lazy file mapping is disabled: bounded expert reads are required.");\n'
+            '#endif\n')
 direct_size = ('LLAMA_DIRECT_IO_BUFFER_SIZE' if 'LLAMA_DIRECT_IO_BUFFER_SIZE' in loader.read_text()
                else '64 * 1024 * 1024')
 replace(loader,

@@ -9,6 +9,9 @@
 // Connections are bounded and completed worker threads are joined, not detached.
 // Safe to call once during startup; failure leaves the console app running.
 bool prospero_http_server_start(unsigned short port);
+// Stops admission, joins the listener and all accepted workers. Call on the main
+// thread before destroying the app/runtime; never forcibly free an active model.
+void prospero_http_server_stop();
 
 // Copies the most recent status/diagnostic line the server thread recorded
 // (socket bind results, last request path, etc.) into the caller's buffer.

@@ -303,8 +303,10 @@ int main()
 #ifdef PS5_LLAMA_VULKAN
         if (!first_frame)
         {
-            std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
-            gpt_runtime_check_configured_idle_unload();
+            std::unique_lock<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex(),
+                                                       std::try_to_lock);
+            if (runtime_lock.owns_lock())
+                gpt_runtime_check_configured_idle_unload();
         }
 #endif
         const float elapsed = static_cast<float>(now - previous) / 1000000.0f;
@@ -386,6 +388,10 @@ int main()
             first_frame = false;
         }
     }
+#ifdef PS5_LLAMA_VULKAN
+    // Stop admission and join every HTTP worker before native/media teardown.
+    prospero_http_server_stop();
+#endif
     gpt_ime_shutdown();
     app.shutdown();
     prospero::debug::event("app-stop", "", "");
