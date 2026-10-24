@@ -59,9 +59,12 @@ struct ExpertStream::State {
     std::deque<Submitted> submitted;
     std::uint64_t graph_key = ~std::uint64_t(0);
     bool events_unavailable = false;
+    bool experimental_uploads = false;
+    bool failed = false;
     Stats stats;
     mutable std::mutex mutex;
-    State(ExpertCache &cache, Resolver resolve) : cache(cache), resolve(std::move(resolve)) {}
+    State(ExpertCache &cache, Resolver resolve, bool experimental)
+        : cache(cache), resolve(std::move(resolve)), experimental_uploads(experimental) {}
     ~State() { retire_all(); }
 
     void retire_all() {
@@ -152,17 +155,27 @@ bool copy_experts(ggml_backend_t backend, ggml_tensor *destination, const ggml_t
         const auto found = state->pools.find(weights);
         if (found == state->pools.end()) {
             ++state->stats.rejected;
+            if (weights->buffer && weights->buffer->buft == &state->buffer_type) {
+                state->failed = true;
+                return true;
+            }
             return false;  // not ours: the scheduler reads resident weights itself
         }
         pool = found->second;
         bytes = state->expert_bytes[weights];
         ++state->stats.copies;
     }
-    if (bytes != expert_size)
-        throw std::runtime_error("Streamed expert stride does not match the scheduler's");
+    if (bytes != expert_size) {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->failed = true;
+        return true;
+    }
 
     std::vector<ExpertCache::Lease> leases;
     leases.reserve(static_cast<std::size_t>(last_id - first_id + 1));
+    ggml_backend_event_t event = nullptr;
+    bool event_registered = false;
+    try {
     {
         std::lock_guard<std::mutex> lock(state->mutex);
         // Leases held for submissions still in flight pin their slots. When that
@@ -193,7 +206,7 @@ bool copy_experts(ggml_backend_t backend, ggml_tensor *destination, const ggml_t
         }
         for (std::int32_t id = first_id; id <= last_id; ++id) {
             const auto index = static_cast<std::size_t>(id);
-            if (index < record.present.size() && record.present[index]) {
+            if (state->experimental_uploads && index < record.present.size() && record.present[index]) {
                 ++state->stats.skipped;                  // the GPU already has this expert
                 state->stats.skipped_bytes += expert_size;
                 continue;
@@ -201,6 +214,11 @@ bool copy_experts(ggml_backend_t backend, ggml_tensor *destination, const ggml_t
             leases.push_back(acquire(static_cast<std::uint64_t>(id)));
             ggml_backend_tensor_set_async(backend, destination, leases.back().data(),
                                           index * expert_size, expert_size);
+            if (!state->experimental_uploads) {
+                ggml_backend_synchronize(backend);
+                leases.clear();
+                ++state->stats.stalls;
+            }
             if (index < record.present.size()) record.present[index] = true;
             ++state->stats.experts;
             state->stats.bytes += expert_size;
@@ -211,7 +229,6 @@ bool copy_experts(ggml_backend_t backend, ggml_tensor *destination, const ggml_t
     // Retain every lease until the GPU has consumed it. An event lets the reads
     // for the next copy run while this one is still in the queue; without events
     // there is nothing to wait on but the whole backend.
-    ggml_backend_event_t event = nullptr;
     std::lock_guard<std::mutex> lock(state->mutex);
     if (!state->events_unavailable) {
         event = ggml_backend_event_new(ggml_backend_get_device(backend));
@@ -224,7 +241,12 @@ bool copy_experts(ggml_backend_t backend, ggml_tensor *destination, const ggml_t
     }
     state->stats.events = true;
     ggml_backend_event_record(event, backend);
-    state->submitted.push_back(ExpertStream::State::Submitted{event, std::move(leases)});
+    // Allocate the queue node before moving leases so allocation failure cannot
+    // destroy the only owners of a source still being read by the GPU.
+    state->submitted.emplace_back();
+    state->submitted.back().event = event;
+    state->submitted.back().leases = std::move(leases);
+    event_registered = true;
     while (state->submitted.size() > max_submitted) {
         auto &oldest = state->submitted.front();
         ggml_backend_event_synchronize(oldest.event);
@@ -233,6 +255,16 @@ bool copy_experts(ggml_backend_t backend, ggml_tensor *destination, const ggml_t
         ++state->stats.retired;
     }
     return true;
+    } catch (...) {
+        // leases is outside the try block: synchronize before stack unwinding
+        // unpins a partially submitted batch (I/O, cache exhaustion or OOM).
+        ggml_backend_synchronize(backend);
+        if (event && !event_registered) ggml_backend_event_free(event);
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->gpu.clear();
+        state->failed = true;
+        return true;
+    }
 }
 } // namespace
 
@@ -262,8 +294,8 @@ bool device_runs_routed_experts(ggml_backend_dev_t device, int type, std::int64_
     return supported && offloads;
 }
 
-ExpertStream::ExpertStream(ExpertCache &cache, Resolver resolve)
-    : state_(std::make_unique<State>(cache, std::move(resolve))) {
+ExpertStream::ExpertStream(ExpertCache &cache, Resolver resolve, bool experimental_uploads)
+    : state_(std::make_unique<State>(cache, std::move(resolve), experimental_uploads)) {
     state_->buffer_type.iface = {
         /* .get_name         = */ buffer_type_name,
         /* .alloc_buffer     = */ buffer_type_alloc,
@@ -304,6 +336,11 @@ void ExpertStream::uninstall() {
 void ExpertStream::drain() {
     std::lock_guard<std::mutex> lock(state_->mutex);
     state_->retire_all();
+}
+
+bool ExpertStream::failed() const {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    return state_->failed;
 }
 
 void ExpertStream::begin_graph(std::uint64_t key) {

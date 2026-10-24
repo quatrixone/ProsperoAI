@@ -56,6 +56,8 @@ class VulkanRuntimeTests(unittest.TestCase):
             # Routed experts reaching Vulkan through the scheduler's expert hook,
             # with the weight tensor never resident.
             subprocess.run([str(stream), fixtures], check=True, env=environment, timeout=900)
+            subprocess.run([str(stream), fixtures, 'experimental'], check=True,
+                           env=environment, timeout=900)
 
     def test_required_build_cannot_skip_missing_artifacts(self):
         with mock.patch.dict(os.environ, {'PROSPERO_REQUIRE_VULKAN_RUNTIME': '1'}), \

@@ -46,7 +46,7 @@ std::string write_weights(const char *directory, ggml_type type, std::vector<std
 
 int main(int argc, char **argv)
 {
-    assert(argc == 2);
+    assert(argc == 2 || argc == 3);
     constexpr std::uint64_t header = 128;
     const auto type = GGML_TYPE_Q4_K;
     std::vector<std::uint8_t> packed;
@@ -66,16 +66,18 @@ int main(int argc, char **argv)
     const ExpertExtent extent{header, static_cast<std::uint64_t>(ggml_row_size(type, columns)),
                               rows, experts};
     unsigned resolved = 0;
-    ExpertStream stream(cache,
-                        [&](const std::string &name, StreamedTensor &out)
-                        {
-                            if (name != "streamed_experts")
-                                return false;
-                            out.extent = extent;
-                            out.slots = 4;
-                            ++resolved;
-                            return true;
-                        });
+    ExpertStream stream(
+        cache,
+        [&](const std::string &name, StreamedTensor &out)
+        {
+            if (name != "streamed_experts")
+                return false;
+            out.extent = extent;
+            out.slots = 4;
+            ++resolved;
+            return true;
+        },
+        argc > 2);
     stream.install();
 
     // Room for both graphs: one graph's worth of context silently aliased them.
@@ -145,7 +147,15 @@ int main(int argc, char **argv)
         assert(ggml_backend_sched_alloc_graph(sched, graph));
         ggml_backend_tensor_set(input, x.data(), 0, sizeof(x));
         ggml_backend_tensor_set(ids, route.data(), 0, sizeof(route));
-        assert(ggml_backend_sched_graph_compute(sched, graph) == GGML_STATUS_SUCCESS);
+        try
+        {
+            assert(ggml_backend_sched_graph_compute(sched, graph) == GGML_STATUS_SUCCESS);
+        }
+        catch (...)
+        {
+            ggml_free(ctx);
+            throw;
+        }
         ggml_backend_tensor_get(result, out.data(), 0, out.size() * sizeof(float));
         ggml_free(ctx);
     };
@@ -172,7 +182,7 @@ int main(int argc, char **argv)
            served.bytes == served.experts * expert_bytes);
     // The second route repeats the first, so those experts must not be uploaded
     // again, and parity above proves the skipped ones were really still there.
-    assert(served.skipped >= selected);
+    assert(argc > 2 ? served.skipped >= selected : served.skipped == 0);
     assert(served.skipped_bytes == served.skipped * expert_bytes);
 
     // A different graph key means the scheduler may have moved its copies: every
@@ -199,10 +209,12 @@ int main(int argc, char **argv)
     stream.drain(); // in-flight copies hold their leases
     assert(cache.stats().pinned_slots == 0);
 
+    const auto before_uninstall = stream.stats();
+
     // With the hook uninstalled the scheduler would read the fake address, so a
     // run without it must not be attempted; check the counter instead.
     ExpertStream::uninstall();
-    assert(stream.stats().copies == after_invalidation.copies);
+    assert(stream.stats().copies == before_uninstall.copies);
 
     std::printf("expert stream: routed parity through the scheduler; %llu experts uploaded, "
                 "%llu skipped as already resident on the GPU, %llu copies, cache %zu bytes, "

@@ -41,7 +41,8 @@ public:
     // rejected: a silent fallback would allocate the whole tensor.
     using Resolver = std::function<bool(const std::string &name, StreamedTensor &out)>;
 
-    ExpertStream(ExpertCache &cache, Resolver resolve);
+    // Optimized uploads remain a host-test-only opt-in until console validation.
+    ExpertStream(ExpertCache &cache, Resolver resolve, bool experimental_uploads = false);
     ExpertStream(const ExpertStream &) = delete;
     ExpertStream &operator=(const ExpertStream &) = delete;
     ~ExpertStream();
@@ -64,6 +65,7 @@ public:
     // Waits for every submitted copy and releases the leases it was holding.
     // Required before the cache goes away, and after the last decode of a model.
     void drain();
+    bool failed() const;
 
     struct Stats {
         std::uint64_t copies = 0, experts = 0, bytes = 0;    // scheduler requests served

@@ -1,3 +1,4 @@
+#include <stdexcept>
 #include "runtime_residency.hpp"
 // ProsperoAI - llama.cpp inference through the PS5 RADV Vulkan backend.
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -308,6 +309,8 @@ bool prepare() {
             expert_layout = prospero_streaming::read_routed_expert_layout(path);
             unsigned slots = 16, workers = 2;
             read_streaming_tuning(slots, workers);
+            if (slots < expert_layout.experts_used || slots > 16)
+                throw std::runtime_error("Experimental PS5 cache requires routed-expert count <= slots <= 16");
 
             std::uint64_t budget = 0;
             unsigned streamed = 0;
@@ -333,6 +336,12 @@ bool prepare() {
                           * std::min<std::uint64_t>(slots, tensor.extent.experts);
                 ++streamed;
             }
+            constexpr std::uint64_t cache_ceiling = 2ULL << 30;
+            constexpr std::uint64_t runtime_reserve = 4ULL << 30;
+            const auto available = prospero_memory::free_total();
+            if (!budget || budget > cache_ceiling || available > total_bytes ||
+                available <= runtime_reserve || budget > available - runtime_reserve)
+                throw std::runtime_error("Expert cache exceeds the safe experimental memory budget");
             expert_cache = std::make_unique<prospero_streaming::ExpertCache>(
                 path.c_str(), static_cast<std::size_t>(budget), workers);
             expert_stream = std::make_unique<prospero_streaming::ExpertStream>(
@@ -674,7 +683,14 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
             // shape, because the scheduler may move its copy tensors otherwise.
             if (expert_stream) expert_stream->begin_graph(static_cast<std::uint64_t>(batch_count));
 #endif
-            if (llama_decode(context, batch) != 0) { previous_tokens.clear(); return 1; }
+            const int decode_result = llama_decode(context, batch);
+            if (decode_result != 0 || (expert_stream && expert_stream->failed())) {
+                previous_tokens.clear();
+                if (expert_stream && expert_stream->failed())
+                    std::snprintf(output, capacity, "Expert streaming failed while reading model weights.");
+                release_model();
+                return 1;
+            }
             previous_tokens.insert(previous_tokens.end(), tokens.begin() + pos, tokens.begin() + pos + batch_count);
             pos += batch_count;
         }
@@ -721,7 +737,15 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
 #ifdef PROSPERO_EXPERT_STREAM
                 if (expert_stream) expert_stream->begin_graph(1);
 #endif
-                if (llama_decode(context, batch) != 0) { previous_tokens.clear(); result = 1; break; }
+                const int decode_result = llama_decode(context, batch);
+                if (decode_result != 0 || (expert_stream && expert_stream->failed())) {
+                    previous_tokens.clear();
+                    if (expert_stream && expert_stream->failed())
+                        std::snprintf(output, capacity, "Expert streaming failed while reading model weights.");
+                    release_model();
+                    result = 1;
+                    break;
+                }
                 previous_tokens.push_back(token);
             }
         }
