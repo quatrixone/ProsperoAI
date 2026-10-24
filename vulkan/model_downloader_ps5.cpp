@@ -450,8 +450,9 @@ void *download_range(void *opaque) {
     // A resumed range asks for everything after its last saved byte, and a range the
     // manifest already reports as whole is not fetched at all.
     std::uint64_t received = std::min(task.resume, length);
-    bool ok = true;
-    if (received < length) {
+    bool ok = received == length;
+    for (unsigned attempt = 0; received < length && attempt < 3 && !cancel_pending(); ++attempt) {
+        ok = true;
         HttpSession http;
         ok = http.get_range(*task.url, task.first + received, task.last);
         const int file = ok ? open(task.path->c_str(), O_WRONLY) : -1;
@@ -479,6 +480,8 @@ void *download_range(void *opaque) {
             if (http.read(&extra, 1) != 0) ok = false;
         }
         if (file >= 0) close(file);
+        if (!ok && !cancel_pending() && received < length)
+            ::usleep(250000u * (attempt + 1));
     }
     task.ok = ok && received == length && !cancel_pending();
     // Record the byte count even when the connection dropped: the next attempt picks
@@ -1030,6 +1033,7 @@ bool delete_model_files(const char *raw_id) {
     std::fclose(index);
     if (failed || count == 0 ||
         (!std::strstr(contents, "Flux2KleinPipeline") &&
+         !std::strstr(contents, "QwenImage21Pipeline") &&
          !std::strstr(contents, "StableDiffusion3Pipeline") &&
          !std::strstr(contents, "StableDiffusionXLPipeline")))
         return false;

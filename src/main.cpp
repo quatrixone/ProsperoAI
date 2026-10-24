@@ -304,7 +304,7 @@ int main()
         if (!first_frame)
         {
             std::unique_lock<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex(),
-                                                       std::try_to_lock);
+                                                      std::try_to_lock);
             if (runtime_lock.owns_lock())
                 gpt_runtime_check_configured_idle_unload();
         }

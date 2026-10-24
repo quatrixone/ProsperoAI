@@ -94,6 +94,8 @@ bool supported_diffusers_directory(const std::string &path, std::string &family)
         return false;
     if (std::strstr(contents, "Flux2KleinPipeline"))
         family = "FLUX.2 Klein";
+    else if (std::strstr(contents, "QwenImage21Pipeline"))
+        family = "Qwen-Image 2.1";
     else if (std::strstr(contents, "StableDiffusion3Pipeline"))
         family = "SD3";
     else if (std::strstr(contents, "StableDiffusionXLPipeline"))
@@ -101,6 +103,12 @@ bool supported_diffusers_directory(const std::string &path, std::string &family)
     else
         return false;
     return count > 0;
+}
+bool supported_qwen_image_2_1_directory(const std::string &path)
+{
+    return exists(path + "/qwen_image_2.1-Q2_K.gguf") &&
+           exists(path + "/Qwen3VL-8B-Instruct-Q4_K_M.gguf") &&
+           exists(path + "/qwen_image_2.1_vae_bf16.safetensors");
 }
 void scan()
 {
@@ -201,8 +209,11 @@ void scan()
             if (stat(root.c_str(), &info) != 0 || !S_ISDIR(info.st_mode))
                 continue;
             std::string family;
-            if (supported_diffusers_directory(root, family))
+            if (supported_diffusers_directory(root, family) &&
+                (family != "Qwen-Image 2.1" || supported_qwen_image_2_1_directory(root)))
                 models.push_back({id, id + " (" + family + ")", root, Modality::Image, 0});
+            else if (supported_qwen_image_2_1_directory(root))
+                models.push_back({id, id + " (Qwen-Image 2.1)", root, Modality::Image, 0});
         }
         closedir(directory);
     }

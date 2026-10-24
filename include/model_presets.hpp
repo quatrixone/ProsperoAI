@@ -81,9 +81,11 @@ inline constexpr PresetFile preset_files_6[] = {
 inline constexpr PresetFile preset_files_7[] = {
     {"MiniCPM5-2B-Q8_0.gguf", "", "c5415f8989bf88a8288f1b55a3cc371af53c07b0faa220a63bd7a990cfaba078", 2679710688ULL, nullptr, nullptr},
 };
+#ifdef PROSPERO_PRISM_RUNTIME
 inline constexpr PresetFile preset_files_8[] = {
     {"Ternary-Bonsai-2-27B-PTQ1_0.gguf", "", "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3", 5946648928ULL, nullptr, nullptr},
 };
+#endif
 inline constexpr PresetFile preset_files_9[] = {
     {"granite-4.0-h-tiny-Q4_K_M.gguf", "", "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd", 4230976352ULL, nullptr, nullptr},
 };
@@ -102,6 +104,20 @@ inline constexpr PresetFile preset_files_11[] = {
     {"voices/ruth_golding.flac", "voices/chatterbox/ruth_golding.flac", "f381a6ea1e26bcd24f30a61946ec8056cc34eea6bfdbcaad72efd2f72ebd2405", 295300ULL, "github:CoisLR/TTS-Reference-Voices", "f6be3bc580483c1027e4a66a887ca8510566ae40"},
     {"voices/phil_chenevert.flac", "voices/chatterbox/phil_chenevert.flac", "2c66f024ceee942fec277f9700d07abcffcd5dbccb81e714eb48d95505f117da", 296237ULL, "github:CoisLR/TTS-Reference-Voices", "f6be3bc580483c1027e4a66a887ca8510566ae40"},
 };
+inline constexpr PresetFile preset_files_12[] = {
+    {"yue2-3b-q8_0.gguf", "yue2-3b-q8_0.gguf", "9694dbcdf67c31875eb78abbe94cc30169465ed7f259af98df96b84d999cba1c", 4264194240ULL, nullptr, nullptr},
+    {"yue2-vae-f16.gguf", "yue2-vae-f16.gguf", "81e05a79e78ce5cb8deb1d87e17b73e5d205b440be2bd510ae62acf37b300ddb", 265226496ULL, nullptr, nullptr},
+    {"sidecars/yue2-model-config.json", "sidecars/yue2-model-config.json", "ad3477bbef890bf98ae196c1e4b44779494a6231c4ab66f32708eabadf265329", 959ULL, nullptr, nullptr},
+    {"sidecars/yue2-generation-config.json", "sidecars/yue2-generation-config.json", "203830cebde6e3644eb291925362990d198e66c3b6006cd11f1aaa21904bcc61", 466ULL, nullptr, nullptr},
+    {"sidecars/yue2-vae-config.json", "sidecars/yue2-vae-config.json", "f0191bb9694009956de44e0c361a6f1334760be4c8f848e599bde242a54a0970", 1378ULL, nullptr, nullptr},
+    {"sidecars/yue2-qwen.tiktoken", "sidecars/yue2-qwen.tiktoken", "b2b1b8dfb5cc5f024bafc373121c6aba3f66f9a5a0269e243470a1de16a33186", 2561218ULL, nullptr, nullptr},
+};
+inline constexpr PresetFile preset_files_13[] = {
+    {"sheetsage2-orig.gguf", "sheetsage2-orig.gguf", "d858bfdf5ac7be16261ac6ee38754d6fca502149131b44a5262b4039fb72876e", 2708224256ULL, nullptr, nullptr},
+};
+inline constexpr PresetFile preset_files_14[] = {
+    {"HTDemucs-GGUF/htdemucs-q8_0.gguf", "htdemucs-q8_0.gguf", "b0f532ac6e5f373aeb11fa0df73253251e133832d9c8b9942dc58f50bc5b4388", 61940768ULL, nullptr, nullptr},
+};
 inline constexpr Preset presets[] = {
     {"Mistral-7B-Instruct-v0.3.Q4_0.gguf", "Mistral 7B Instruct v0.3 Q4_0", "QuantFactory/Mistral-7B-Instruct-v0.3-GGUF", "a83fbb7c79c1afd59dfcce75272591cbe5a2412f", 0, 4113289152ULL, preset_files_0, 1},
     {"qwen3.8-9b-distill-q4-k-m.gguf", "Qwen3.8 9B Distill Q4_K_M", "empero-ai/Qwen3.8-9B-Distill-GGUF", "760121cd70bb4c36b2b5ec58eb765e0df5987efe", 0, 5780090176ULL, preset_files_1, 1},
@@ -111,10 +127,15 @@ inline constexpr Preset presets[] = {
     {"ace-step-1.5-turbo-q8-0", "ACE-Step 1.5 Turbo Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 2, 6244194798ULL, preset_files_5, 15},
     {"kokoro-82m-vulkan", "Kokoro 82M Vulkan", "blackbearreloaded/ProsperoAI-Kokoro-82M-FP16-PS5", "a06dcbed88d1d04f7653d899e95d025daa55f16d", 3, 167324763ULL, preset_files_6, 28},
     {"minicpm5-2b-q8-0.gguf", "MiniCPM5 2B Q8_0", "openbmb/MiniCPM5-2B-GGUF", "2079a22f3beaa4e306449978533478fe0522f4b3", 0, 2679710688ULL, preset_files_7, 1},
+#ifdef PROSPERO_PRISM_RUNTIME
     {"Ternary-Bonsai-2-27B-PTQ1_0.gguf", "Ternary Bonsai 2 27B PTQ1_0", "prism-ml/Ternary-Bonsai-2-27B-gguf", "b072e1d3b35a0a630cece372c2127528e0994386", 0, 5946648928ULL, preset_files_8, 1},
+#endif
     {"granite-4.0-h-tiny-q4-k-m.gguf", "Granite 4.0 H-Tiny Q4_K_M", "ibm-granite/granite-4.0-h-tiny-GGUF", "08d5a8a9741dd5c1a95d2d39e25253226aa1464e", 0, 4230976352ULL, preset_files_9, 1},
     {"bohf-12b-moe-3a-q3-k-m.gguf", "BoHF 12B MoE 3A Q3_K_M", "theprint/Bohf-12B-MoE-3A-GGUF", "a0ab1f1455f4bad47f31c8c52f6aec1569699da5", 0, 4703718432ULL, preset_files_10, 1},
     {"chatterbox-500m-q8-0", "Chatterbox 500M Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 3, 2092546523ULL, preset_files_11, 10},
+    {"yue2-3b-q8-0", "YuE2 3B Q8_0 (Vulkan)", "ngquocvinh/YuE2-3B-GGUF", "9711e46e444185449185914dfb8694e6ce4069c9", 2, 4531984757ULL, preset_files_12, 6},
+    {"sheetsage2-orig", "SheetSage2 Cover (Vulkan)", "audio-cpp/SheetSage2-GGUF", "4e88814450385334524e50df43724af583f74206", 2, 2708224256ULL, preset_files_13, 1},
+    {"htdemucs-q8_0", "HTDemucs Stems Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "661a224e9d9adbd49c01626f85e426f5f425d771", 2, 61940768ULL, preset_files_14, 1},
 };
 inline constexpr std::size_t preset_count = sizeof(presets) / sizeof(presets[0]);
 }

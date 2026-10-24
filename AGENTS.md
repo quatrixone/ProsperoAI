@@ -30,6 +30,16 @@ Your task is whatever the user's prompt asks. `VK_ACTIVE.md`'s "Next" list is ba
 where things stand, not a queue to work through unprompted — say so if the prompt and that list
 disagree about what to do next.
 
+## Codebase graph
+
+- For architecture and code-flow questions, use the Graphify skill and query
+  `graphify-out/graph.json` first when it exists.
+- Build the project graph with `graphify .` when no graph exists. After changing code or docs,
+  update it with `graphify . --update` before using it for another query.
+- If full semantic extraction has no configured LLM backend, use `--code-only` and keep working;
+  do not ask for or expose API keys.
+- Keep generated graph artifacts under `graphify-out/`.
+
 ## Build and verify
 
 - Keep generated user-facing outputs in their persistent modality folders: `work/image/`,

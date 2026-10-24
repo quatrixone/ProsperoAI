@@ -29,3 +29,6 @@ models/*
 *.sprx
 *.prx
 *.pkg
+graphify-out/cache/
+graphify-out/.graphify_*
+graphify-out/[0-9]*/

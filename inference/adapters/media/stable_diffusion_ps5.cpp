@@ -45,6 +45,19 @@ bool model_index_has(const char *root, const char *pipeline)
     return !failed && count > 0 && std::strstr(contents, pipeline) != nullptr;
 }
 
+bool file_exists(const char *root, const char *name)
+{
+    char path[512];
+    if (std::snprintf(path, sizeof(path), "%s/%s", root, name) >=
+        static_cast<int>(sizeof(path)))
+        return false;
+    std::FILE *file = std::fopen(path, "rb");
+    if (!file)
+        return false;
+    std::fclose(file);
+    return true;
+}
+
 bool is_sd3_model(const char *root)
 {
     return root && model_index_has(root, "StableDiffusion3Pipeline");
@@ -53,6 +66,14 @@ bool is_sd3_model(const char *root)
 bool is_flux2_klein_model(const char *root)
 {
     return root && model_index_has(root, "Flux2KleinPipeline");
+}
+
+bool is_qwen_image_2_1_model(const char *root)
+{
+    return root && (model_index_has(root, "QwenImage21Pipeline") ||
+                    (file_exists(root, "qwen_image_2.1-Q2_K.gguf") &&
+                     file_exists(root, "Qwen3VL-8B-Instruct-Q4_K_M.gguf") &&
+                     file_exists(root, "qwen_image_2.1_vae_bf16.safetensors")));
 }
 
 bool is_sdxl_checkpoint(const char *root)
@@ -217,10 +238,22 @@ bool ensure_context(const char *root)
     sd_ctx_params_t parameters;
     sd_ctx_params_init(&parameters);
     const bool flux2_klein = is_flux2_klein_model(root);
+    const bool qwen_image_2_1 = is_qwen_image_2_1_model(root);
     char diffusion_model_path[512];
     char llm_path[512];
     char vae_path[512];
     char checkpoint_path[512];
+    if (qwen_image_2_1 &&
+        (std::snprintf(diffusion_model_path, sizeof(diffusion_model_path),
+                       "%s/qwen_image_2.1-Q2_K.gguf", root) >=
+             static_cast<int>(sizeof(diffusion_model_path)) ||
+         std::snprintf(llm_path, sizeof(llm_path),
+                       "%s/Qwen3VL-8B-Instruct-Q4_K_M.gguf", root) >=
+             static_cast<int>(sizeof(llm_path)) ||
+         std::snprintf(vae_path, sizeof(vae_path),
+                       "%s/qwen_image_2.1_vae_bf16.safetensors", root) >=
+             static_cast<int>(sizeof(vae_path))))
+        return false;
     const bool sdxl_checkpoint = is_sdxl_checkpoint(root);
     const bool sdxl = sdxl_checkpoint || model_index_has(root, "StableDiffusionXLPipeline");
     const bool realistic_vision = is_realistic_vision_v51(root);
@@ -243,7 +276,7 @@ bool ensure_context(const char *root)
          std::snprintf(vae_path, sizeof(vae_path), "%s/vae.safetensors", root) >=
              static_cast<int>(sizeof(vae_path))))
         return false;
-    parameters.model_path = flux2_klein ? nullptr
+    parameters.model_path = (flux2_klein || qwen_image_2_1) ? nullptr
                             : (sdxl_checkpoint || realistic_vision) ? checkpoint_path
                                                                   : root;
     if (flux2_klein)
@@ -253,18 +286,29 @@ bool ensure_context(const char *root)
         parameters.vae_path = vae_path;
         parameters.vae_format = SD_VAE_FORMAT_FLUX2;
     }
+    if (qwen_image_2_1)
+    {
+        parameters.diffusion_model_path = diffusion_model_path;
+        parameters.llm_path = llm_path;
+        parameters.vae_path = vae_path;
+        parameters.prediction = FLOW_PRED;
+        parameters.max_vram = "10";
+        parameters.model_args = "qwen_image_2_1_prefix_cache_type=q8_0";
+    }
     if (realistic_vision)
         parameters.vae_path = vae_path;
     parameters.n_threads = 1;
     parameters.wtype = SD_TYPE_F16;
     parameters.rng_type = CUDA_RNG;
-    parameters.prediction = (is_sd3_model(root) || flux2_klein) ? FLOW_PRED : EPS_PRED;
+    parameters.prediction = (is_sd3_model(root) || flux2_klein || qwen_image_2_1)
+                                ? FLOW_PRED
+                                : EPS_PRED;
     parameters.enable_mmap = false;
     parameters.eager_load = false;
     parameters.diffusion_conv_direct = false;
     parameters.vae_conv_direct = false;
     parameters.diffusion_flash_attn = false;
-    parameters.backend = sdxl ? "CPU,diffusion=Vulkan0,vae=CPU"
+    parameters.backend = (sdxl || qwen_image_2_1) ? "CPU,diffusion=Vulkan0,vae=CPU"
                               : "CPU,diffusion=Vulkan0,vae=Vulkan0";
     parameters.params_backend = "Vulkan0";
     context = new_sd_ctx(&parameters);
@@ -300,11 +344,13 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
                                         "prosperoai-image", "png"))
         return 1;
     const bool sd3 = is_sd3_model(root);
+    const bool qwen_image_2_1 = is_qwen_image_2_1_model(root);
     const bool sdxl = model_index_has(root, "StableDiffusionXLPipeline") || is_sdxl_checkpoint(root);
     const bool flux2_klein = is_flux2_klein_model(root);
     progress_callback = progress;
     if (progress_callback)
-        progress_callback(flux2_klein ? "Loading FLUX.2 Klein 4B"
+        progress_callback(qwen_image_2_1 ? "Loading Qwen-Image 2.1"
+                          : flux2_klein ? "Loading FLUX.2 Klein 4B"
                           : sdxl       ? "Loading Stable Diffusion XL"
                           : sd3        ? "Loading Stable Diffusion 3"
                                             : "Loading SD-Turbo");
@@ -346,19 +392,21 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     parameters.seed = runtime_settings.sd_seed == 0 ? -1
                       : static_cast<std::int64_t>(runtime_settings.sd_seed);
     parameters.batch_count = 1;
-    parameters.sample_params.sample_steps = flux2_klein ? 4
+    parameters.sample_params.sample_steps = qwen_image_2_1 ? 40
+                                            : flux2_klein ? 4
                                             : sdxl ? 10
                                             : sd3 ? 28
                                             : is_realistic_vision_v51(root) ? 20
                                                   : 1;
-    parameters.sample_params.sample_method = (sdxl || sd3 || flux2_klein || is_realistic_vision_v51(root))
+    parameters.sample_params.sample_method = (sdxl || sd3 || flux2_klein || qwen_image_2_1 || is_realistic_vision_v51(root))
                                                  ? EULER_SAMPLE_METHOD
                                                  : EULER_A_SAMPLE_METHOD;
     if (flux2_klein)
         parameters.sample_params.scheduler = FLUX2_SCHEDULER;
     if (flux2_klein)
         parameters.sample_params.guidance.distilled_guidance = 1.0f;
-    parameters.sample_params.guidance.txt_cfg = is_realistic_vision_v51(root) ? 7.0f
+    parameters.sample_params.guidance.txt_cfg = qwen_image_2_1 ? 1.0f
+                                               : is_realistic_vision_v51(root) ? 7.0f
                                                : sdxl ? 5.0f : sd3 ? 4.5f : 1.0f;
 
     sd_image_t *images = nullptr;

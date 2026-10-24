@@ -16,10 +16,10 @@ class HttpApiTests(unittest.TestCase):
         cls.scratch = tempfile.TemporaryDirectory(prefix="prospero-http-", dir=ROOT / "build/tests")
         tmp = Path(cls.scratch.name)
         cls.binary = tmp / "http-test"
-        compiler = shutil.which("clang++") or shutil.which("g++")
+        compiler = shutil.which(os.environ.get("HOST_CXX", "clang++")) or shutil.which("g++")
         if not compiler or not (ROOT / ".deps/llama.cpp/vendor/nlohmann/json.hpp").exists():
             raise unittest.SkipTest("C++ compiler and make deps required")
-        subprocess.run([compiler, "-std=c++20", "-O1", "-pthread", "-ffunction-sections", "-fdata-sections",
+        command = [compiler, "-std=c++20", "-O1", "-pthread", "-ffunction-sections", "-fdata-sections",
                         "-DPROSPERO_SESSION_TEST",
                         '-DPROSPERO_WEB_ASSET_ROOT="'+str(ROOT / 'assets/web')+'/"',
                         '-DPROSPERO_SETTINGS_PATH="'+str(tmp / "runtime.cfg")+'"', "-Wl,--gc-sections", "-I"+str(ROOT / "vulkan"), "-I"+str(ROOT / "include"),
@@ -34,11 +34,24 @@ class HttpApiTests(unittest.TestCase):
                         str(ROOT / "search-engine/src/search.cpp"),
                         str(ROOT / "search-engine/src/transport.cpp"),
                         "-DPROSPERO_HOST", str(ROOT / "src/voice_recorder.cpp"),
-                        "-o", str(cls.binary)], check=True)
+                        "-o", str(cls.binary)]
+        subprocess.run(command, check=True)
+        cls.lifecycle_binary = tmp / "http-lifecycle-test"
+        command[command.index(str(ROOT / "tests/http_api_harness.cpp"))] = str(ROOT / "tests/http_lifecycle_test.cpp")
+        command[-1] = str(cls.lifecycle_binary)
+        subprocess.run(command, check=True)
 
     @classmethod
     def tearDownClass(cls):
         cls.scratch.cleanup()
+
+    def test_shutdown_joins_async_jobs_and_idle_connections(self):
+        subprocess.run([str(self.lifecycle_binary)], check=True, timeout=20)
+
+    def test_restart_does_not_kill_the_process(self):
+        header, body = self.request('/api/system/restart', body={})
+        self.assertIn('409 Conflict', header)
+        self.assertIn('disabled', json.loads(body)['error'])
 
     def request(self, path="/v1/chat/completions", body=None, key=None, headers=None, method=None,
                 environment=None):
@@ -52,6 +65,40 @@ class HttpApiTests(unittest.TestCase):
                                       input="\r\n".join(lines).encode()+b"\r\n\r\n"+payload)
         head, data = wire.split(b"\r\n\r\n", 1)
         return head.decode(), data.decode()
+
+    def test_audio_lyrics_round_trip_and_persistence(self):
+        config = Path(self.scratch.name) / 'runtime.cfg'
+        config.write_text('version=2\ntokens=192\n')
+        lyrics = '[verse]\nCântă, cântă, inima mea\n[chorus]\nPiesa-ntreaga e a ta\n'
+        header, body = self.request('/api/settings/runtime', body={'audio_lyrics': lyrics})
+        self.assertIn('200 OK', header)
+        self.assertEqual(json.loads(body)['audio_lyrics'], lyrics)
+        lines = config.read_text().splitlines()
+        self.assertTrue(any(line.startswith('audio_lyrics_b64=') for line in lines))
+        self.assertEqual(json.loads(self.request('/api/settings/runtime')[1])['audio_lyrics'], lyrics)
+        header, body = self.request('/api/settings/runtime', body={'audio_lyrics': ''})
+        self.assertIn('200 OK', header)
+        self.assertEqual(json.loads(body)['audio_lyrics'], '')
+        self.assertFalse(any(line.startswith('audio_lyrics_b64=') for line in config.read_text().splitlines()))
+        for invalid in ({'audio_lyrics': 5}, {'audio_lyrics': 'x' * 4097}):
+            self.assertIn('400 Bad Request', self.request('/api/settings/runtime', body=invalid)[0])
+
+    def test_audio_options_round_trip_and_persistence(self):
+        config = Path(self.scratch.name) / 'runtime.cfg'
+        config.write_text('version=2\ntokens=192\n')
+        options = 'cot=full\nsemantic_temperature=1.1\nsemantic_prefix_file=/download0/ProsperoAI/work/audio/song-semantic.json\n'
+        header, body = self.request('/api/settings/runtime', body={'audio_options': options})
+        self.assertIn('200 OK', header)
+        self.assertEqual(json.loads(body)['audio_options'], options)
+        lines = config.read_text().splitlines()
+        self.assertTrue(any(line.startswith('audio_options_b64=') for line in lines))
+        self.assertEqual(json.loads(self.request('/api/settings/runtime')[1])['audio_options'], options)
+        header, body = self.request('/api/settings/runtime', body={'audio_options': ''})
+        self.assertIn('200 OK', header)
+        self.assertEqual(json.loads(body)['audio_options'], '')
+        self.assertFalse(any(line.startswith('audio_options_b64=') for line in config.read_text().splitlines()))
+        for invalid in ({'audio_options': 5}, {'audio_options': 'x' * 4097}, {'audio_options': 'cot=full\n\x07bell'}):
+            self.assertIn('400 Bad Request', self.request('/api/settings/runtime', body=invalid)[0])
 
     def test_runtime_settings_round_trip(self):
         config = Path(self.scratch.name) / 'runtime.cfg'
@@ -94,6 +141,12 @@ class HttpApiTests(unittest.TestCase):
         # Even a failed search says which providers were asked, so a caller can tell
         # throttling from an empty index.
         self.assertTrue(json.loads(body)['providers'])
+
+    def test_manual_model_refresh_rescans_installed_models(self):
+        header, body = self.request('/api/models/refresh', method='POST', body={})
+        self.assertIn('200 OK', header)
+        self.assertEqual([model['name'] for model in json.loads(body)['models']],
+                         ['tiny.gguf', 'second.gguf'])
 
     def test_search_scopes_round_trip_and_select_providers(self):
         # What the Settings checkboxes send is this bitmask, in the engine's scope

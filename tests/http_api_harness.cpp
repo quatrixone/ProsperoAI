@@ -4,6 +4,7 @@
 #define PROSPERO_UI_VULKAN
 #include "../vulkan/http_server.cpp"
 #include <iostream>
+#include <functional>
 #include <iterator>
 #include <cstdlib>
 #include <dirent.h>
@@ -72,6 +73,7 @@ extern "C"
 static std::string input, wire;
 static std::size_t position;
 static unsigned current_model;
+static std::function<void()> generation_hook;
 static bool fail_model_prepare = std::getenv("PROSPERO_TEST_FAIL_PREPARE") != nullptr;
 namespace prospero_model_download
 {
@@ -214,6 +216,8 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *out, std::size_t capacity,
                          gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
 {
+    if (generation_hook)
+        generation_hook();
     if (settings.model_id)
         current_model = std::strcmp(settings.model_id, "second.gguf") == 0 ? 1 : 0;
     std::string last = messages[count - 1].content;
@@ -280,4 +284,5 @@ int main(int argc, char **argv)
     if (runtime_busy)
         prospero::model_manager::runtime_mutex().unlock();
     std::cout << wire;
+    return 0;
 }
