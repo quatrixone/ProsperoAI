@@ -48,9 +48,15 @@ constexpr const char *kTabs[] = {"Workspace", "Models", "Settings", "Mobile"};
 constexpr const char *kCategories[] = {"Appearance", "Sound", "Accessibility", "Diagnostics",
                                        "About"};
 #ifdef PS5_LLAMA_VULKAN
-bool inference_running() { return gpt_runtime_generations_running() != 0; }
+bool inference_running()
+{
+    return gpt_runtime_generations_running() != 0;
+}
 #else
-bool inference_running() { return false; }
+bool inference_running()
+{
+    return false;
+}
 #endif
 enum DialogAction
 {
