@@ -151,6 +151,26 @@ void validate(Preferences &p)
     p.text_size = std::min(p.text_size, 1U);
 }
 
+void read_generation_preferences(Preferences &preferences)
+{
+    const auto runtime = prospero_settings::get();
+    preferences.context_length = runtime.context;
+    preferences.output_limit = runtime.output_limit;
+    preferences.kv_cache = runtime.kv;
+    preferences.thinking = runtime.thinking;
+    preferences.idle_unload_minutes = runtime.idle_unload_minutes;
+    preferences.kokoro_voice = runtime.kokoro_voice;
+    preferences.chatterbox_voice = runtime.chatterbox_voice;
+    preferences.chatterbox_language = runtime.chatterbox_language;
+    preferences.audio_duration_sec = runtime.audio_duration_sec;
+    preferences.audio_seed = runtime.audio_seed;
+    preferences.sd_seed = runtime.sd_seed;
+    preferences.sd_width = runtime.sd_width;
+    preferences.sd_height = runtime.sd_height;
+    preferences.sd_upscale = runtime.sd_upscale;
+    preferences.web_search = runtime.web_search;
+}
+
 void load_preferences(Preferences &p, const std::vector<Model> &models)
 {
     std::FILE *file = std::fopen(PROSPERO_SETTINGS_PATH, "rb");
@@ -389,6 +409,8 @@ void App::poll()
         !stream_lock_.test_and_set(std::memory_order_acquire))
     {
         state_.stream = stream_buffer_.data();
+        if (job_ == Job::Music || job_ == Job::Cover || job_ == Job::Stems)
+            state_.operation_progress = state_.stream;
         stream_lock_.clear(std::memory_order_release);
         displayed_stream_ = version;
         ++state_.revision;
@@ -406,7 +428,7 @@ void App::poll()
         state_ = std::move(result_);
         if (state_.notice != Notice::None)
             notices_.push_back(state_.notice);
-        if (job_ == Job::Select || job_ == Job::Open)
+        if (job_ == Job::Select || job_ == Job::Open || job_ == Job::Generate)
             preferences_dirty_ = true;
     }
     if (!running_ && preferences_dirty_)
@@ -461,6 +483,10 @@ Activity App::activity() const
         return Activity::OpeningConversation;
     case Job::Generate:
         return Activity::Generating;
+    case Job::Music:
+    case Job::Cover:
+    case Job::Stems:
+        return Activity::Generating;
     case Job::Save:
         return Activity::Saving;
     default:
@@ -475,9 +501,46 @@ std::vector<Notice> App::take_notices()
 }
 bool App::can_send() const
 {
-    return !running_ && state_.ready && state_.selected_model >= 0 &&
+    if (running_ || state_.unsaved)
+        return false;
+    if (state_.staged_model >= 0)
+        return static_cast<std::size_t>(state_.staged_model) < state_.models.size();
+    return state_.ready && state_.selected_model >= 0 &&
            state_.models[static_cast<std::size_t>(state_.selected_model)].id ==
                state_.session.model_id;
+}
+
+std::vector<unsigned> App::model_indices_for(Capability capability) const
+{
+    std::vector<unsigned> indices;
+    for (unsigned i = 0; i < state_.models.size(); ++i)
+        if (state_.models[i].capability == capability)
+            indices.push_back(i);
+    return indices;
+}
+
+bool App::stage_model(unsigned index)
+{
+    if (running_ || state_.unsaved || index >= state_.models.size())
+        return false;
+    state_.staged_model = static_cast<int>(index);
+    state_.preferences.model_id = state_.models[index].id;
+    ++state_.revision;
+    return true;
+}
+
+bool App::stage_preferences(Preferences preferences)
+{
+    if (running_ || state_.unsaved)
+        return false;
+    validate(preferences);
+    if (!prospero_settings::valid_audio_duration_sec(preferences.audio_duration_sec) ||
+        !prospero_settings::valid_sd_dimensions(preferences.sd_width, preferences.sd_height))
+        return false;
+    preferences.model_id = state_.preferences.model_id;
+    state_.preferences = std::move(preferences);
+    ++state_.revision;
+    return true;
 }
 
 bool App::select_model(unsigned index)
@@ -487,6 +550,7 @@ bool App::select_model(unsigned index)
     const int previous_model = state_.selected_model;
     const bool previous_ready = state_.ready;
     argument_ = index;
+    state_.staged_model = -1;
     state_.selected_model = static_cast<int>(index);
     state_.ready = false;
     state_.preparing = true;
@@ -571,9 +635,70 @@ bool App::send(const std::string &text)
     return true;
 }
 
+bool App::start_music(const audio_workflows::MusicRequest &request)
+{
+    if (running_)
+        return false;
+    music_request_ = request;
+    state_.operation_status = "running";
+    state_.operation_progress = "Starting music generation";
+    state_.operation_result.clear();
+    state_.operation_artifacts.clear();
+    state_.status = state_.operation_progress;
+    if (start(Job::Music))
+        return true;
+    state_.operation_status = "failed";
+    state_.status = "Could not start music generation. Try again.";
+    return false;
+}
+
+bool App::start_cover(const std::string &model_id, const std::string &source_name)
+{
+    if (running_)
+        return false;
+    workflow_model_id_ = model_id;
+    workflow_source_name_ = source_name;
+    state_.operation_status = "running";
+    state_.operation_progress = "Validating audio source";
+    state_.operation_result.clear();
+    state_.operation_artifacts.clear();
+    state_.status = state_.operation_progress;
+    if (start(Job::Cover))
+        return true;
+    state_.operation_status = "failed";
+    state_.status = "Could not start Cover to ABC. Try again.";
+    return false;
+}
+
+bool App::start_stems(const std::string &model_id, const std::string &source_name)
+{
+    if (running_)
+        return false;
+    workflow_model_id_ = model_id;
+    workflow_source_name_ = source_name;
+    state_.operation_status = "running";
+    state_.operation_progress = "Validating audio source";
+    state_.operation_result.clear();
+    state_.operation_artifacts.clear();
+    state_.status = state_.operation_progress;
+    if (start(Job::Stems))
+        return true;
+    state_.operation_status = "failed";
+    state_.status = "Could not start stem separation. Try again.";
+    return false;
+}
+
 bool App::retry()
 {
-    if (!can_send() || !state_.retry_available || state_.messages.empty())
+    const bool model_available =
+        state_.staged_model >= 0 &&
+        static_cast<std::size_t>(state_.staged_model) < state_.models.size();
+    const bool current_model_ready =
+        state_.ready && state_.selected_model >= 0 &&
+        state_.models[static_cast<std::size_t>(state_.selected_model)].id ==
+            state_.session.model_id;
+    if (running_ || (!model_available && !current_model_ready) || !state_.retry_available ||
+        state_.messages.empty())
         return false;
     state_.status = "Trying again...";
     if (state_.unsaved && std::strcmp(state_.messages.back().role, "assistant") == 0)
@@ -601,6 +726,7 @@ void App::set_preferences(Preferences preferences)
     gpt_runtime_set_idle_unload_timeout(preferences.idle_unload_minutes * 60);
     preferences.model_id = state_.preferences.model_id;
     state_.preferences = std::move(preferences);
+    read_generation_preferences(state_.preferences);
     preferences_dirty_ = true;
     ++state_.revision;
 }
@@ -734,6 +860,7 @@ void App::work()
             result_.models.push_back(std::move(model));
         }
         load_preferences(result_.preferences, result_.models);
+        read_generation_preferences(result_.preferences);
         refresh_sessions();
         result_.initialized = true;
         result_.status =
@@ -925,6 +1052,33 @@ void App::work()
                                        diagnostic_operation_id_);
         }
         break;
+    case Job::Music:
+    case Job::Cover:
+    case Job::Stems:
+    {
+        const auto progress = [this](std::string_view message)
+        {
+            result_.operation_progress.assign(message);
+            stream_callback(result_.operation_progress.c_str());
+        };
+        audio_workflows::Result operation;
+        if (job_ == Job::Music)
+            operation = audio_workflows::create_music(music_request_, progress);
+        else if (job_ == Job::Cover)
+            operation =
+                audio_workflows::cover_to_abc(workflow_model_id_, workflow_source_name_, progress);
+        else
+            operation = audio_workflows::separate_stems(workflow_model_id_, workflow_source_name_,
+                                                        progress);
+        result_.operation_status = operation.ok ? "done" : "failed";
+        result_.operation_result = operation.response;
+        result_.operation_artifacts = std::move(operation.artifacts);
+        result_.status = operation.response;
+        result_.notice = operation.ok ? Notice::MediaReady : Notice::GenerationFailed;
+        if (operation.ok && !result_.operation_artifacts.empty())
+            result_.operation_progress = "Completed";
+        break;
+    }
     case Job::Save:
         result_.unsaved = !prospero_session::save(&result_.session, result_.messages.data(),
                                                   static_cast<unsigned>(result_.messages.size()));
@@ -1004,7 +1158,10 @@ void App::work()
                                                 "save",
                                                 "save settings",
                                                 "play sound",
-                                                "sync conversations"};
+                                                "sync conversations",
+                                                "create music",
+                                                "cover to ABC",
+                                                "split stems"};
         const double seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
         const char *model =
@@ -1030,7 +1187,73 @@ void App::work()
 void App::generate()
 {
     std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
+    if (result_.staged_model >= 0)
+    {
+        const auto index = static_cast<unsigned>(result_.staged_model);
+        if (index >= result_.models.size())
+        {
+            result_.status = "The staged model is no longer installed.";
+            result_.notice = Notice::GenerationFailed;
+            result_.retry_available = true;
+            return;
+        }
+        const auto &staged_model = result_.models[index];
+        model_manager::publish(staged_model.id.c_str(), model_manager::Stage::preparing);
+        result_.preparing = true;
+        if (!gpt_runtime_select_model(index) || gpt_runtime_prepare() != 0)
+        {
+            const char *reason = "The staged model could not be prepared. Try again.";
+            model_manager::publish(staged_model.id.c_str(), model_manager::Stage::failed, reason);
+            result_.preparing = false;
+            result_.ready = false;
+            result_.status = reason;
+            result_.notice = Notice::GenerationFailed;
+            result_.retry_available = true;
+            result_.unsaved = false;
+            diagnostic_error_ = "model-preparation-failed";
+            return;
+        }
+        model_manager::publish(staged_model.id.c_str(), model_manager::Stage::ready);
+        result_.selected_model = static_cast<int>(index);
+        result_.ready = true;
+        result_.preparing = false;
+        result_.preferences.model_id = staged_model.id;
+    }
+    auto options = prospero_settings::get();
+    options.context = result_.preferences.context_length;
+    options.output_limit = result_.preferences.output_limit;
+    options.kv = result_.preferences.kv_cache;
+    options.thinking = result_.preferences.thinking;
+    options.idle_unload_minutes = result_.preferences.idle_unload_minutes;
+    options.kokoro_voice = result_.preferences.kokoro_voice;
+    options.chatterbox_voice = result_.preferences.chatterbox_voice;
+    options.chatterbox_language = result_.preferences.chatterbox_language;
+    options.audio_duration_sec = result_.preferences.audio_duration_sec;
+    options.audio_seed = result_.preferences.audio_seed;
+    options.sd_seed = result_.preferences.sd_seed;
+    options.sd_width = result_.preferences.sd_width;
+    options.sd_height = result_.preferences.sd_height;
+    options.sd_upscale = result_.preferences.sd_upscale;
+    options.web_search = result_.preferences.web_search;
+    if (!prospero_settings::set(options))
+    {
+        result_.status = "Could not apply the staged generation options.";
+        result_.notice = Notice::GenerationFailed;
+        result_.retry_available = true;
+        result_.unsaved = false;
+        diagnostic_error_ = "generation-options-failed";
+        return;
+    }
+    gpt_runtime_set_idle_unload_timeout(options.idle_unload_minutes * 60);
+    result_.staged_model = -1;
     const auto &model = result_.models[static_cast<std::size_t>(result_.selected_model)];
+    if (result_.session.id[0] && std::strcmp(result_.session.model_id, model.id.c_str()) != 0)
+    {
+        std::snprintf(result_.session.model_id, sizeof(result_.session.model_id), "%s",
+                      model.id.c_str());
+        std::snprintf(result_.session.model_name, sizeof(result_.session.model_name), "%s",
+                      model.name.c_str());
+    }
     result_.retry_available = true;
     result_.unsaved = true;
     result_.stats_valid = false;

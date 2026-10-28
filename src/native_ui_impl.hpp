@@ -29,6 +29,27 @@
 
 namespace prospero
 {
+enum class WorkspaceMode : std::uint8_t
+{
+    Text,
+    Audio,
+    SD,
+    TTS
+};
+static constexpr Capability capability_for(WorkspaceMode mode)
+{
+    switch (mode)
+    {
+    case WorkspaceMode::Audio:
+        return Capability::Audio;
+    case WorkspaceMode::SD:
+        return Capability::Image;
+    case WorkspaceMode::TTS:
+        return Capability::Voice;
+    default:
+        return Capability::Text;
+    }
+}
 // The Settings categories that are more than a form.
 constexpr int kDiagnostics = 3, kAbout = 4;
 // Where the debug log is written, as the console names the folder.
@@ -74,6 +95,10 @@ struct NativeUI::Impl
     void apply_theme();
     void announce(ui::Feedback &feedback);
     void handle_workspace(const InputFrame &input, ui::Feedback &feedback);
+    void update_audio_queue();
+    void begin_audio_library_selection(bool abc, int action);
+    void begin_audio_keyboard(int field);
+    void finish_audio_keyboard();
     void handle_models(const InputFrame &input, ui::Feedback &feedback);
     void handle_settings(const InputFrame &input, ui::Feedback &feedback);
     void open_dialog(int action, int index, std::string title, std::string body, const char *button,
@@ -91,6 +116,7 @@ struct NativeUI::Impl
     void backspace(ui::Feedback &feedback);
     void submit(ui::Feedback &feedback);
     void keyboard_result(const char *value);
+    int workspace_model_index() const;
     void upload_visible_image();
     int selected_audio_row() const;
     void release();
@@ -172,10 +198,41 @@ struct NativeUI::Impl
     int workspace_language_row_ = -1;
     int workspace_new_conversation_row_ = -1;
     int workspace_sessions_row_ = 3;
+    int workspace_mode_row_ = 0, workspace_model_row_ = 1, workspace_settings_row_ = 2;
+    int workspace_music_row_ = -1, workspace_cover_row_ = -1, workspace_stems_row_ = -1,
+        workspace_queue_row_ = -1, workspace_abc_row_ = -1, workspace_queue_entry_start_row_ = -1,
+        workspace_queue_clear_row_ = -1, workspace_artifact_start_row_ = -1;
     unsigned session_category_ = 0;
     std::string session_query_;
     std::string workspace_model_query_;
     int workspace_model_filter_ = -1; // -1 = all capabilities; otherwise Capability ordinal.
+    WorkspaceMode workspace_mode_ = WorkspaceMode::Text;
+    std::vector<audio_workflows::LibraryEntry> workspace_audio_entries_;
+    bool workspace_mode_open_ = false, workspace_queue_open_ = false, audio_keyboard_open_ = false,
+         choosing_audio_library_ = false, choosing_abc_ = false, queue_stop_requested_ = false,
+         queue_active_ = false, queue_after_music_prompt_ = false;
+    enum class AudioPanelAction : std::uint8_t
+    {
+        none,
+        cover,
+        stems,
+        abc
+    };
+    AudioPanelAction audio_panel_action_ = AudioPanelAction::none;
+    int audio_keyboard_field_ = 0; // 1 style, 2 lyrics, 3 ABC text
+    int audio_library_action_ = 0; // 1 cover, 2 stems, 3 choose ABC
+    std::string audio_keyboard_text_;
+    std::string last_audio_status_seen_;
+    audio_workflows::MusicRequest music_request_;
+    struct QueueEntry
+    {
+        audio_workflows::MusicRequest request;
+        std::string status = "pending";
+        std::string result;
+    };
+    std::vector<QueueEntry> audio_queue_;
+    int active_queue_item_ = -1;
+    unsigned queue_variants_ = 3;
     ui::Keyboard keyboard_;
     ui::Form form_;
     ui::Dialog dialog_;

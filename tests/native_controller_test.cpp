@@ -1,10 +1,13 @@
 // Host checks for real controller ownership, persistence, and multilingual layout.
 #include "native_app.hpp"
+#include "audio_workflows.hpp"
 #include "debug_log.hpp"
 #include "model_manager.hpp"
+#include "runtime_settings.hpp"
 #include "gfx/font.hpp"
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -12,6 +15,8 @@
 #include <iterator>
 #include <map>
 #include <thread>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace
 {
@@ -19,7 +24,11 @@ std::thread::id ui_thread;
 unsigned selected = 0;
 bool fail_generation = false, fail_save = false, fail_after_generation = false;
 bool fail_prepare = false;
-unsigned generations = 0;
+bool fail_audio_generation = false;
+unsigned generations = 0, select_calls = 0, prepare_calls = 0, audio_generations = 0;
+unsigned fixture_model_count = 500;
+bool audio_only_fixture = false;
+std::string audio_root, last_audio_prompt, last_audio_options;
 struct Saved
 {
     prospero_session::Record record;
@@ -59,7 +68,7 @@ void gpt_runtime_set_idle_unload_timeout(unsigned)
 unsigned gpt_runtime_model_count()
 {
     off_ui();
-    return 500;
+    return fixture_model_count;
 }
 unsigned gpt_runtime_selected_model()
 {
@@ -70,16 +79,29 @@ const char *gpt_runtime_model_id(unsigned index)
 {
     off_ui();
     static char id[48];
-    std::snprintf(id, sizeof(id), "model-%u", index);
+    if (index == 1)
+        std::snprintf(id, sizeof(id), "sheetsage-test");
+    else if (index == 4)
+        std::snprintf(id, sizeof(id), "htdemucs-test");
+    else if (index == 5)
+        std::snprintf(id, sizeof(id), "music-test");
+    else
+        std::snprintf(id, sizeof(id), "model-%u", index);
     return id;
 }
 const char *gpt_runtime_model_name(unsigned index)
 {
     return gpt_runtime_model_id(index);
 }
-const char *gpt_runtime_model_purpose(unsigned)
+const char *gpt_runtime_model_purpose(unsigned index)
 {
     off_ui();
+    if (audio_only_fixture || index == 1 || index == 4 || index == 5)
+        return "text-to-audio";
+    if (index == 2)
+        return "text-to-image";
+    if (index == 3)
+        return "text-to-speech";
     return "text-to-text";
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
@@ -93,12 +115,14 @@ bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t 
 bool gpt_runtime_select_model(unsigned index)
 {
     off_ui();
+    ++select_calls;
     selected = index;
     return true;
 }
 int gpt_runtime_prepare()
 {
     off_ui();
+    ++prepare_calls;
     return fail_prepare ? -1 : 0;
 }
 bool gpt_runtime_context_full()
@@ -112,6 +136,25 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
 {
     off_ui();
     ++generations;
+    if (count == 1 && settings.model_id &&
+        (std::strcmp(settings.model_id, "sheetsage-test") == 0 ||
+         std::strcmp(settings.model_id, "htdemucs-test") == 0 ||
+         std::strcmp(settings.model_id, "music-test") == 0))
+    {
+        ++audio_generations;
+        last_audio_prompt = messages[0].content;
+        last_audio_options = prospero_settings::get().audio_options;
+        if (fail_audio_generation)
+        {
+            std::snprintf(output, capacity, "%s", "Audio runtime failure");
+            return 1;
+        }
+        const std::string artifact = audio_root + "/generated.wav";
+        std::ofstream file(artifact, std::ios::binary);
+        file << "fixture";
+        std::snprintf(output, capacity, "Generated audio: %s", artifact.c_str());
+        return 0;
+    }
     assert(count >= 2 && std::strcmp(messages[count - 1].role, "user") == 0);
     if (std::strcmp(messages[count - 1].content, "Long response") == 0)
     {
@@ -127,6 +170,19 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         stats->generated_tokens = 65536;
         return 0;
     }
+    if (std::strcmp(messages[count - 1].content, "Workspace staged options") == 0)
+    {
+        assert(settings.model_id && std::strcmp(settings.model_id, "model-0") == 0);
+        assert(settings.max_output_tokens == 2048 && settings.context_length == 4096);
+        assert(settings.thinking);
+    }
+    if (std::strcmp(messages[count - 1].content, "Workspace staged options without model change") ==
+        0)
+    {
+        assert(settings.model_id && std::strcmp(settings.model_id, "model-0") == 0);
+        assert(settings.max_output_tokens == 4096 && settings.context_length == 8192);
+        assert(!settings.thinking);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(15));
     progress("Thinking about your question...");
     std::snprintf(output, capacity, "%s",
@@ -135,6 +191,15 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
     if (fail_after_generation)
         fail_save = true;
     return fail_generation ? 1 : 0;
+}
+
+extern "C" std::int64_t sceKernelGetDirectMemorySize()
+{
+    return 16ll << 30;
+}
+extern "C" int sceKernelDirectMemoryQuery(std::int64_t, int, void *, std::size_t)
+{
+    return -1;
 }
 namespace prospero_session
 {
@@ -207,7 +272,7 @@ int main(int argc, char **argv)
         prospero::App app;
         assert(app.initialize());
         settle(app);
-        assert(app.state().models.size() == 500 && app.state().model_counts[0] == 500);
+        assert(app.state().models.size() == 500 && app.state().model_counts[0] == 495);
         assert(app.state().preferences.style == 2 && app.state().preferences.output_limit == 192);
         assert(app.state().preferences.idle_unload_minutes == 5);
         assert(app.state().preferences.context_length == 0 &&
@@ -421,6 +486,122 @@ int main(int argc, char **argv)
     assert(events.find("\"error\":\"assistant-message-save-failed\"") != std::string::npos);
     assert(events.find("A question that fails") == std::string::npos);
     assert(events.find("Hello, 世界.") == std::string::npos);
+
+    // Workspace model and workflow choices are staged until their worker operation runs.
+    fixture_model_count = 6;
+    audio_only_fixture = false;
+    selected = 0;
+    select_calls = prepare_calls = audio_generations = 0;
+    audio_root = PROSPERO_AUDIO_DIR;
+    assert(mkdir(audio_root.c_str(), 0777) == 0 || errno == EEXIST);
+    {
+        std::ofstream wav(audio_root + "/uploaded.wav", std::ios::binary);
+        const unsigned char bytes[] = {'R',  'I',  'F', 'F', 40,   0,    0, 0, 'W', 'A', 'V', 'E',
+                                       'f',  'm',  't', ' ', 16,   0,    0, 0, 1,   0,   1,   0,
+                                       0x44, 0xac, 0,   0,   0x88, 0x58, 1, 0, 2,   0,   16,  0,
+                                       'd',  'a',  't', 'a', 4,    0,    0, 0, 0,   0,   0,   0};
+        wav.write(reinterpret_cast<const char *>(bytes), sizeof(bytes));
+    }
+    prospero::model_manager::publish("", prospero::model_manager::Stage::none);
+    {
+        prospero::App app;
+        assert(app.initialize());
+        settle(app);
+        assert(app.model_indices_for(prospero::Capability::Text) == std::vector<unsigned>{0});
+        assert(app.model_indices_for(prospero::Capability::Image) == std::vector<unsigned>{2});
+        assert(app.model_indices_for(prospero::Capability::Voice) == std::vector<unsigned>{3});
+        assert(app.model_indices_for(prospero::Capability::Audio) ==
+               (std::vector<unsigned>{1, 4, 5}));
+        const auto runtime_before_stage = prospero_settings::get();
+        auto staged = app.state().preferences;
+        staged.output_limit = 2048;
+        staged.context_length = 4096;
+        staged.thinking = true;
+        assert(app.stage_model(0));
+        assert(app.stage_preferences(staged));
+        assert(select_calls == 0 && prepare_calls == 0);
+        const auto runtime_after_stage = prospero_settings::get();
+        assert(runtime_after_stage.output_limit == runtime_before_stage.output_limit &&
+               runtime_after_stage.context == runtime_before_stage.context &&
+               runtime_after_stage.thinking == runtime_before_stage.thinking);
+        assert(app.send("Workspace staged options"));
+        settle(app);
+        assert(select_calls == 1 && prepare_calls == 1);
+        assert(app.state().selected_model == 0 && app.state().ready);
+        const auto runtime_before_options = prospero_settings::get();
+        staged = app.state().preferences;
+        staged.output_limit = 4096;
+        staged.context_length = 8192;
+        staged.thinking = false;
+        assert(app.stage_preferences(staged));
+        const auto runtime_after_options = prospero_settings::get();
+        assert(runtime_after_options.output_limit == runtime_before_options.output_limit &&
+               runtime_after_options.context == runtime_before_options.context &&
+               runtime_after_options.thinking == runtime_before_options.thinking);
+        assert(app.send("Workspace staged options without model change"));
+        settle(app);
+        assert(select_calls == 1 && prepare_calls == 1);
+        const unsigned selections_before_switch = select_calls;
+        assert(app.stage_model(2));
+        assert(select_calls == selections_before_switch);
+        assert(app.send("Workspace switched model"));
+        settle(app);
+        assert(select_calls == selections_before_switch + 1);
+        assert(std::strcmp(app.state().session.model_id, "model-2") == 0 && app.can_send());
+
+        const unsigned audio_before = audio_generations;
+        assert(app.start_cover("sheetsage-test", "uploaded.wav"));
+        settle(app);
+        assert(audio_generations == audio_before + 1);
+        assert(last_audio_prompt.find("uploaded.wav") != std::string::npos);
+        assert(last_audio_options.find("input_audio=" + audio_root + "/uploaded.wav") !=
+               std::string::npos);
+        assert(!app.state().operation_status.empty() && app.state().operation_status == "done");
+
+        const unsigned generation_before_missing = generations;
+        const unsigned selection_before_missing = select_calls;
+        assert(app.start_stems("htdemucs-test", "missing.wav"));
+        settle(app);
+        assert(generations == generation_before_missing &&
+               select_calls == selection_before_missing);
+        assert(app.state().operation_status == "failed" &&
+               app.state().status.find("missing") != std::string::npos);
+
+        fail_audio_generation = true;
+        assert(app.start_cover("sheetsage-test", "uploaded.wav"));
+        settle(app);
+        fail_audio_generation = false;
+        assert(app.state().operation_status == "failed" &&
+               app.state().operation_result.find("Audio runtime failure") != std::string::npos);
+
+        prospero::audio_workflows::MusicRequest request;
+        request.model_id = "music-test";
+        request.style = "ambient";
+        assert(app.start_music(request));
+        assert(app.busy());
+        assert(!app.start_stems("htdemucs-test", "uploaded.wav"));
+        settle(app);
+        assert(app.state().operation_status == "done");
+    }
+    fixture_model_count = 1;
+    audio_only_fixture = true;
+    prospero::model_manager::publish("", prospero::model_manager::Stage::none);
+    const unsigned selections_before_empty_filter = select_calls;
+    const unsigned preparations_before_empty_filter = prepare_calls;
+    {
+        prospero::App app;
+        assert(app.initialize());
+        settle(app);
+        assert(app.model_indices_for(prospero::Capability::Audio) == std::vector<unsigned>{0});
+        assert(app.model_indices_for(prospero::Capability::Text).empty());
+        assert(app.model_indices_for(prospero::Capability::Image).empty());
+        assert(app.model_indices_for(prospero::Capability::Voice).empty());
+        assert(select_calls == selections_before_empty_filter &&
+               prepare_calls == preparations_before_empty_filter);
+    }
+    std::remove((audio_root + "/uploaded.wav").c_str());
+    std::remove((audio_root + "/generated.wav").c_str());
+    rmdir(audio_root.c_str());
     std::remove(PROSPERO_SETTINGS_PATH);
     std::puts("Controller: 500 models, worker ownership, switching, session restore, retry, "
               "persistence and Unicode passed.");
