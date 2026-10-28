@@ -307,6 +307,10 @@ std::uint64_t gpt_runtime_vulkan_heap_bytes()
 {
     return prospero_vulkan::gpt_runtime_vulkan_heap_bytes();
 }
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes)
+{
+    return prospero_vulkan::gpt_runtime_vulkan_memory(free_bytes, total_bytes);
+}
 namespace
 {
 bool select_model_locked(unsigned index)

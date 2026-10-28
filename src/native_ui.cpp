@@ -2736,12 +2736,23 @@ void NativeUI::Impl::draw_header(ui::Canvas &canvas) const
                        : state.selected_model < 0 && !state.initialized ? palette_.muted
                                                                         : palette_.bad;
     std::string status = activity_text();
-    char loaded_id[256]{}, loaded_name[256]{};
-    const bool loaded =
-        gpt_runtime_loaded_model(loaded_id, sizeof(loaded_id), loaded_name, sizeof(loaded_name));
-    const std::string memory =
-        loaded ? "Memory: " + fit(loaded_name[0] ? loaded_name : loaded_id, 19, 330)
+    const bool loaded = state.loaded_model;
+    std::string memory =
+        loaded ? "Memory: " + fit(state.loaded_model_name.empty() ? state.loaded_model_id
+                                                                  : state.loaded_model_name,
+                                  19, 330)
                : "Memory: no model loaded";
+    if (loaded && state.vulkan_memory_available &&
+        state.vulkan_free_bytes <= state.vulkan_total_bytes)
+    {
+        char allocation[96];
+        std::snprintf(allocation, sizeof(allocation), " · %.1f / %.1f GiB allocated (device-wide)",
+                      static_cast<double>(state.vulkan_allocated_bytes) / (1ull << 30),
+                      static_cast<double>(state.vulkan_total_bytes) / (1ull << 30));
+        memory += allocation;
+    }
+    else if (loaded)
+        memory += " · Vulkan allocation unavailable";
     const float memory_width = fonts_.regular.measure(memory, 19);
     text(list, memory, kRight - memory_width, 126, 19, loaded ? palette_.good : palette_.muted);
     const float width = chip_width(status, true);

@@ -8,6 +8,7 @@
 #include "debug_log.hpp"
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <memory>
 #include <vector>
@@ -86,6 +87,9 @@ struct State
     int staged_model = -1;
     bool ready = false, preparing = false, initialized = false, retry_available = false,
          unsaved = false;
+    bool loaded_model = false, vulkan_memory_available = false;
+    std::string loaded_model_id, loaded_model_name;
+    std::uint64_t vulkan_free_bytes = 0, vulkan_allocated_bytes = 0, vulkan_total_bytes = 0;
     std::string status = "Opening your space...", stream;
     std::string operation_status, operation_progress, operation_result;
     std::vector<std::string> operation_artifacts;
@@ -155,7 +159,8 @@ class App
         SyncSessions,
         Music,
         Cover,
-        Stems
+        Stems,
+        VulkanMemory
     };
     bool start(Job job);
     static void *worker(void *context);
@@ -176,6 +181,7 @@ class App
     prospero::debug::OperationId diagnostic_operation_id_ = 0;
     std::vector<Notice> notices_;
     bool running_ = false, preferences_dirty_ = false;
+    std::chrono::steady_clock::time_point last_vulkan_memory_refresh_{};
     std::atomic<bool> done_{false};
     std::atomic_flag stream_lock_ = ATOMIC_FLAG_INIT;
     std::atomic<unsigned> stream_version_{0};

@@ -450,13 +450,40 @@ class HttpApiTests(unittest.TestCase):
             self.request('/api/settings/runtime', body={'context': 'auto', 'kv': 'auto', 'thinking': False, 'idle_unload_minutes': 2})
 
     def test_model_memory_status(self):
-        head, body = self.request("/api/models/memory")
-        self.assertIn("200 OK", head)
-        self.assertEqual(json.loads(body), {
-            "loaded": False, "id": "", "name": "", "vulkan_heap_bytes": 0,
-            "largest_direct_block_bytes": 0, "flexible_free_bytes": 0,
-            "estimate_confidence": "live-memory-snapshot",
+        head, body = self.request("/api/models/memory", environment={
+            "PROSPERO_TEST_VULKAN_MEMORY": "valid",
+            "PROSPERO_TEST_MODEL_LOADED": "1",
         })
+        self.assertIn("200 OK", head)
+        payload = json.loads(body)
+        self.assertTrue(payload["loaded"])
+        self.assertEqual(payload["vulkan_memory_available"], True)
+        self.assertEqual(payload["vulkan_free_bytes"], 6 * 1024**3)
+        self.assertEqual(payload["vulkan_allocated_bytes"], 4 * 1024**3)
+        self.assertEqual(payload["vulkan_heap_bytes"], 10 * 1024**3)
+        self.assertEqual(payload["name"], "SheetSage test fixture")
+        self.assertIn("largest_direct_block_bytes", payload)
+        self.assertIn("flexible_free_bytes", payload)
+        self.assertEqual(payload["estimate_confidence"], "live-memory-snapshot")
+
+        _, body = self.request("/api/models/memory", environment={
+            "PROSPERO_TEST_VULKAN_MEMORY": "unavailable",
+            "PROSPERO_TEST_MODEL_LOADED": "1",
+        })
+        payload = json.loads(body)
+        self.assertFalse(payload["vulkan_memory_available"])
+        self.assertIsNone(payload["vulkan_free_bytes"])
+        self.assertIsNone(payload["vulkan_allocated_bytes"])
+        self.assertEqual(payload["vulkan_heap_bytes"], 0)
+
+        _, body = self.request("/api/models/memory", environment={
+            "PROSPERO_TEST_VULKAN_MEMORY": "valid",
+        })
+        payload = json.loads(body)
+        self.assertFalse(payload["loaded"])
+        self.assertTrue(payload["vulkan_memory_available"])
+        self.assertEqual(payload["vulkan_allocated_bytes"], 4 * 1024**3)
+        self.assertEqual(payload["vulkan_heap_bytes"], 10 * 1024**3)
         self.assertIn("401 Unauthorized", self.request("/api/models/memory", key="secret")[0])
 
     def test_models_and_selection(self):

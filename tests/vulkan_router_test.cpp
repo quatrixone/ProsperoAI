@@ -46,6 +46,10 @@ std::uint64_t gpt_runtime_vulkan_heap_bytes()
 {
     return 0;
 }
+bool gpt_runtime_vulkan_memory(std::uint64_t *, std::uint64_t *)
+{
+    return false;
+}
 bool gpt_runtime_select_model(unsigned i)
 {
     if (text_selected != i)

@@ -43,7 +43,19 @@ extern "C"
 
 std::uint64_t gpt_runtime_vulkan_heap_bytes()
 {
-    return 0;
+    std::uint64_t free_bytes = 0, total_bytes = 0;
+    return gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) ? total_bytes : 0;
+}
+
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes)
+{
+    if (!std::getenv("PROSPERO_TEST_VULKAN_MEMORY") ||
+        std::string(std::getenv("PROSPERO_TEST_VULKAN_MEMORY")) != "valid" || !free_bytes ||
+        !total_bytes)
+        return false;
+    *free_bytes = 6ull << 30;
+    *total_bytes = 10ull << 30;
+    return true;
 }
 
 extern "C"
@@ -206,7 +218,8 @@ const char *gpt_runtime_model_purpose(unsigned index)
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
 {
-    if (std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && current_model == 2)
+    if ((std::getenv("PROSPERO_TEST_MODEL_LOADED") ||
+         (std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && current_model == 2)))
     {
         if (id && ic)
             std::snprintf(id, ic, "%s", "sheetsage-test");

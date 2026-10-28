@@ -88,3 +88,6 @@ class NativeController(unittest.TestCase):
 
     def test_workspace_modes_and_audio_actions(self):
         self.test_worker_state_and_unicode()
+
+    def test_native_vulkan_memory_snapshot(self):
+        self.test_worker_state_and_unicode()

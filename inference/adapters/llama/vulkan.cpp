@@ -410,11 +410,19 @@ const char *gpt_runtime_name() { return gpt_runtime_model_name(gpt_runtime_selec
 const char *gpt_runtime_backend() { return "llama.cpp Vulkan / RADV"; }
 const char *gpt_runtime_purpose() { return "text-to-text"; }
 bool gpt_runtime_context_full() { std::lock_guard<std::mutex> lock(runtime_mutex); return context_full; }
-std::uint64_t gpt_runtime_vulkan_heap_bytes() {
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes) {
     auto *device = ggml_backend_dev_by_name("Vulkan0");
-    if (!device) return 0;
-    size_t free_bytes = 0, total_bytes = 0;
-    ggml_backend_dev_memory(device, &free_bytes, &total_bytes);
+    if (!device || !free_bytes || !total_bytes) return false;
+    size_t free_memory = 0, total_memory = 0;
+    ggml_backend_dev_memory(device, &free_memory, &total_memory);
+    if (free_memory > total_memory || total_memory == 0) return false;
+    *free_bytes = free_memory;
+    *total_bytes = total_memory;
+    return true;
+}
+std::uint64_t gpt_runtime_vulkan_heap_bytes() {
+    std::uint64_t free_bytes = 0, total_bytes = 0;
+    if (!gpt_runtime_vulkan_memory(&free_bytes, &total_bytes)) return 0;
     return total_bytes;
 }
 bool gpt_runtime_select_model(unsigned i) {

@@ -127,7 +127,7 @@ let memoryRefreshBusy=false;
 async function refreshMemoryModel(){
  if(memoryRefreshBusy||document.visibilityState==='hidden')return;
  memoryRefreshBusy=true;
- try{const response=await api('/api/models/memory'),state=await response.json();const free=Number(state.largest_direct_block_bytes||0);const freeText=free?` · largest free block ${(free/1073741824).toFixed(1)} GiB`:'';$('memory-model').textContent=(state.loaded?`Loaded: ${state.name||state.id}`:'Memory: no model loaded')+freeText;$('memory-model').title=`Live memory snapshot. Largest direct-memory block ${(free/1073741824).toFixed(2)} GiB; this is not a model-fit guarantee.`;if(!state.loaded)preparedModel='';}
+ try{const response=await api('/api/models/memory'),state=await response.json();const label=$('memory-model');if(!state.loaded){label.textContent='Memory: no model loaded';label.title='No model is currently resident.';preparedModel='';return;}const name=state.name||state.id||'Unknown model';const free=state.vulkan_free_bytes,total=state.vulkan_heap_bytes;if(state.vulkan_memory_available===true&&typeof free==='number'&&typeof total==='number'&&Number.isFinite(free)&&Number.isFinite(total)&&free>=0&&free<=total&&total>0){const allocated=total-free;label.textContent=`Loaded: ${name} · ${(allocated/1073741824).toFixed(1)} / ${(total/1073741824).toFixed(1)} GiB allocated (device-wide)`;label.title='Device-wide Vulkan heap allocation (total minus free), not a per-model estimate.';}else{label.textContent=`Loaded: ${name} · Vulkan allocation unavailable`;label.title='The device-wide Vulkan memory snapshot is unavailable.';}}
  catch{$('memory-model').textContent='Memory: unavailable';}
  finally{memoryRefreshBusy=false;}
 }

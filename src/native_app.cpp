@@ -463,6 +463,14 @@ void App::poll()
             }
         }
     }
+    if (!running_ && !preferences_dirty_ && state_.initialized)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (last_vulkan_memory_refresh_ == std::chrono::steady_clock::time_point{} ||
+            now - last_vulkan_memory_refresh_ >= std::chrono::seconds(1))
+            if (start(Job::VulkanMemory))
+                last_vulkan_memory_refresh_ = now;
+    }
 }
 
 bool App::generating() const
@@ -1144,6 +1152,22 @@ void App::work()
                 result_.status = "Conversation removed from the web";
             }
         }
+        break;
+    }
+    case Job::VulkanMemory:
+    {
+        char id[256]{}, name[256]{};
+        std::uint64_t free_bytes = 0, total_bytes = 0;
+        std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
+        result_.loaded_model = gpt_runtime_loaded_model(id, sizeof(id), name, sizeof(name));
+        result_.loaded_model_id = result_.loaded_model ? id : "";
+        result_.loaded_model_name = result_.loaded_model ? (name[0] ? name : id) : "";
+        result_.vulkan_memory_available = gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
+                                          total_bytes != 0 && free_bytes <= total_bytes;
+        result_.vulkan_free_bytes = result_.vulkan_memory_available ? free_bytes : 0;
+        result_.vulkan_total_bytes = result_.vulkan_memory_available ? total_bytes : 0;
+        result_.vulkan_allocated_bytes =
+            result_.vulkan_memory_available ? total_bytes - free_bytes : 0;
         break;
     }
     }

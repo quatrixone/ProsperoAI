@@ -3622,8 +3622,20 @@ void handle_connection(const NetApi &api, int sock)
         std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
         char id[256]{}, name[256]{};
         const bool loaded=gpt_runtime_loaded_model(id,sizeof(id),name,sizeof(name));
+        std::uint64_t free_bytes = 0, total_bytes = 0;
+        const bool memory_available =
+            gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) && free_bytes <= total_bytes;
+        nlohmann::json free_value = nullptr, allocated_value = nullptr;
+        if (memory_available)
+        {
+            free_value = free_bytes;
+            allocated_value = total_bytes - free_bytes;
+        }
         send_json(api,sock,nlohmann::json{{"loaded",loaded},{"id",id},{"name",name},
-            {"vulkan_heap_bytes",gpt_runtime_vulkan_heap_bytes()},
+            {"vulkan_heap_bytes",memory_available ? total_bytes : 0},
+            {"vulkan_free_bytes",free_value},
+            {"vulkan_allocated_bytes",allocated_value},
+            {"vulkan_memory_available",memory_available},
             {"largest_direct_block_bytes",prospero_memory::largest_free_block()},
             {"flexible_free_bytes",prospero_memory::flexible_free()},
             {"estimate_confidence","live-memory-snapshot"}}.dump().c_str());

@@ -29,6 +29,8 @@ bool fail_audio_generation = false;
 unsigned generations = 0, select_calls = 0, prepare_calls = 0, audio_generations = 0;
 unsigned fixture_model_count = 500;
 bool audio_only_fixture = false;
+bool fixture_model_loaded = false, fixture_vulkan_memory_available = false;
+std::uint64_t fixture_vulkan_free_bytes = 0, fixture_vulkan_total_bytes = 0;
 std::string audio_root, last_audio_prompt, last_audio_options;
 struct Saved
 {
@@ -73,6 +75,49 @@ void test_stopped_queue_waiting_for_busy_worker()
                                                            false) ==
            prospero::native_audio_queue::DispatchDecision::stopped);
     assert(!active && !stop_requested && pending[0] == "pending" && pending[1] == "pending");
+}
+
+void test_native_vulkan_memory_snapshot()
+{
+    fixture_model_loaded = true;
+    fixture_vulkan_memory_available = true;
+    fixture_vulkan_free_bytes = 6ull << 30;
+    fixture_vulkan_total_bytes = 10ull << 30;
+
+    prospero::App app;
+    assert(app.initialize());
+    settle(app);
+    assert(app.state().loaded_model_id == "model-0");
+    assert(app.state().loaded_model_name == "model-0");
+    assert(app.state().vulkan_memory_available);
+    assert(app.state().vulkan_free_bytes == (6ull << 30));
+    assert(app.state().vulkan_allocated_bytes == (4ull << 30));
+    assert(app.state().vulkan_total_bytes == (10ull << 30));
+
+    fixture_vulkan_memory_available = false;
+    app.poll();
+    settle(app);
+    assert(app.state().vulkan_memory_available);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    app.poll();
+    settle(app);
+    assert(app.state().loaded_model);
+    assert(app.state().loaded_model_name == "model-0");
+    assert(!app.state().vulkan_memory_available);
+    assert(app.state().vulkan_allocated_bytes == 0);
+
+    fixture_model_loaded = false;
+    fixture_vulkan_memory_available = true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    app.poll();
+    settle(app);
+    assert(app.state().loaded_model_id.empty());
+    assert(app.state().loaded_model_name.empty());
+    assert(!app.state().loaded_model);
+    assert(app.state().vulkan_memory_available);
+    assert(app.state().vulkan_allocated_bytes == (4ull << 30));
+    app.shutdown();
+    fixture_model_loaded = false;
 }
 } // namespace
 
@@ -124,11 +169,29 @@ const char *gpt_runtime_model_purpose(unsigned index)
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
 {
+    off_ui();
+    if (!fixture_model_loaded)
+    {
+        if (id && ic)
+            id[0] = 0;
+        if (name && nc)
+            name[0] = 0;
+        return false;
+    }
     if (id && ic)
-        id[0] = 0;
+        std::snprintf(id, ic, "%s", "model-0");
     if (name && nc)
-        name[0] = 0;
-    return false;
+        std::snprintf(name, nc, "%s", "model-0");
+    return true;
+}
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes)
+{
+    off_ui();
+    if (!fixture_vulkan_memory_available || !free_bytes || !total_bytes)
+        return false;
+    *free_bytes = fixture_vulkan_free_bytes;
+    *total_bytes = fixture_vulkan_total_bytes;
+    return true;
 }
 bool gpt_runtime_select_model(unsigned index)
 {
@@ -287,6 +350,7 @@ int main(int argc, char **argv)
         settings << "style=2\ntokens=192\n";
     }
     ui_thread = std::this_thread::get_id();
+    test_native_vulkan_memory_snapshot();
     {
         prospero::App app;
         assert(app.initialize());
