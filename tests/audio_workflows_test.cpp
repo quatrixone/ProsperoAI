@@ -6,13 +6,17 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -32,9 +36,23 @@ std::string expected_lyrics;
 std::string expected_options;
 unsigned expected_seed = 0;
 unsigned expected_duration = 0;
-bool require_serialized = false;
 bool verify_generation = true;
 std::string generation_response;
+
+struct RuntimeLockProbe
+{
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool selection_entered = false;
+    bool release_selection = false;
+    bool generation_entered = false;
+    bool release_generation = false;
+    bool contender_started = false;
+    bool contender_completed = false;
+    bool contender_succeeded = false;
+};
+
+RuntimeLockProbe *runtime_lock_probe = nullptr;
 
 std::string read_bytes(const std::filesystem::path &path)
 {
@@ -131,13 +149,24 @@ bool gpt_runtime_select_model(unsigned index)
 {
     if (index >= 4)
         return false;
-    if (require_serialized)
-        assert(!prospero::model_manager::runtime_mutex().try_lock());
+    if (runtime_lock_probe && index == 1)
+    {
+        std::unique_lock<std::mutex> lock(runtime_lock_probe->mutex);
+        runtime_lock_probe->selection_entered = true;
+        runtime_lock_probe->changed.notify_all();
+        runtime_lock_probe->changed.wait(lock,
+                                         [] { return runtime_lock_probe->release_selection; });
+    }
     ++selection_calls;
     if ((selected == 3) != (index == 3))
         ++cross_modality_releases;
     selected = index;
     return true;
+}
+
+int gpt_runtime_prepare()
+{
+    return 0;
 }
 
 bool gpt_runtime_loaded_model(char *id, std::size_t id_capacity, char *name,
@@ -173,9 +202,6 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                expected_id == gpt_runtime_model_id(selected));
         assert(messages[0].content && expected_prompt == messages[0].content);
     }
-    if (require_serialized && verify_generation)
-        assert(!prospero::model_manager::runtime_mutex().try_lock());
-
     const auto runtime = prospero_settings::get();
     if (verify_generation)
     {
@@ -183,6 +209,14 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         assert(runtime.audio_options == expected_options);
         assert(runtime.audio_seed == expected_seed);
         assert(runtime.audio_duration_sec == expected_duration);
+    }
+    if (runtime_lock_probe)
+    {
+        std::unique_lock<std::mutex> lock(runtime_lock_probe->mutex);
+        runtime_lock_probe->generation_entered = true;
+        runtime_lock_probe->changed.notify_all();
+        runtime_lock_probe->changed.wait(lock,
+                                         [] { return runtime_lock_probe->release_generation; });
     }
     ++generation_calls;
     if (simulate_cover_release)
@@ -278,16 +312,84 @@ int main(int argc, char **argv)
     assert(selection_calls == before_preflight_selections &&
            generation_calls == before_preflight_generations && selected == 3);
     available_memory = 12ull << 30;
-    require_serialized = true;
     const unsigned before_submit_selections = selection_calls;
     const unsigned before_submit_generations = generation_calls;
-    const auto submitted_model =
-        prospero::audio_workflows::cover_to_abc("sheetsage-model", "source.wav", {});
-    require_serialized = false;
+    RuntimeLockProbe lock_probe;
+    runtime_lock_probe = &lock_probe;
+    prospero::audio_workflows::Result submitted_model;
+    std::thread audio_operation(
+        [&]
+        {
+            submitted_model =
+                prospero::audio_workflows::cover_to_abc("sheetsage-model", "source.wav", {});
+        });
+    bool selection_entered = false;
+    {
+        std::unique_lock<std::mutex> lock(lock_probe.mutex);
+        selection_entered = lock_probe.changed.wait_for(lock, std::chrono::seconds(5), [&]
+                                                        { return lock_probe.selection_entered; });
+    }
+
+    bool contender_started = false;
+    bool completed_during_selection = false;
+    bool generation_entered = false;
+    bool completed_during_generation = false;
+    std::thread competing_selection;
+    if (selection_entered)
+    {
+        competing_selection = std::thread(
+            [&]
+            {
+                {
+                    std::lock_guard<std::mutex> lock(lock_probe.mutex);
+                    lock_probe.contender_started = true;
+                }
+                lock_probe.changed.notify_all();
+                std::string error;
+                const bool ok =
+                    prospero::model_manager::select("htdemucs-model", false, false, &error);
+                {
+                    std::lock_guard<std::mutex> lock(lock_probe.mutex);
+                    lock_probe.contender_succeeded = ok;
+                    lock_probe.contender_completed = true;
+                }
+                lock_probe.changed.notify_all();
+            });
+        std::unique_lock<std::mutex> lock(lock_probe.mutex);
+        contender_started = lock_probe.changed.wait_for(lock, std::chrono::seconds(5), [&]
+                                                        { return lock_probe.contender_started; });
+        if (contender_started)
+            completed_during_selection =
+                lock_probe.changed.wait_for(lock, std::chrono::milliseconds(100),
+                                            [&] { return lock_probe.contender_completed; });
+    }
+    {
+        std::lock_guard<std::mutex> lock(lock_probe.mutex);
+        lock_probe.release_selection = true;
+    }
+    lock_probe.changed.notify_all();
+    {
+        std::unique_lock<std::mutex> lock(lock_probe.mutex);
+        generation_entered = lock_probe.changed.wait_for(lock, std::chrono::seconds(5), [&]
+                                                         { return lock_probe.generation_entered; });
+        if (contender_started)
+            completed_during_generation =
+                lock_probe.changed.wait_for(lock, std::chrono::milliseconds(100),
+                                            [&] { return lock_probe.contender_completed; });
+        lock_probe.release_generation = true;
+    }
+    lock_probe.changed.notify_all();
+    audio_operation.join();
+    if (competing_selection.joinable())
+        competing_selection.join();
+    runtime_lock_probe = nullptr;
     assert(submitted_model.ok && submitted_model.artifacts.size() == 1);
-    assert(selection_calls == before_submit_selections + 1 &&
+    assert(selection_entered && contender_started && generation_entered);
+    assert(!completed_during_selection && !completed_during_generation);
+    assert(lock_probe.contender_completed && lock_probe.contender_succeeded);
+    assert(selection_calls == before_submit_selections + 2 &&
            generation_calls == before_submit_generations + 1);
-    assert(selected == 1 &&
+    assert(selected == 2 &&
            submitted_model.artifacts[0] == std::string(PROSPERO_AUDIO_DIR) + "source-cover.abc");
     assert_settings_equal(prospero_settings::get(), settings);
     generation_response.clear();
@@ -318,11 +420,9 @@ int main(int argc, char **argv)
     request.track_name = "test-track";
     request.seed = expected_seed;
     request.duration_seconds = expected_duration;
-    require_serialized = true;
     const unsigned before_music_selections = selection_calls;
     const auto music = prospero::audio_workflows::create_music(request, [&](std::string_view phase)
                                                                { progress(phases, phase); });
-    require_serialized = false;
     assert(music.ok && !music.retryable && music.artifacts.size() == 1);
     assert(selection_calls == before_music_selections);
     assert(music.artifacts[0] == std::string(PROSPERO_AUDIO_DIR) + "result.wav");
