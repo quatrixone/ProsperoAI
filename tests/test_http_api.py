@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+import base64
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,7 @@ class HttpApiTests(unittest.TestCase):
                         "-I"+str(ROOT / "search-engine/include"), "-I"+str(ROOT / "search-engine/src"),
                         "-I"+str(ROOT / ".deps/llama.cpp/vendor"),
                         str(ROOT / "tests/http_api_harness.cpp"), str(ROOT / "src/session_store.cpp"),
+                        str(ROOT / "src/audio_workflows.cpp"),
                         str(ROOT / "src/debug_log.cpp"),
                         str(ROOT / "search-engine/src/query.cpp"),
                         str(ROOT / "search-engine/src/providers.cpp"),
@@ -48,8 +50,74 @@ class HttpApiTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.scratch.cleanup()
 
+    def setUp(self):
+        self.audio_calls_file = Path(self.scratch.name) / "audio-calls.txt"
+        self.audio_calls_file.unlink(missing_ok=True)
+
+    def audio_generate_calls(self):
+        if not self.audio_calls_file.exists():
+            return 0
+        return len(self.audio_calls_file.read_text().splitlines())
+
+    def tearDown(self):
+        for name in ("workspace.abc", "legacy.wav", "uploaded.wav", "uploaded-cover.abc"):
+            (self.audio_dir / name).unlink(missing_ok=True)
+
     def test_shutdown_joins_async_jobs_and_idle_connections(self):
         subprocess.run([str(self.lifecycle_binary)], check=True, timeout=20)
+
+    def test_music_route_redirects_to_workspace_audio(self):
+        head, _ = self.request_raw("/music", b"", method="GET")
+        self.assertIn("302 Found", head)
+        self.assertIn("Location: /?mode=audio", head)
+
+        abc = "X:1\nK:C\nCDEF|\n"
+        head, _ = self.request("/api/music/abc", {"name": "workspace.abc", "content": abc})
+        self.assertIn("200 OK", head)
+        self.assertEqual((self.audio_dir / "workspace.abc").read_text(), abc)
+
+        head, _ = self.request("/api/music/upload", {
+            "name": "legacy.wav", "part": 0,
+            "data": base64.b64encode(b"legacy upload").decode("ascii"),
+        })
+        self.assertIn("200 OK", head)
+        self.assertEqual((self.audio_dir / "legacy.wav").read_bytes(), b"legacy upload")
+
+        head, body = self.request("/api/music/files")
+        self.assertIn("200 OK", head)
+        names = {entry["name"] for entry in json.loads(body)["files"]}
+        self.assertTrue({"workspace.abc", "legacy.wav"}.issubset(names))
+
+    def test_audio_workflow_dispatch_uses_shared_operations(self):
+        import wave
+
+        source = self.audio_dir / "uploaded.wav"
+        with wave.open(str(source), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(b"\0\0")
+
+        environment = {
+            "PROSPERO_TEST_AUDIO_CALLS_FILE": str(self.audio_calls_file),
+            "PROSPERO_TEST_AUDIO_FIXTURE": "1",
+        }
+        initial_calls = self.audio_generate_calls()
+        head, body = self.request("/api/generate", {
+            "async": False, "audio_workflow": "cover", "model": "sheetsage-test",
+            "source": "uploaded.wav",
+        }, environment=environment)
+        self.assertIn("200 OK", head)
+        self.assertEqual(self.audio_generate_calls(), initial_calls + 1)
+        self.assertTrue(json.loads(body)["done"])
+
+        calls_before = self.audio_generate_calls()
+        head, _ = self.request("/api/generate", {
+            "async": False, "audio_workflow": "cover", "model": "sheetsage-test",
+            "source": "../outside.wav",
+        }, environment=environment)
+        self.assertIn("400 Bad Request", head)
+        self.assertEqual(self.audio_generate_calls(), calls_before)
 
     def test_restart_does_not_kill_the_process(self):
         header, body = self.request('/api/system/restart', body={})

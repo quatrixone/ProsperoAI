@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <barrier>
 #include <thread>
+#include <fstream>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -172,7 +173,7 @@ static int fake_close(int)
 }
 unsigned gpt_runtime_model_count()
 {
-    return 2;
+    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") ? 3 : 2;
 }
 unsigned gpt_runtime_selected_model()
 {
@@ -186,18 +187,27 @@ void gpt_runtime_set_idle_unload_timeout(unsigned)
 }
 const char *gpt_runtime_model_id(unsigned i)
 {
-    return i == 0 ? "tiny.gguf" : "second.gguf";
+    return i == 0 ? "tiny.gguf" : i == 1 ? "second.gguf" : "sheetsage-test";
 }
 const char *gpt_runtime_model_name(unsigned index)
 {
     return gpt_runtime_model_id(index);
 }
-const char *gpt_runtime_model_purpose(unsigned)
+const char *gpt_runtime_model_purpose(unsigned index)
 {
-    return "text-to-text";
+    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && index == 2 ? "text-to-audio"
+                                                                    : "text-to-text";
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
 {
+    if (std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && current_model == 2)
+    {
+        if (id && ic)
+            std::snprintf(id, ic, "%s", "sheetsage-test");
+        if (name && nc)
+            std::snprintf(name, nc, "%s", "SheetSage test fixture");
+        return true;
+    }
     if (id && ic)
         id[0] = 0;
     if (name && nc)
@@ -207,7 +217,7 @@ bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t 
 bool gpt_runtime_select_model(unsigned i)
 {
     current_model = i;
-    return i < 2;
+    return i < gpt_runtime_model_count();
 }
 int gpt_runtime_prepare()
 {
@@ -224,8 +234,24 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
     if (generation_hook)
         generation_hook();
     if (settings.model_id)
-        current_model = std::strcmp(settings.model_id, "second.gguf") == 0 ? 1 : 0;
+        current_model = std::strcmp(settings.model_id, "sheetsage-test") == 0 ? 2
+                        : std::strcmp(settings.model_id, "second.gguf") == 0  ? 1
+                                                                              : 0;
     std::string last = messages[count - 1].content;
+    if (const char *calls_file = std::getenv("PROSPERO_TEST_AUDIO_CALLS_FILE"))
+    {
+        std::ofstream calls(calls_file, std::ios::app);
+        calls << "call\n";
+    }
+    if (current_model == 2)
+    {
+        const std::string artifact = std::string(PROSPERO_AUDIO_DIR) + "uploaded-cover.abc";
+        std::ofstream(artifact) << "X:1\nK:C\nCDEF|\n";
+        std::snprintf(out, capacity, "Cover transcription complete. Artifacts: %s",
+                      artifact.c_str());
+        *stats = {};
+        return 0;
+    }
     if (last == "fail")
     {
         std::snprintf(out, capacity, "Context full");

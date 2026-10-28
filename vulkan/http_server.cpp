@@ -27,6 +27,7 @@
 #include "direct_memory.hpp"
 #include "prospero_search.hpp"
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+#include "audio_workflows.hpp"
 #include "model_downloader_ps5.hpp"
 #endif
 
@@ -424,6 +425,14 @@ void send_json(const NetApi &api, int sock, const char *json)
 // Public presentation assets only; model and generation routes retain bearer authentication.
 bool serve_ui_asset(const NetApi &api, int sock, const char *path)
 {
+    if (std::strcmp(path, "/music") == 0)
+    {
+        static constexpr char redirect[] =
+            "HTTP/1.1 302 Found\r\nLocation: /?mode=audio\r\nContent-Length: 0\r\n"
+            "Cache-Control: no-store\r\nConnection: close\r\n\r\n";
+        send_all(api, sock, redirect, sizeof(redirect) - 1);
+        return true;
+    }
     struct Asset
     {
         const char *route;
@@ -439,9 +448,6 @@ bool serve_ui_asset(const NetApi &api, int sock, const char *path)
         {"/lame.min.js", "lame.min.js", "text/javascript; charset=utf-8"},
         {"/mp3-worker.js", "mp3-worker.js", "text/javascript; charset=utf-8"},
         {"/stems-worker.js", "stems-worker.js", "text/javascript; charset=utf-8"},
-        {"/music", "music.html", "text/html; charset=utf-8"},
-        {"/music.css", "music.css", "text/css; charset=utf-8"},
-        {"/music.js", "music.js", "text/javascript; charset=utf-8"},
         {"/fonts/Inter-Regular.ttf", "fonts/Inter-Regular.ttf", "font/ttf"},
         {"/fonts/Inter-SemiBold.ttf", "fonts/Inter-SemiBold.ttf", "font/ttf"},
         {"/fonts/Montserrat-Medium.ttf", "fonts/Montserrat-Medium.ttf", "font/ttf"},
@@ -658,9 +664,154 @@ bool is_background_poll(const char *path)
            std::strcmp(path, "/api/models/selection") == 0;
 }
 
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+struct AudioWorkflowRequest
+{
+    std::string workflow;
+    std::string model;
+    std::string source;
+    prospero::audio_workflows::MusicRequest music;
+};
+
+bool parse_audio_workflow(const nlohmann::json &request, AudioWorkflowRequest &parsed,
+                          std::string &error)
+{
+    if (!request.is_object() || !request.contains("audio_workflow") ||
+        !request["audio_workflow"].is_string())
+    {
+        error = "Unsupported audio workflow.";
+        return false;
+    }
+    parsed.workflow = request["audio_workflow"].get<std::string>();
+    if (parsed.workflow != "create" && parsed.workflow != "cover" && parsed.workflow != "stems")
+    {
+        error = "Unsupported audio workflow.";
+        return false;
+    }
+    if (!request.contains("model") || !request["model"].is_string())
+    {
+        error = "A model ID is required.";
+        return false;
+    }
+    parsed.model = request["model"].get<std::string>();
+    if (parsed.model.empty() || parsed.model.size() >= 128)
+    {
+        error = "A valid model ID is required.";
+        return false;
+    }
+    parsed.music.model_id = parsed.model;
+
+    const auto string_field = [&request, &error](const char *key, std::string &value,
+                                                std::size_t maximum, bool required = false)
+    {
+        if (!request.contains(key))
+        {
+            if (required)
+            {
+                error = std::string("A ") + key + " value is required.";
+                return false;
+            }
+            return true;
+        }
+        if (!request[key].is_string())
+        {
+            error = std::string("The ") + key + " value must be a string.";
+            return false;
+        }
+        value = request[key].get<std::string>();
+        if (value.size() > maximum || (required && value.empty()))
+        {
+            error = std::string("The ") + key + " value is empty or exceeds its size limit.";
+            return false;
+        }
+        return true;
+    };
+    const auto unsigned_field = [&request, &error](const char *key, unsigned &value)
+    {
+        if (!request.contains(key))
+            return true;
+        const auto &field = request[key];
+        std::uint64_t parsed_value = 0;
+        if (field.is_number_unsigned())
+            parsed_value = field.get<std::uint64_t>();
+        else if (field.is_number_integer())
+        {
+            const auto signed_value = field.get<std::int64_t>();
+            if (signed_value < 0)
+            {
+                error = std::string("The ") + key + " value is out of range.";
+                return false;
+            }
+            parsed_value = static_cast<std::uint64_t>(signed_value);
+        }
+        else
+        {
+            error = std::string("The ") + key + " value must be an unsigned integer.";
+            return false;
+        }
+        if (parsed_value > UINT_MAX)
+        {
+            error = std::string("The ") + key + " value is out of range.";
+            return false;
+        }
+        value = static_cast<unsigned>(parsed_value);
+        return true;
+    };
+
+    if (parsed.workflow == "create")
+        return string_field("style", parsed.music.style, 4096, true) &&
+               string_field("lyrics", parsed.music.lyrics,
+                            prospero_settings::kMaxAudioLyricsBytes) &&
+               string_field("abc_name", parsed.music.abc_name, 96) &&
+               string_field("abc_content", parsed.music.abc_content, 256 * 1024) &&
+               string_field("track_name", parsed.music.track_name, 96) &&
+               unsigned_field("seed", parsed.music.seed) &&
+               unsigned_field("duration_seconds", parsed.music.duration_seconds);
+
+    return string_field("source", parsed.source, 96, true);
+}
+
+prospero::audio_workflows::Result run_audio_workflow(const AudioWorkflowRequest &request)
+{
+    std::string selection_error;
+    if (!prospero::model_manager::select(request.model.c_str(), false, false, &selection_error))
+        return {false, false, std::move(selection_error), {}};
+
+    if (request.workflow == "cover")
+        return prospero::audio_workflows::cover_to_abc(request.model, request.source, {});
+    if (request.workflow == "stems")
+        return prospero::audio_workflows::separate_stems(request.model, request.source, {});
+    return prospero::audio_workflows::create_music(request.music, {});
+}
+
+std::string audio_workflow_json(const AudioWorkflowRequest &request,
+                                const prospero::audio_workflows::Result &result)
+{
+    nlohmann::json body = {{"model", request.model}, {"response", result.response},
+                           {"done", true}, {"artifacts", result.artifacts}};
+    if (!result.ok)
+        body["error"] = result.response;
+    if (result.retryable)
+        body["retryable"] = true;
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+#endif
+
 // Builds exactly the JSON that the synchronous /api/generate would send.
 std::string generate_response_json(const char *request_body)
 {
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    const auto parsed_request = nlohmann::json::parse(request_body, nullptr, false);
+    if (parsed_request.is_object() && parsed_request.contains("audio_workflow"))
+    {
+        AudioWorkflowRequest audio_request;
+        std::string error;
+        if (!parse_audio_workflow(parsed_request, audio_request, error))
+            return nlohmann::json{{"done", true}, {"error", error}}.dump();
+        const auto result = run_audio_workflow(audio_request);
+        return audio_workflow_json(audio_request, result);
+    }
+#endif
     char model[128] = {};
     char prompt[65536] = {};
     json_find_string(request_body, "model", model, sizeof(model));
@@ -781,6 +932,20 @@ void handle_jobs_list(const NetApi &api, int sock)
 void handle_generate(const NetApi &api, int sock, const char *request_body)
 {
     const auto request = nlohmann::json::parse(request_body, nullptr, false);
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    AudioWorkflowRequest audio_request;
+    const bool has_audio_workflow = request.is_object() && request.contains("audio_workflow");
+    if (has_audio_workflow)
+    {
+        std::string error;
+        if (!parse_audio_workflow(request, audio_request, error))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        nlohmann::json{{"error", error}}.dump().c_str());
+            return;
+        }
+    }
+#endif
     if (request.is_object() && request.value("async", nlohmann::json()) == true)
     {
         std::lock_guard<std::mutex> lock(jobs_mutex);
@@ -816,6 +981,17 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
         send_json(api, sock, out);
         return;
     }
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    if (has_audio_workflow)
+    {
+        const auto result = run_audio_workflow(audio_request);
+        const auto response = audio_workflow_json(audio_request, result);
+        send_status(api, sock, result.ok ? "200 OK" : result.retryable ? "409 Conflict"
+                                                                        : "400 Bad Request",
+                    "application/json", response.c_str());
+        return;
+    }
+#endif
     // Model output may end halfway through a multibyte UTF-8 character when
     // num_predict is reached. Replace malformed bytes instead of letting JSON
     // serialization throw out of the HTTP worker and abort the whole title.
@@ -2773,60 +2949,37 @@ void handle_music_stems_zip(const NetApi &api, int sock, const char *track)
 // Music Studio: list generated audio + ABC files under work/audio, newest first.
 void handle_music_files(const NetApi &api, int sock)
 {
-    const char *dir = "/download0/ProsperoAI/work/audio";
+    const std::string dir = PROSPERO_AUDIO_DIR;
     nlohmann::json files = nlohmann::json::array();
-    if (DIR *dir_handle = opendir(dir))
+    const auto entries = prospero::audio_workflows::list_library(dir);
+    std::vector<nlohmann::json> rows;
+    for (const auto &entry : entries)
     {
-        std::vector<std::pair<long long, nlohmann::json>> rows;
-        while (struct dirent *entry = readdir(dir_handle))
+        nlohmann::json row = {{"name", entry.name}, {"size", entry.size},
+                              {"mtime", entry.modified}};
+        if (entry.name.compare(entry.name.size() - 4, 4, ".abc") != 0)
         {
-            const char *name = entry->d_name;
-            const std::size_t name_length = std::strlen(name);
-            if (name_length <= 4 || name_length > 96 ||
-                std::strcmp(name + name_length - 4, ".wav") != 0 &&
-                std::strcmp(name + name_length - 4, ".mp3") != 0 &&
-                std::strcmp(name + name_length - 4, ".abc") != 0)
-                continue;
-            const std::string full = std::string(dir) + "/" + name;
-            struct stat st{};
-            if (stat(full.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
-                continue;
-            rows.push_back({static_cast<long long>(st.st_mtime),
-                            nlohmann::json{{"name", name},
-                                           {"size", static_cast<long long>(st.st_size)},
-                                           {"mtime", static_cast<long long>(st.st_mtime)}}});
             // embed generation metadata sidecar (written by /api/music/meta)
-            if (std::strcmp(name + name_length - 4, ".abc") != 0)
+            const std::string base = entry.name.substr(0, entry.name.size() - 4);
+            const std::string meta_path = dir + base + ".track.json";
+            if (FILE *mf = std::fopen(meta_path.c_str(), "rb"))
             {
-                const std::string base(name, name_length - 4);
-                const std::string meta_path = std::string(dir) + "/" + base + ".track.json";
-                if (FILE *mf = std::fopen(meta_path.c_str(), "rb"))
+                std::fseek(mf, 0, SEEK_END);
+                const long msize = std::ftell(mf);
+                std::fseek(mf, 0, SEEK_SET);
+                std::string mtext(static_cast<std::size_t>(msize > 0 ? msize : 0), '\0');
+                if (msize > 0 && std::fread(mtext.data(), 1, mtext.size(), mf) == mtext.size())
                 {
-                    std::fseek(mf, 0, SEEK_END);
-                    const long msize = std::ftell(mf);
-                    std::fseek(mf, 0, SEEK_SET);
-                    std::string mtext(static_cast<std::size_t>(msize > 0 ? msize : 0), '\0');
-                    if (msize > 0 && std::fread(mtext.data(), 1, mtext.size(), mf) == mtext.size())
-                    {
-                        auto mj = nlohmann::json::parse(mtext, nullptr, false);
-                        if (mj.is_object())
-                            rows.back().second["meta"] = std::move(mj);
-                    }
-                    std::fclose(mf);
+                    auto mj = nlohmann::json::parse(mtext, nullptr, false);
+                    if (mj.is_object())
+                        row["meta"] = std::move(mj);
                 }
+                std::fclose(mf);
             }
         }
-        closedir(dir_handle);
-        std::sort(rows.begin(), rows.end(),
-                  [](const std::pair<long long, nlohmann::json> &a,
-                     const std::pair<long long, nlohmann::json> &b) { return a.first > b.first; });
-        for (auto &row : rows)
-        {
-            files.push_back(std::move(row.second));
-            if (files.size() >= 50)
-                break;
-        }
+        rows.push_back(std::move(row));
     }
+    files = std::move(rows);
     send_json(api, sock, nlohmann::json{{"files", std::move(files)}}.dump().c_str());
 }
 
@@ -2864,15 +3017,12 @@ void handle_music_abc(const NetApi &api, int sock, const char *body)
             return;
         }
     }
-    const std::string path = std::string("/download0/ProsperoAI/work/audio/") + name;
-    FILE *file = std::fopen(path.c_str(), "wb");
-    if (!file)
+    const std::string path = std::string(PROSPERO_AUDIO_DIR) + name;
+    if (!prospero::audio_workflows::save_abc(PROSPERO_AUDIO_DIR, name, content))
     {
         openai_error(api, sock, "500 Internal Server Error", "abc_write_failed", path.c_str());
         return;
     }
-    std::fwrite(content.data(), 1, content.size(), file);
-    std::fclose(file);
     send_json(api, sock, nlohmann::json{{"ok", true}, {"path", path}}.dump().c_str());
 }
 
@@ -3015,7 +3165,7 @@ void handle_music_upload(const NetApi &api, int sock, const char *body)
         openai_error(api, sock, "400 Bad Request", "invalid_upload", "Bad base64 payload.");
         return;
     }
-    const std::string path = std::string("/download0/ProsperoAI/work/audio/") + name;
+    const std::string path = std::string(PROSPERO_AUDIO_DIR) + name;
     std::FILE *file = std::fopen(path.c_str(), part == 0 ? "wb" : "ab");
     if (!file)
     {
