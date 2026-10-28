@@ -5,6 +5,8 @@
 #include "gpt_runtime.hpp"
 #include "model_manager.hpp"
 #include "runtime_settings.hpp"
+#include "direct_memory.hpp"
+#include "stems_audio_limits.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -30,6 +32,9 @@ namespace
 constexpr std::size_t kMaxNameBytes = 96;
 constexpr std::size_t kMaxAbcBytes = 256 * 1024;
 constexpr unsigned kMaxLibraryEntries = 50;
+constexpr std::uint64_t kMaxWavDataBytes = 256ull * 1024 * 1024;
+constexpr std::uint64_t kYue2MinimumFreeBytes = 2500ull << 20;
+constexpr std::uint64_t kSheetSageMinimumFreeBytes = 7500ull << 20;
 std::atomic<unsigned> temporary_file_id{0};
 thread_local ProgressCallback *active_progress = nullptr;
 
@@ -88,6 +93,119 @@ bool regular_file(const std::string &path, struct stat &info)
     if (lstat(path.c_str(), &info) != 0)
         return false;
     return S_ISREG(info.st_mode);
+}
+
+std::uint16_t read_le16(std::FILE *file)
+{
+    unsigned char bytes[2];
+    if (std::fread(bytes, 1, sizeof(bytes), file) != sizeof(bytes))
+        return 0;
+    return static_cast<std::uint16_t>(bytes[0]) |
+           static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[1]) << 8);
+}
+
+std::uint32_t read_le32(std::FILE *file)
+{
+    unsigned char bytes[4];
+    if (std::fread(bytes, 1, sizeof(bytes), file) != sizeof(bytes))
+        return 0;
+    return static_cast<std::uint32_t>(bytes[0]) | (static_cast<std::uint32_t>(bytes[1]) << 8) |
+           (static_cast<std::uint32_t>(bytes[2]) << 16) |
+           (static_cast<std::uint32_t>(bytes[3]) << 24);
+}
+
+std::string lower(std::string value);
+
+bool valid_wav_source(const std::string &path, const std::string &kind)
+{
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    if (!file)
+        return false;
+    const bool valid = [&]()
+    {
+        if (std::fseek(file, 0, SEEK_END) != 0)
+            return false;
+        const long file_size = std::ftell(file);
+        if (file_size < 12 || std::fseek(file, 0, SEEK_SET) != 0)
+            return false;
+
+        char tag[4];
+        if (std::fread(tag, 1, 4, file) != 4 || std::memcmp(tag, "RIFF", 4) != 0)
+            return false;
+        const std::uint64_t riff_end = static_cast<std::uint64_t>(read_le32(file)) + 8;
+        if (std::fread(tag, 1, 4, file) != 4 || std::memcmp(tag, "WAVE", 4) != 0 || riff_end < 12 ||
+            riff_end > static_cast<std::uint64_t>(file_size))
+            return false;
+
+        std::uint16_t format = 0, channels = 0, bits = 0;
+        std::uint32_t sample_rate = 0;
+        std::uint32_t data_bytes = 0;
+        for (std::uint64_t offset = 12; offset + 8 <= riff_end;)
+        {
+            if (std::fseek(file, static_cast<long>(offset), SEEK_SET) != 0 ||
+                std::fread(tag, 1, 4, file) != 4)
+                return false;
+            const std::uint32_t chunk_bytes = read_le32(file);
+            const std::uint64_t body = offset + 8;
+            if (chunk_bytes > riff_end - body)
+                return false;
+            const std::uint64_t next = body + chunk_bytes + (chunk_bytes & 1u);
+            if (next > riff_end)
+                return false;
+            if (std::memcmp(tag, "fmt ", 4) == 0)
+            {
+                if (chunk_bytes < 16 || std::fseek(file, static_cast<long>(body), SEEK_SET) != 0)
+                    return false;
+                format = read_le16(file);
+                channels = read_le16(file);
+                sample_rate = read_le32(file);
+                (void)read_le32(file);
+                (void)read_le16(file);
+                bits = read_le16(file);
+            }
+            else if (std::memcmp(tag, "data", 4) == 0)
+                data_bytes = chunk_bytes;
+            offset = next;
+            if (format && data_bytes)
+                break;
+        }
+
+        if (!data_bytes || data_bytes > kMaxWavDataBytes || !sample_rate ||
+            (format != 1 && format != 3) || channels < 1 || channels > 2 ||
+            (format == 1 && bits != 16) || (format == 3 && bits != 32))
+            return false;
+        const std::uint64_t bytes_per_frame = static_cast<std::uint64_t>(channels) * bits / 8;
+        if (!bytes_per_frame || data_bytes % bytes_per_frame != 0)
+            return false;
+        if (kind == "stems")
+        {
+            std::size_t output_frames = 0;
+            if (!prospero_stems::output_frame_count(data_bytes / bytes_per_frame, sample_rate,
+                                                    output_frames))
+                return false;
+        }
+        return true;
+    }();
+    std::fclose(file);
+    return valid;
+}
+
+bool memory_admission_failed(const std::string &model_id, const std::string &kind)
+{
+    std::uint64_t minimum_free = 0;
+    if (kind == "cover")
+        minimum_free = kSheetSageMinimumFreeBytes;
+    else if (lower(model_id).find("yue2") != std::string::npos)
+    {
+        char loaded_id[128]{};
+        char loaded_name[128]{};
+        if (gpt_runtime_loaded_model(loaded_id, sizeof(loaded_id), loaded_name,
+                                     sizeof(loaded_name)) &&
+            model_id == loaded_id)
+            return false;
+        minimum_free = kYue2MinimumFreeBytes;
+    }
+    return minimum_free && prospero_memory::free_total() < minimum_free;
 }
 
 std::string path_for(const std::string &root, const std::string &name)
@@ -285,6 +403,9 @@ Result run_audio(const std::string &model_id, const std::string &kind, const std
         };
         if (!regular_file(audio_root() + source_name, source_info))
             return failure("The selected audio source is missing or is not a regular file.");
+        if (!valid_wav_source(audio_root() + source_name, kind))
+            return failure(
+                "The selected WAV source is malformed, unsupported, or exceeds workflow limits.");
     }
 
     std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
@@ -292,6 +413,10 @@ Result run_audio(const std::string &model_id, const std::string &kind, const std
     std::string model_error;
     if (!resolve_model(model_id, kind, model_index, model_error))
         return failure(model_error);
+    if (model_index != gpt_runtime_selected_model())
+        return failure("Select the requested audio model before starting this workflow.");
+    if (memory_admission_failed(model_id, kind))
+        return failure("GPU memory low; free memory and retry.", true);
 
     const auto previous_settings = prospero_settings::get();
     auto operation_settings = previous_settings;
@@ -306,27 +431,20 @@ Result run_audio(const std::string &model_id, const std::string &kind, const std
         return failure("Could not apply temporary audio settings.");
 
     notify(progress, "preparation");
-    bool selected = gpt_runtime_select_model(model_index);
-    std::string response;
+    notify(progress, "inference");
+    char output[8192]{};
+    gpt_runtime_message_t message{"user", prompt.c_str()};
+    gpt_runtime_settings_t settings{};
+    settings.max_output_tokens = 1;
+    settings.model_id = model_id.c_str();
+    gpt_runtime_stats_t stats{};
     int status = 1;
-    if (!selected)
-        response = "The audio model could not be selected because the runtime is busy.";
-    else
     {
-        notify(progress, "inference");
-        char output[8192]{};
-        gpt_runtime_message_t message{"user", prompt.c_str()};
-        gpt_runtime_settings_t settings{};
-        settings.max_output_tokens = 1;
-        settings.model_id = model_id.c_str();
-        gpt_runtime_stats_t stats{};
-        {
-            ProgressScope progress_scope(progress);
-            status = gpt_runtime_generate(&message, 1, settings, output, sizeof(output), &stats,
-                                          runtime_progress);
-        }
-        response = output;
+        ProgressScope progress_scope(progress);
+        status = gpt_runtime_generate(&message, 1, settings, output, sizeof(output), &stats,
+                                      runtime_progress);
     }
+    std::string response = output;
 
     const bool settings_restored = prospero_settings::set(previous_settings);
     if (!settings_restored)
