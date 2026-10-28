@@ -51,8 +51,8 @@
             items,
             get running() { return running; },
             add(params, count, seed) {
-                const total = Math.max(1, Math.min(20, Number(count) || 1));
                 const firstSeed = Math.max(1, Math.min(4294967295, Number(seed) || 42));
+                const total = Math.min(Math.max(1, Math.min(20, Number(count) || 1)), 4294967295 - firstSeed + 1);
                 for (let index = 0; index < total; index++)
                     items.push({id: `${Date.now()}:${index}`, seed: Math.min(4294967295, firstSeed + index),
                         params: {...params}, status: 'pending', note: ''});
@@ -148,12 +148,13 @@
             const list = $('audio-library');
             list.replaceChildren();
             const audioFiles = library.filter(file => /\.(wav|mp3)$/i.test(file.name) && !file.meta?.stem_of);
+            const sourceFiles = audioFiles.filter(file => /\.wav$/i.test(file.name));
             const abcFiles = library.filter(file => /\.abc$/i.test(file.name));
             const source = $('audio-source');
             source.replaceChildren();
             const placeholder = document.createElement('option');
             placeholder.value = ''; placeholder.textContent = 'Choose an audio file…'; source.append(placeholder);
-            for (const file of audioFiles) {
+            for (const file of sourceFiles) {
                 const option = document.createElement('option');
                 option.value = file.name; option.textContent = file.name; source.append(option);
             }
@@ -181,11 +182,13 @@
                     player.src = pathFor(file.name); article.append(player);
                     const download = document.createElement('a'); download.href = pathFor(file.name);
                     download.download = file.name; download.textContent = 'Download'; article.append(download);
-                    const cover = document.createElement('button'); cover.type = 'button'; cover.className = 'secondary';
-                    cover.textContent = 'Use for Cover'; cover.onclick = () => { source.value = file.name; void runSourceWorkflow('cover'); };
-                    const stems = document.createElement('button'); stems.type = 'button'; stems.className = 'secondary';
-                    stems.textContent = 'Split stems'; stems.onclick = () => { source.value = file.name; void runSourceWorkflow('stems'); };
-                    article.append(cover, stems);
+                    if (/\.wav$/i.test(file.name)) {
+                        const cover = document.createElement('button'); cover.type = 'button'; cover.className = 'secondary';
+                        cover.textContent = 'Use for Cover'; cover.onclick = () => { source.value = file.name; void runSourceWorkflow('cover'); };
+                        const stems = document.createElement('button'); stems.type = 'button'; stems.className = 'secondary';
+                        stems.textContent = 'Split stems'; stems.onclick = () => { source.value = file.name; void runSourceWorkflow('stems'); };
+                        article.append(cover, stems);
+                    }
                     for (const stem of stemsByParent.get(file.name) || []) {
                         const stemRow = document.createElement('div'); stemRow.className = 'audio-stem';
                         const stemPlayer = document.createElement('audio'); stemPlayer.controls = true;
@@ -260,9 +263,9 @@
             if (!file) throw new Error('Choose an audio file first.');
             const base = file.name.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')
                 .replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60).toLowerCase() || 'cover';
-            if (/\.(wav|mp3)$/i.test(file.name) && file.size <= 64 * 1024 * 1024) {
-                await uploadBinary(base + file.name.match(/\.(wav|mp3)$/i)[0].toLowerCase(), await file.arrayBuffer());
-                return base + file.name.match(/\.(wav|mp3)$/i)[0].toLowerCase();
+            if (/\.wav$/i.test(file.name) && file.size <= 64 * 1024 * 1024) {
+                await uploadBinary(base + '.wav', await file.arrayBuffer());
+                return base + '.wav';
             }
             const wav = await localFileToWav(file), name = base + '-src.wav';
             await uploadWav(name, wav);

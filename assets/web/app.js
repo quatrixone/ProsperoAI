@@ -234,6 +234,7 @@ async function prepareConversationModel(){
     finally{modelChooser.disabled=false;}
 }
 function chooseInstalledModel(id,beginConversation=false){
+    if(controller){modelChooser.value=current?.model||'';return;}
     const chosen=models.find(model=>model.id===id);
     if(!chosen||!workspaceUI.filterModels(models,workspaceModeName).some(model=>model.id===id))return;
     if(beginConversation||!current||(current.model&&current.model!==id))newConversation();

@@ -77,6 +77,13 @@ test('audio queue assigns consecutive seeds and leaves later items pending after
     assert.deepEqual(Array.from(queue.items, item => item.status), ['failed', 'pending']);
 });
 
+test('audio queue stops at the maximum seed instead of duplicating it', () => {
+    const {createAudioQueue} = workspaceApi();
+    const queue = createAudioQueue({run: async () => {}});
+    queue.add({}, 3, 4294967295);
+    assert.deepEqual(Array.from(queue.items, item => item.seed), [4294967295]);
+});
+
 test('stopping an audio queue lets its active operation settle and skips the next item', async () => {
     assert.ok(source, 'the workspace audio/mode controller module should exist');
     const {createAudioQueue} = workspaceApi();
@@ -120,6 +127,76 @@ test('Workspace mode and model choices do not call runtime APIs', () => {
     assert.doesNotMatch(appSource.slice(modeStart, modeEnd), /api\(|runtimeSettings\(/);
     assert.doesNotMatch(appSource.slice(modelStart, modelEnd), /api\(|runtimeSettings\(/);
     assert.doesNotMatch(appSource.slice(settingsStart, settingsEnd), /runtimeSettings\(/);
+});
+
+test('changing the model during an active response preserves its model attribution', () => {
+    const start = appSource.indexOf('function chooseInstalledModel(');
+    const end = appSource.indexOf("\n}\n$('search')", start) + 2;
+    const chooserFunction = appSource.slice(start, end);
+    const current = {model: 'active-model'};
+    const modelChooser = {value: 'replacement-model'};
+    const models = [{id: 'replacement-model', name: 'Replacement', purpose: 'text-to-text'}];
+    const context = {
+        controller: {}, current, modelChooser, models, workspaceModeName: 'text',
+        workspaceUI: {filterModels: list => list}, workspaceMode: {stageModel() {}},
+        $: () => ({textContent: ''}), newConversation() {},
+        updateModelChip() {}, renderModels() {}, renderHistory() {}, openChat() {},
+        syncAudioDurationVisibility() {},
+    };
+    runInNewContext(`${chooserFunction}\nchooseInstalledModel('replacement-model')`, context);
+    assert.equal(current.model, 'active-model');
+    assert.equal(modelChooser.value, 'active-model');
+});
+
+test('Cover and stems use WAV sources while MP3 remains available for playback', () => {
+    const start = source.indexOf('        function renderLibrary()');
+    const end = source.indexOf('\n\n        async function refreshLibrary()', start);
+    const renderLibrary = source.slice(start, end);
+    const elements = new Map();
+    const element = tagName => ({
+        tagName,
+        children: [],
+        append(...children) { this.children.push(...children); },
+        replaceChildren() { this.children = []; },
+    });
+    for (const id of ['audio-library', 'audio-source', 'audio-abc-library']) elements.set(id, element());
+    const context = {
+        library: [{name: 'song.wav'}, {name: 'song.mp3'}, {name: 'score.abc'}],
+        document: {createElement: tagName => element(tagName)},
+        $: id => elements.get(id),
+        pathFor: name => name,
+        loadAbc() {},
+        runSourceWorkflow() {},
+    };
+    runInNewContext(`${renderLibrary}\nrenderLibrary()`, context);
+
+    const sourceChoices = Array.from(elements.get('audio-source').children, option => option.value);
+    assert.deepEqual(sourceChoices, ['', 'song.wav']);
+    const articles = elements.get('audio-library').children.filter(child => child.tagName !== 'p');
+    const wavArticle = articles.find(article => article.children.some(child => child.textContent === 'song.wav'));
+    const mp3Article = articles.find(article => article.children.some(child => child.textContent === 'song.mp3'));
+    assert.ok(wavArticle.children.some(child => child.textContent === 'Use for Cover'));
+    assert.ok(wavArticle.children.some(child => child.textContent === 'Split stems'));
+    assert.ok(mp3Article.children.some(child => child.tagName === 'audio'));
+    assert.ok(!mp3Article.children.some(child => ['Use for Cover', 'Split stems'].includes(child.textContent)));
+});
+
+test('uploaded MP3 is converted to WAV before it is sent to Cover', async () => {
+    const start = source.indexOf('        async function uploadLocalCoverSource()');
+    const end = source.indexOf('\n\n        async function loadAbc(', start);
+    const uploadFunction = source.slice(start, end);
+    const calls = [];
+    const file = {name: 'Track.MP3', size: 1024, async arrayBuffer() { return new Uint8Array([1, 2]); }};
+    const context = {
+        $: () => ({files: [file]}),
+        async uploadBinary(...args) { calls.push(['binary', ...args]); },
+        async localFileToWav(input) { calls.push(['convert', input.name]); return new Uint8Array([3, 4]); },
+        async uploadWav(...args) { calls.push(['wav', ...args]); },
+    };
+    const result = await runInNewContext(`(async()=>{${uploadFunction}\nreturn uploadLocalCoverSource()})()`, context);
+    assert.equal(result, 'track-src.wav');
+    assert.deepEqual(calls.map(call => call[0]), ['convert', 'wav']);
+    assert.equal(calls[1][1], 'track-src.wav');
 });
 
 test('legacy runtime audio settings do not reuse the Audio form field IDs', () => {
