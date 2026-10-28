@@ -1185,7 +1185,8 @@ void App::work()
                                                 "sync conversations",
                                                 "create music",
                                                 "cover to ABC",
-                                                "split stems"};
+                                                "split stems",
+                                                "refresh Vulkan memory"};
         const double seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
         const char *model =

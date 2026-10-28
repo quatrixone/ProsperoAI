@@ -79,6 +79,7 @@ void test_stopped_queue_waiting_for_busy_worker()
 
 void test_native_vulkan_memory_snapshot()
 {
+    assert(prospero::debug::set_enabled(true));
     fixture_model_loaded = true;
     fixture_vulkan_memory_available = true;
     fixture_vulkan_free_bytes = 6ull << 30;
@@ -118,6 +119,11 @@ void test_native_vulkan_memory_snapshot()
     assert(app.state().vulkan_allocated_bytes == (4ull << 30));
     app.shutdown();
     fixture_model_loaded = false;
+    assert(prospero::debug::set_enabled(false));
+    std::ifstream trace(std::string(prospero::debug::folder()) + "/debug-trace.txt");
+    const std::string trace_contents((std::istreambuf_iterator<char>(trace)),
+                                     std::istreambuf_iterator<char>());
+    assert(trace_contents.find("refresh Vulkan memory:") != std::string::npos);
 }
 } // namespace
 
