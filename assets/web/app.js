@@ -49,17 +49,39 @@ let conversationSyncReady = load('prospero-sync-initialized', false), conversati
 let presetCatalog = [], modelFilter = 'all', downloadState = {state:'idle',active_preset:-1}, pendingDelete = '';
 const kindNames = ['Text','Image','Audio','Voice'];
 const modelKind = model => ['text-to-text','text-to-image','text-to-audio','text-to-speech'].indexOf(model.purpose || 'text-to-text');
-let current = null, models = [], selectedModel = '', selectedModelState = 'unknown', pendingModel = '', controller = null, currentModelChosen = false;
+let current = null, models = [], modelsLoaded = false, selectedModel = '', selectedModelState = 'unknown', pendingModel = '', controller = null, currentModelChosen = false;
 const modelChooser=$('workspace-model');
+const workspaceUI=window.ProsperoWorkspace;
+let workspaceModeName=new URLSearchParams(location.search).get('mode')==='audio'?'audio':'text';
+let stagedWorkspaceModel='',workspaceChatOpen=false,preparedModel='',preparation=null,submitting=false,finalWorkspaceOptions={};
+const workspaceMode=workspaceUI.createWorkspaceMode({models,selectModel:selectWorkspaceModel,prepareModel:prepareWorkspaceModel});
+workspaceMode.setMode(workspaceModeName);
 const modelMemoryEstimate=document.createElement('p');modelMemoryEstimate.id='model-memory-estimate';modelMemoryEstimate.className='muted';modelMemoryEstimate.setAttribute('role','status');modelMemoryEstimate.textContent='Checking past memory measurements…';$('model-description').after(modelMemoryEstimate);
-function workspaceModelValue(){return current?.model||selectedModel;}
+function workspaceModelValue(){return [current?.model,stagedWorkspaceModel,selectedModel].find(id=>workspaceUI.filterModels(models,workspaceModeName).some(model=>model.id===id))||'';}
 let sessionToken = ''; try { sessionToken = sessionStorage.getItem('prospero-session') || ''; sessionStorage.removeItem('prospero-key'); } catch {}
 function page(name) { for (const p of ['workspace','media','models','settings']) $(p).hidden = p !== name; document.querySelectorAll('[data-page]').forEach(b => { b.classList.toggle('selected', b.dataset.page === name); b.setAttribute('aria-current', b.dataset.page === name ? 'page' : 'false'); }); }
 document.querySelectorAll('[data-page]').forEach(b => b.onclick = () => page(b.dataset.page));
+function renderWorkspaceModels(){
+    const selected=workspaceModelValue(),available=workspaceUI.filterModels(models,workspaceModeName);
+    modelChooser.replaceChildren();
+    const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose a model…';modelChooser.append(placeholder);
+    for(const model of available){const option=document.createElement('option');option.value=model.id;option.textContent=model.name||model.id;modelChooser.append(option);}
+    modelChooser.value=selected;
+    $('audio-empty-models').hidden=!modelsLoaded||workspaceUI.filterModels(models,'audio').length>0;
+}
+function setWorkspaceMode(mode){
+    workspaceModeName=mode;workspaceMode.setMode(mode);
+    for(const button of document.querySelectorAll('[data-mode]')){const active=button.dataset.mode===mode;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
+    renderWorkspaceModels();
+    const audio=mode==='audio';$('workspace-audio').hidden=!audio;
+    if(audio){$('welcome').hidden=true;$('chat').hidden=true;}
+    else{$('chat').hidden=!workspaceChatOpen;$('welcome').hidden=workspaceChatOpen;}
+}
+document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>setWorkspaceMode(button.dataset.mode));
 async function renderMediaLibrary(){const root=$('media-library');root.replaceChildren();const loading=document.createElement('p');loading.className='muted';loading.textContent='Loading media…';root.append(loading);try{const payload=await api('/api/media');const files=payload.data||[];root.replaceChildren();if(!files.length){const note=document.createElement('p');note.className='muted';note.textContent='Generated images and audio linked to saved conversations will appear here.';root.append(note);return;}for(const file of files){const card=document.createElement('article');card.className='glass model-card';const heading=document.createElement('strong');heading.textContent=file.path.split('/').at(-1)||'Generated media';const source=document.createElement('button');source.className='secondary';source.type='button';source.textContent=`From: ${file.title||'Conversation'}`;source.onclick=async()=>{try{let conversation=conversations.find(item=>item.id===file.conversation_id);if(!conversation)conversation=await api(`/api/conversations/${encodeURIComponent(file.conversation_id)}`).then(r=>r.json());if(!conversations.some(item=>item.id===conversation.id)){conversations.unshift(conversation);save('prospero-conversations',conversations.slice(0,50));}current=conversation;currentModelChosen=false;openChat();renderMessages();renderHistory();}catch(error){$('feedback').textContent=error.message;}};const model=document.createElement('small');model.className='muted';model.textContent=`Model: ${file.modelName||file.model||'Unknown'}`;const preview=document.createElement('div');preview.className='media-library-preview';const remove=document.createElement('button');remove.className='secondary';remove.type='button';remove.textContent='Delete archived copy';remove.title='Deletes only the archived copy stored with this conversation';remove.onclick=async()=>{if(!confirm(`Delete archived media “${heading.textContent}”? The generated source file is kept.`))return;remove.disabled=true;try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});card.remove();if(!root.children.length){const note=document.createElement('p');note.className='muted';note.textContent='Generated images and audio linked to saved conversations will appear here.';root.append(note);}}catch(error){$('feedback').textContent=error.message;remove.disabled=false;}};card.append(heading,source,model,preview,remove);appendMedia(preview,{path:file.path,kind:file.kind});root.append(card);}}catch(error){root.replaceChildren();const note=document.createElement('p');note.className='muted';note.textContent=`Could not load media: ${error.message}`;root.append(note);}}
 document.querySelector('[data-page="media"]').addEventListener('click',renderMediaLibrary);
 document.querySelector('.brand').onclick = e => { e.preventDefault(); showWelcome(); };
-function showWelcome(){if(controller){$('feedback').textContent='Stop the current response before leaving this conversation.';return;}current=null;currentModelChosen=false;page('workspace');$('chat').hidden=true;$('welcome').hidden=false;renderHistory();}
+function showWelcome(){if(controller){$('feedback').textContent='Stop the current response before leaving this conversation.';return;}current=null;currentModelChosen=false;workspaceChatOpen=false;page('workspace');setWorkspaceMode(workspaceModeName);renderHistory();}
 $('workspace-back').onclick=showWelcome;
 function applyPreferences() { document.body.classList.toggle('daylight', preferences.theme === 'daylight'); document.body.dataset.accent = preferences.accent; document.body.classList.toggle('large', preferences.size === 'large'); document.body.classList.toggle('reduce-motion', preferences.motion); document.body.classList.toggle('contrast', preferences.contrast); drawSculpture(0); }
 for (const [id, prop] of [['theme','theme'],['accent','accent'],['text-size','size'],['motion','motion'],['contrast','contrast'],['temperature','temperature'],['sounds','sounds'],['volume','volume']]) { const el = $(id); if (el.type === 'checkbox') el.checked = Boolean(preferences[prop]); else el.value = preferences[prop]; el.onchange = () => { preferences[prop] = el.type === 'checkbox' ? el.checked : ['temperature','volume'].includes(prop) ? Number(el.value) : el.value; $('temperature-value').textContent = preferences.temperature; save('prospero-preferences',preferences); applyPreferences(); }; }
@@ -67,7 +89,7 @@ $('temperature-value').textContent = preferences.temperature;
 function drawMark() { const svg = document.querySelector('.mark'); for (let i=0;i<4;i++) { const r=10+i*3, start=-0.4+i*0.24,end=start+4.7; const p=document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('d',`M ${25+r*Math.cos(start)} ${25+r*Math.sin(start)} A ${r} ${r} 0 1 1 ${25+r*Math.cos(end)} ${25+r*Math.sin(end)}`);p.setAttribute('fill','none');p.setAttribute('stroke','currentColor');p.setAttribute('stroke-width','1.4');svg.append(p); } }
 function drawSculpture(time) { const ctx=$('sculpture').getContext('2d'), size=300,cx=360,cy=360,turn=0.46+0.025*Math.sin(time*0.35);ctx.clearRect(0,0,720,720);ctx.lineWidth=1.25;const color=getComputedStyle(document.body).getPropertyValue('--accent').trim(); for(let band=0;band<40;band++){const v=band*2*Math.PI/40;let lx,ly;for(let step=0;step<=72;step++){const u=step*2*Math.PI/72,r=size*(0.70+0.24*Math.cos(v)),x=r*Math.cos(u),y=r*Math.sin(u),z=size*0.24*Math.sin(v),ty=y*0.62-z*0.78,depth=y*0.78+z*0.62,px=cx+x*Math.cos(turn)-ty*Math.sin(turn),py=cy+x*Math.sin(turn)+ty*Math.cos(turn);if(step){ctx.globalAlpha=0.22+0.70*(depth/size+1)*0.5;ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(px,py);ctx.stroke();}lx=px;ly=py;}}ctx.globalAlpha=1; }
 let lastArt=0;function animate(t){if(t-lastArt>66&&!$('welcome').hidden&&!$('workspace').hidden&&!preferences.motion&&!matchMedia('(prefers-reduced-motion:reduce)').matches){drawSculpture(t/1000);lastArt=t;}requestAnimationFrame(animate);}drawMark();applyPreferences();requestAnimationFrame(animate);
-async function api(path, options={}) { if(path==='/v1/chat/completions'&&options.body&&current){try{const request=JSON.parse(options.body),model=models.find(item=>item.id===request.model);if(model&&modelKind(model)===0){request.output_session_id=current.id;request.output_message_index=current.messages.length;options={...options,body:JSON.stringify(request)};}}catch{}}const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{}),...(sessionToken?{Authorization:`Bearer ${sessionToken}`}:{})}});if(response.status===401){sessionToken='';try{sessionStorage.removeItem('prospero-session');}catch{}if(!$('key-dialog').open)$('key-dialog').showModal();throw Error('A connection key is required, or the browser session has expired.');}if(!response.ok){let message=`Connection failed (${response.status}).`;try{const body=await response.json();message=body.error?.message||body.error||message;}catch{}throw Error(message);}return response; }
+async function api(path, options={}) { if(path==='/v1/chat/completions'&&options.body&&current){try{const request=JSON.parse(options.body),model=models.find(item=>item.id===request.model);request.options={...(request.options||{}),...finalWorkspaceOptions,num_predict:Number(finalWorkspaceOptions.output_limit)||0,num_ctx:(Number.parseInt(finalWorkspaceOptions.context,10)||0)*1024};if(model&&modelKind(model)===0){request.output_session_id=current.id;request.output_message_index=current.messages.length;}options={...options,body:JSON.stringify(request)};}catch{}}const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{}),...(sessionToken?{Authorization:`Bearer ${sessionToken}`}:{})}});if(response.status===401){sessionToken='';try{sessionStorage.removeItem('prospero-session');}catch{}if(!$('key-dialog').open)$('key-dialog').showModal();throw Error('A connection key is required, or the browser session has expired.');}if(!response.ok){let message=`Connection failed (${response.status}).`;try{const body=await response.json();message=body.error?.message||body.error||message;}catch{}throw Error(message);}return response; }
 async function refreshModels(){
     try {
         const response=await api('/v1/models');
@@ -78,10 +100,11 @@ async function refreshModels(){
         const selection=await api('/api/models/selection');
         const selectionData=await selection.json();
         selectedModel=models.some(m=>m.id===selectionData.id)?selectionData.id:'';selectedModelState=selectionData.state||'unknown';
-        modelChooser.replaceChildren();
-        const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose a model…';modelChooser.append(placeholder);
-        for(const model of models){const option=document.createElement('option');option.value=model.id;option.textContent=model.name||model.id;modelChooser.append(option);}
-        modelChooser.value=workspaceModelValue();
+        modelsLoaded=true;
+        if(selectedModelState==='ready')preparedModel=selectedModel;
+        workspaceMode.setModels(models);
+        if(!stagedWorkspaceModel&&workspaceUI.filterModels(models,workspaceModeName).some(model=>model.id===selectedModel))stagedWorkspaceModel=selectedModel;
+        renderWorkspaceModels();
         $('status').textContent=models.length?'PS5 · Connected':'No models installed';
         for(const [kind,id] of ['text-count','image-count','audio-count','voice-count'].entries()){
             const count=models.filter(m=>modelKind(m)===kind).length;
@@ -189,21 +212,39 @@ async function pollDownloads(){
     }catch(error){$('download-status').textContent=error.message;}
 }
 async function startModelDownload(index){const item=downloadState.items?.[index];if(!item)return;const required=(Number(item.size||0)/1073741824).toFixed(2);if(!confirm(`Download ${item.name}?\n\nRequired download size: ${required} GiB.\nFree console storage cannot be checked safely.\n\nCheck that enough space is available before continuing.`))return;$('download-status').textContent='Starting verified download…';try{await api('/api/models/download',{method:'POST',body:JSON.stringify({index})});await pollDownloads();}catch(error){$('download-status').textContent=error.message;}}
-let preparedModel='',preparation=null,submitting=false;
-async function prepareConversationModel(){
-  const id=current?.model;
-  if(!currentModelChosen||!id)return;
-  if(preparedModel===id)return;
-  if(preparation){await preparation;return prepareConversationModel();}
-  $('model-load-status').textContent='Preparing model…';
-  modelChooser.disabled=true;
-  preparation=(async()=>{const response=await api('/api/models/selection',{method:'POST',body:JSON.stringify({id,prepare:true})});if(!response.ok){let message='The selected model could not be prepared.';try{message=(await response.json()).error||message;}catch{}throw new Error(message);}const selection=await response.json();selectedModelState=selection.state||'ready';preparedModel=id;})();
-  try{await preparation;$('model-load-status').textContent='Model ready.';void refreshMemoryModel();}
-  finally{preparation=null;modelChooser.disabled=false;}
+let preparingModel='';
+async function selectWorkspaceModel(id){
+    const response=await api('/api/models/selection',{method:'POST',body:JSON.stringify({id,prepare:false})});
+    const selection=await response.json();selectedModel=id;selectedModelState=selection.state||'selected';preparedModel='';
 }
-async function chooseInstalledModel(id,beginConversation=false){try{if(beginConversation||!current||(current.model&&current.model!==id))newConversation();const loadStatus=$('model-load-status');loadStatus.textContent='Selecting model…';modelChooser.disabled=true;const response=await api('/api/models/selection',{method:'POST',body:JSON.stringify({id,prepare:false})});if(!response.ok)throw new Error('The model could not be selected.');const selection=await response.json();preparedModel='';selectedModel=id;selectedModelState=selection.state||'selected';currentModelChosen=true;modelChooser.value=id;const chosen=models.find(model=>model.id===id);current.model=id;current.modelName=chosen?.name||id;current.purpose=chosen?.purpose||'text-to-text';current.updatedAt=Date.now();loadStatus.textContent=selectedModelState==='ready'?`${current.modelName} is ready.`:`${current.modelName} selected for this conversation.`;openChat();renderModels();renderHistory();if(conversations.includes(current))void persistConversation(current);}catch(error){modelChooser.value='';$('model-load-status').textContent=error.message;}finally{modelChooser.disabled=false;}}
-$('search').oninput=renderModels;$('model-dialog').addEventListener('close',()=>{if($('model-dialog').returnValue==='use')void chooseInstalledModel(pendingModel,true);});
-modelChooser.onchange=()=>{if(modelChooser.value)void chooseInstalledModel(modelChooser.value);};
+async function prepareWorkspaceModel(id){
+    if(preparedModel===id)return;
+    if(preparation){if(preparingModel===id)return preparation;await preparation;return prepareWorkspaceModel(id);}
+    preparingModel=id;$('model-load-status').textContent='Preparing model…';
+    preparation=(async()=>{const response=await api('/api/models/selection',{method:'POST',body:JSON.stringify({id,prepare:true})});const selection=await response.json();selectedModelState=selection.state||'ready';preparedModel=id;})();
+    try{await preparation;$('model-load-status').textContent='Model ready.';void refreshMemoryModel();}
+    finally{preparation=null;preparingModel='';modelChooser.disabled=false;}
+}
+async function prepareConversationModel(){
+    const id=current?.model;
+    if(!currentModelChosen||!id)return;
+    workspaceMode.stageModel(id);
+    modelChooser.disabled=true;
+    try{return await workspaceMode.submit(stageWorkspaceSettings(),async options=>{await runtimeSettings(options);finalWorkspaceOptions=options;return options;});}
+    finally{modelChooser.disabled=false;}
+}
+function chooseInstalledModel(id,beginConversation=false){
+    const chosen=models.find(model=>model.id===id);
+    if(!chosen||!workspaceUI.filterModels(models,workspaceModeName).some(model=>model.id===id))return;
+    if(beginConversation||!current||(current.model&&current.model!==id))newConversation();
+    workspaceMode.stageModel(id);stagedWorkspaceModel=id;currentModelChosen=true;
+    if(current){current.model=id;current.modelName=chosen.name||id;current.purpose=chosen.purpose||'text-to-text';current.updatedAt=Date.now();}
+    modelChooser.value=id;$('model-load-status').textContent=`${chosen.name||id} staged. It loads when you submit.`;
+    updateModelChip();renderModels();renderHistory();
+    if(current)openChat();else syncAudioDurationVisibility();
+}
+$('search').oninput=renderModels;$('model-dialog').addEventListener('close',()=>{if($('model-dialog').returnValue==='use')chooseInstalledModel(pendingModel,true);});
+modelChooser.onchange=()=>{if(modelChooser.value)chooseInstalledModel(modelChooser.value);};
 function renderHistory(){
     const list=$('history');list.replaceChildren();
     const kind=$('history-kind').value, query=$('history-search').value.trim().toLocaleLowerCase(), archiveMode=$('history-archive-mode').value;
@@ -289,7 +330,7 @@ $('delete-dialog').addEventListener('close',async()=>{
     renderHistory();
 });
 function updateModelChip(){const chip=$('model-chip'),model=models.find(item=>item.id===current?.model),name=current?.modelName||model?.name||current?.model||'';chip.textContent=name?`Model: ${name}`:'Choose a model';chip.title=name?`This conversation uses ${name}`:'Choose a model for this conversation';chip.hidden=false;}
-function openChat(){page('workspace');$('welcome').hidden=true;$('chat').hidden=false;$('chat-title').textContent=current?.title||'A little room for big ideas.';updateModelChip();modelChooser.value=workspaceModelValue();$('model-load-status').textContent=currentModelChosen?`${current.modelName||current.model} is selected for this conversation.`:current?.model?'Choose this conversation’s model, then start typing to load it.':selectedModel?`${models.find(item=>item.id===selectedModel)?.name||selectedModel} is available. Choose it to use it in this conversation.`:'Choose a model, then start typing to load it.';const model=models.find(item=>item.id===(current?.model||selectedModel)),tts=currentModelChosen&&(current?.purpose==='text-to-speech'||model?.purpose==='text-to-speech');$('workspace-voice-group').hidden=!tts;syncAudioDurationVisibility();if(tts){populateWorkspaceVoicePicker(model?.id||current?.model||selectedModel);const chatterbox=String(model?.id||current?.model||selectedModel).includes('chatterbox');$('chatterbox-upload-label').hidden=!chatterbox;void runtimeSettings();if(chatterbox)void refreshCustomChatterboxVoice();}}
+function openChat(){workspaceChatOpen=true;page('workspace');setWorkspaceMode(workspaceModeName);$('chat-title').textContent=current?.title||'A little room for big ideas.';updateModelChip();modelChooser.value=workspaceModelValue();$('model-load-status').textContent=currentModelChosen?`${current.modelName||current.model} is staged. It loads when you submit.`:current?.model?'Choose this conversation’s model before submitting.':'Choose a model. It loads when you submit.';const model=models.find(item=>item.id===(current?.model||stagedWorkspaceModel)),tts=currentModelChosen&&(current?.purpose==='text-to-speech'||model?.purpose==='text-to-speech');$('workspace-voice-group').hidden=!tts;syncAudioDurationVisibility();if(tts){populateWorkspaceVoicePicker(model?.id||current?.model||stagedWorkspaceModel);const chatterbox=String(model?.id||current?.model||stagedWorkspaceModel).includes('chatterbox');if($('chatterbox-upload-label'))$('chatterbox-upload-label').hidden=!chatterbox;if(chatterbox)void refreshCustomChatterboxVoice();}}
 $('history-kind').onchange=renderHistory;$('history-archive-mode').onchange=renderHistory;
 $('history-search').oninput=renderHistory;
 function newConversation(){
@@ -297,7 +338,7 @@ function newConversation(){
     currentModelChosen=false;current={id:globalThis.crypto?.randomUUID?.()||String(Date.now()),title:'New conversation',model:'',modelName:'',purpose:'other',messages:[],updatedAt:Date.now()};
     openChat();renderMessages();renderHistory();$('prompt').focus();
 }
-function startKind(kind){if(controller){$('feedback').textContent='Stop the current response before starting a new conversation.';return;}newConversation();modelChooser.focus();$('model-load-status').textContent=`Choose a ${kindNames[kind].toLowerCase()} model, then start typing to load it.`;}
+function startKind(kind){if(controller){$('feedback').textContent='Stop the current response before starting a new conversation.';return;}const mode=['text','sd','audio','tts'][kind]||'text';setWorkspaceMode(mode);syncAudioDurationVisibility();if(mode==='audio')return;newConversation();modelChooser.focus();$('model-load-status').textContent=`Choose a ${kindNames[kind].toLowerCase()} model; it loads when you submit.`;}
 function closeHistory(){$('chat').classList.remove('show-history');$('history-toggle').setAttribute('aria-expanded','false');}
 $('start').onclick=()=>startKind(0);for(const [kind,id] of ['converse','imagine','compose','speak'].entries())$(id).onclick=()=>startKind(kind);$('new').onclick=()=>{newConversation();closeHistory();};$('history-close').onclick=closeHistory;$('history-toggle').onclick=()=>{$('chat').classList.toggle('show-history');$('history-toggle').setAttribute('aria-expanded',String($('chat').classList.contains('show-history')));};
 function extractMedia(text){const paths=[...text.matchAll(/\/download0\/[^\s]+\.(?:png|tga|wav)/g)];if(!paths.length)return null;const match=paths.find(item=>item[0].startsWith('/download0/ProsperoAI/sessions/')||item[0].startsWith('/download0/ProsperoAI/work/image/'))||paths[0],path=match[0],kind=path.endsWith('.wav')?'audio':'image';return{path,kind,before:text.slice(0,match.index)};}
@@ -312,7 +353,7 @@ function appendArtifacts(el,text,primary){for(const path of extractArtifacts(tex
 function addMessage(message){const el=document.createElement('div');el.className=`message ${message.role==='user'?'user':'assistant'}`;const media=message.role!=='user'&&extractMedia(message.content||'');if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,message.content||'');}else el.textContent=message.content||'';$('messages').append(el);return el;}
 function showGenerationStats(el,usage,isText,fallbackSeconds){const rate=Number(usage?.tokens_per_second),seconds=Number(usage?.generation_time_ms)/1000||fallbackSeconds;if(isText&&Number.isFinite(rate)&&rate>0){const meta=document.createElement('div');meta.className='message-metrics';meta.textContent=`${rate.toFixed(1)} tok/s · ${seconds.toFixed(1)} s`;el.append(meta);}else if(!isText&&Number.isFinite(seconds)&&seconds>0){const meta=document.createElement('div');meta.className='message-metrics';meta.textContent=`Generated in ${seconds.toFixed(1)} s`;el.append(meta);}}
 function renderMessages(){$('messages').replaceChildren();for(const message of current?.messages||[])addMessage(message);$('messages').scrollTop=$('messages').scrollHeight;}
-$('prompt').oninput=()=>{if($('prompt').value.trim()&&currentModelChosen)void prepareConversationModel().catch(error=>{$('feedback').textContent=error.message;});$('prompt').style.height='auto';$('prompt').style.height=Math.min(180,$('prompt').scrollHeight)+'px';};$('prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&matchMedia('(min-width:701px)').matches){e.preventDefault();$('composer').requestSubmit();}};
+$('prompt').oninput=()=>{$('prompt').style.height='auto';$('prompt').style.height=Math.min(180,$('prompt').scrollHeight)+'px';};$('prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&matchMedia('(min-width:701px)').matches){e.preventDefault();$('composer').requestSubmit();}};
 $('composer').onsubmit=async e=>{e.preventDefault();if(controller){controller.abort();return;}const text=$('prompt').value.trim();if(!text)return;if(!current)newConversation();if(!currentModelChosen){if(!modelChooser.value){$('feedback').textContent='Choose a model for this conversation before sending.';modelChooser.focus();return;}await chooseInstalledModel(modelChooser.value);if(!currentModelChosen)return;}if(submitting)return;submitting=true;const conversation=current;try{await prepareConversationModel();}catch(error){$('feedback').textContent=error.message;return;}finally{submitting=false;}if(current!==conversation)return;if(!conversations.includes(conversation))conversations.unshift(conversation);conversation.messages.push({role:'user',content:text});if(conversation.messages.length===1)conversation.title=text.slice(0,70);conversation.updatedAt=Date.now();$('prompt').value='';$('prompt').style.height='auto';openChat();renderHistory();addMessage(conversation.messages.at(-1));const answer={role:'assistant',content:''};const el=addMessage(answer);controller=new AbortController();$('send').textContent='■';$('send').setAttribute('aria-label','Stop response');$('prompt').disabled=true;$('feedback').textContent='Thinking…';const start=performance.now();const selectedModel=models.find(model=>model.id===conversation.model);const isTextModel=!selectedModel?.purpose||modelKind(selectedModel)===0;let usage=null,received=false,requestMessages=conversation.messages;try{await persistConversation(conversation);requestMessages=await prosperoPrepareSearch(text,requestMessages,isTextModel);const response=await api('/v1/chat/completions',{method:'POST',signal:controller.signal,body:JSON.stringify({model:conversation.model,messages:requestMessages,stream:isTextModel,stream_options:isTextModel?{include_usage:true}:undefined,temperature:preferences.temperature})});if(!response.headers.get('Content-Type')?.includes('text/event-stream')){
     const result=await response.json();usage=result.usage||null;answer.content=result.choices?.[0]?.message?.content||'';received=Boolean(answer.content);const media=extractMedia(answer.content);if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,answer.content);}else el.textContent=answer.content;
 }else{
@@ -320,6 +361,9 @@ const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
 if(!received)throw Error('The model returned an empty response.');showGenerationStats(el,usage,isTextModel,(performance.now()-start)/1000);$('feedback').textContent=`Completed · ${((performance.now()-start)/1000).toFixed(1)}s`;}catch(error){$('feedback').textContent=error.name==='AbortError'?'Response stopped.':error.message;if(!received)el.remove();}finally{if(answer.content)conversation.messages.push(answer);conversation.updatedAt=Date.now();save('prospero-conversations',conversations.slice(0,50));controller=null;$('send').textContent='↑';$('send').setAttribute('aria-label','Send message');$('prompt').disabled=false;renderHistory();void persistConversation(conversation);}};
 $('access').onclick=()=>{$('key-error').textContent='';$('key-dialog').showModal();};$('key-dialog').addEventListener('close',async()=>{if($('key-dialog').returnValue==='connect'){const apiKey=$('key').value.trim();$('key').value='';try{const response=await fetch('/api/auth/session',{method:'POST',headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'}});if(!response.ok){let message='Could not create a browser session.';try{const body=await response.json();message=body.error?.message||body.error||message;}catch{}throw new Error(message);}const session=await response.json();sessionToken=session.token;try{sessionStorage.setItem('prospero-session',sessionToken);}catch{}$('key-error').textContent='';refreshModels();}catch(error){$('key-error').textContent=error.message;$('key-dialog').showModal();}}});
 $('export-diagnostics').onclick=async()=>{try{const response=await api('/api/diagnostics/events');const blob=new Blob([JSON.stringify(await response.json(),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='prosperoai-diagnostics.json';link.click();URL.revokeObjectURL(url);}catch(error){$('feedback').textContent=error.message;}};
+workspaceUI.mount({api,getModel:()=>modelChooser.value,getModels:()=>models,
+    onSubmit:async(_model,body)=>api('/api/generate',{method:'POST',body:JSON.stringify(body)}).then(response=>response.json()),
+    onComplete:()=>{void refreshModels();void refreshMemoryModel();}});
 renderHistory();refreshModels();pollDownloads();
 void syncConversations();setInterval(syncConversations,4000);setInterval(refreshSelectedModel,4000);void refreshMemoryModel();setInterval(refreshMemoryModel,2000);
 
@@ -344,7 +388,7 @@ function currentSearchScopeMask(){const checked={};for(const [id] of SEARCH_SCOP
 let runtimeSettingsQueue=Promise.resolve();
 function runtimeSettings(change){const result=runtimeSettingsQueue.then(()=>applyRuntimeSettings(change));runtimeSettingsQueue=result.catch(()=>{});return result;}
 async function applyRuntimeSettings(change) {
-  const controls = ['runtime-context','length','runtime-thinking','runtime-idle-unload','audio-duration','audio-seed','audio-options','sd-seed','sd-size','sd-upscale','kokoro-voice','workspace-voice','web-search-enabled','web-search-timeout'].map($).filter(Boolean);
+  const controls = ['runtime-context','length','runtime-thinking','runtime-idle-unload','runtime-audio-duration','runtime-audio-seed','audio-options','sd-seed','sd-size','sd-upscale','kokoro-voice','workspace-voice','web-search-enabled','web-search-timeout'].map($).filter(Boolean);
   controls.forEach(el => el.disabled = true);
   try {
     const response = await api('/api/settings/runtime', change ? {method:'POST',body:JSON.stringify(change)} : {});
@@ -354,9 +398,9 @@ async function applyRuntimeSettings(change) {
     $('length').value = String(settings.output_limit ?? 0);
     $('runtime-thinking').checked = settings.thinking;
     $('runtime-idle-unload').value = String(settings.idle_unload_minutes);
-    if($('audio-duration')){const duration=Number(settings.audio_duration_sec)||0;if(duration!==0&&![8,16,30,60,120,300].includes(duration)&&![...$('audio-duration').options].some(option=>Number(option.value)===duration))$('audio-duration').add(new Option(`${duration} seconds`,String(duration)));$('audio-duration').value=String(duration);}
+    if($('runtime-audio-duration')){const duration=Number(settings.audio_duration_sec)||0;if(duration!==0&&![8,16,30,60,120,300].includes(duration)&&![...$('runtime-audio-duration').options].some(option=>Number(option.value)===duration))$('runtime-audio-duration').add(new Option(`${duration} seconds`,String(duration)));$('runtime-audio-duration').value=String(duration);}
     savedAudioDuration=Number(settings.audio_duration_sec)||0;
-    if($('audio-seed'))$('audio-seed').value=String(settings.audio_seed??42);
+    if($('runtime-audio-seed'))$('runtime-audio-seed').value=String(settings.audio_seed??42);
     savedAudioSeed=Number(settings.audio_seed??42);
     if($('audio-options'))$('audio-options').value=settings.audio_options||'';
     savedAudioOptions=settings.audio_options||'';
@@ -379,9 +423,10 @@ async function applyRuntimeSettings(change) {
     populateWorkspaceVoicePicker(current?.model || selectedModel);
     $('runtime-feedback').textContent = '';
     if($('workspace-voice-feedback'))$('workspace-voice-feedback').textContent = '';
+    stageWorkspaceSettings();
   } catch (error) {
-    if(change?.audio_duration_sec!==undefined&&$('audio-duration'))$('audio-duration').value=String(savedAudioDuration);
-    if(change?.audio_seed!==undefined&&$('audio-seed'))$('audio-seed').value=String(savedAudioSeed);
+    if(change?.audio_duration_sec!==undefined&&$('runtime-audio-duration'))$('runtime-audio-duration').value=String(savedAudioDuration);
+    if(change?.audio_seed!==undefined&&$('runtime-audio-seed'))$('runtime-audio-seed').value=String(savedAudioSeed);
     if(change?.audio_options!==undefined&&$('audio-options'))$('audio-options').value=savedAudioOptions;
     if(change?.sd_seed!==undefined&&$('sd-seed'))$('sd-seed').value=String(savedSdSeed);
     if((change?.sd_width!==undefined||change?.sd_height!==undefined)&&$('sd-size'))$('sd-size').value=savedSdSize;
@@ -396,10 +441,27 @@ async function applyRuntimeSettings(change) {
   }
   finally { controls.forEach(el => el.disabled = false); }
 }
+function stageWorkspaceSettings(){
+  const settings={context:$('runtime-context').value,
+    output_limit:Number($('length').value),thinking:$('runtime-thinking').checked,
+    idle_unload_minutes:Number($('runtime-idle-unload').value)};
+  const model=models.find(item=>item.id===(modelChooser.value||current?.model));
+  if(model?.purpose==='text-to-image')Object.assign(settings,{sd_seed:Number($('sd-seed').value),
+    sd_width:Number($('sd-size').value.split(',')[0]),sd_height:Number($('sd-size').value.split(',')[1]),
+    sd_upscale:$('sd-upscale').checked});
+  if(model?.purpose==='text-to-speech'){
+    if(String(model.id).includes('chatterbox'))Object.assign(settings,{chatterbox_voice:$('workspace-voice').value,
+      chatterbox_language:$('workspace-language').value});
+    else settings.kokoro_voice=$('workspace-voice').value;
+  }
+  workspaceMode.setOptions(settings);
+  return settings;
+}
+function stageWorkspaceSettingsChange(){stageWorkspaceSettings();$('runtime-feedback').textContent='Changes apply when you submit a request.';}
 const audioDurationLabel=document.createElement('label');
 audioDurationLabel.textContent='Audio clip duration';
 const audioDuration=document.createElement('select');
-audioDuration.id='audio-duration';
+audioDuration.id='runtime-audio-duration';
 for(const [value,label] of [[0,'Model default'],[8,'8 seconds'],[16,'16 seconds'],[30,'30 seconds'],[60,'60 seconds'],[120,'120 seconds'],[300,'300 seconds']]){
   const option=document.createElement('option');
   option.value=String(value);
@@ -416,7 +478,7 @@ audioDurationHint.hidden=true;
 const audioSeedLabel=document.createElement('label');
 audioSeedLabel.textContent='Audio seed';
 const audioSeed=document.createElement('input');
-audioSeed.id='audio-seed';
+audioSeed.id='runtime-audio-seed';
 audioSeed.type='number';audioSeed.min='0';audioSeed.max='4294967295';audioSeed.step='1';
 audioSeedLabel.append(audioSeed);
 const audioSeedHint=document.createElement('small');
@@ -473,19 +535,21 @@ sdUpscaleHint.textContent='Optional post-processing. Requires RealESRGAN_x4plus.
 $('runtime-feedback').before(sdUpscaleLabel,sdUpscaleHint);
 sdUpscaleLabel.hidden=true;
 sdUpscaleHint.hidden=true;
-function syncAudioDurationVisibility(){const model=models.find(item=>item.id===(current?.model||selectedModel));const audioVisible=Boolean(model&&modelKind(model)===2),imageVisible=Boolean(model&&modelKind(model)===1);audioDurationLabel.hidden=!audioVisible;audioDurationHint.hidden=!audioVisible;audioSeedLabel.hidden=!audioVisible;audioSeedHint.hidden=!audioVisible;audioOptionsLabel.hidden=!audioVisible;audioOptionsHint.hidden=!audioVisible;sdSeedLabel.hidden=!imageVisible;sdSeedHint.hidden=!imageVisible;sdSizeLabel.hidden=!imageVisible;sdSizeHint.hidden=!imageVisible;sdUpscaleLabel.hidden=!imageVisible;sdUpscaleHint.hidden=!imageVisible;}
-audioDuration.onchange=()=>runtimeSettings({audio_duration_sec:Number(audioDuration.value)});
-audioSeed.onchange=()=>{const value=Number(audioSeed.value);if(!Number.isInteger(value)||value<0||value>4294967295){audioSeed.value=String(savedAudioSeed);$('runtime-feedback').textContent='Enter a whole seed from 0 to 4294967295.';return;}runtimeSettings({audio_seed:value});};
-audioOptions.onchange=()=>runtimeSettings({audio_options:audioOptions.value});
-sdSeed.onchange=()=>{const value=Number(sdSeed.value);if(!Number.isInteger(value)||value<0||value>4294967295){sdSeed.value=String(savedSdSeed);$('runtime-feedback').textContent='Enter a whole seed from 0 to 4294967295.';return;}runtimeSettings({sd_seed:value});};
-sdSize.onchange=()=>{const [width,height]=sdSize.value.split(',').map(Number);runtimeSettings({sd_width:width,sd_height:height});};
-sdUpscale.onchange=()=>runtimeSettings({sd_upscale:sdUpscale.checked});
+function syncAudioDurationVisibility(){const model=models.find(item=>item.id===(current?.model||modelChooser.value||selectedModel));const audioVisible=Boolean(model&&modelKind(model)===2&&workspaceModeName!=='audio'),imageVisible=Boolean(model&&modelKind(model)===1);audioDurationLabel.hidden=!audioVisible;audioDurationHint.hidden=!audioVisible;audioSeedLabel.hidden=!audioVisible;audioSeedHint.hidden=!audioVisible;audioOptionsLabel.hidden=!audioVisible;audioOptionsHint.hidden=!audioVisible;sdSeedLabel.hidden=!imageVisible;sdSeedHint.hidden=!imageVisible;sdSizeLabel.hidden=!imageVisible;sdSizeHint.hidden=!imageVisible;sdUpscaleLabel.hidden=!imageVisible;sdUpscaleHint.hidden=!imageVisible;}
+document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>{setWorkspaceMode(button.dataset.mode);syncAudioDurationVisibility();});
+setWorkspaceMode(workspaceModeName);syncAudioDurationVisibility();
+const workspaceUrl=new URL(location.href);
+if(workspaceUrl.searchParams.has('mode')){workspaceUrl.searchParams.delete('mode');history.replaceState(null,'',workspaceUrl);}
+audioDuration.onchange=stageWorkspaceSettingsChange;
+audioSeed.onchange=()=>{const value=Number(audioSeed.value);if(!Number.isInteger(value)||value<0||value>4294967295){audioSeed.value=String(savedAudioSeed);$('runtime-feedback').textContent='Enter a whole seed from 0 to 4294967295.';return;}stageWorkspaceSettingsChange();};
+audioOptions.onchange=stageWorkspaceSettingsChange;
+sdSeed.onchange=()=>{const value=Number(sdSeed.value);if(!Number.isInteger(value)||value<0||value>4294967295){sdSeed.value=String(savedSdSeed);$('runtime-feedback').textContent='Enter a whole seed from 0 to 4294967295.';return;}stageWorkspaceSettingsChange();};
+sdSize.onchange=stageWorkspaceSettingsChange;
+sdUpscale.onchange=stageWorkspaceSettingsChange;
 const memoryGroup=document.createElement('div');memoryGroup.className='model-memory-settings';const memoryHeading=document.createElement('h2');memoryHeading.textContent='Model memory';const memoryDescription=document.createElement('p');memoryDescription.className='muted';memoryDescription.textContent='Release the active model after it has been idle.';const idleLabel=document.createElement('label');idleLabel.htmlFor='runtime-idle-unload';idleLabel.textContent='Unload model after';const idleSelect=document.createElement('select');idleSelect.id='runtime-idle-unload';for(const [value,label] of [[1,'1 minute'],[2,'2 minutes'],[5,'5 minutes'],[10,'10 minutes'],[30,'30 minutes'],[60,'60 minutes']]){const option=document.createElement('option');option.value=String(value);option.textContent=label;idleSelect.append(option);}idleLabel.append(idleSelect);memoryGroup.append(memoryHeading,memoryDescription,idleLabel);$('runtime-feedback').before(memoryGroup);
 const searchSettings=document.createElement('div');searchSettings.className='model-memory-settings';const searchHeading=document.createElement('h2');searchHeading.textContent='Web search';const searchDescription=document.createElement('p');searchDescription.className='muted';searchDescription.textContent='Use /search followed by a question in a text conversation, and /fetch followed by an address to read one page. The search runs on the console and asks the groups of sites you select below.';const searchToggleLabel=document.createElement('label');searchToggleLabel.className='check';const searchToggle=document.createElement('input');searchToggle.type='checkbox';searchToggle.id='web-search-enabled';searchToggleLabel.append(searchToggle,document.createTextNode('Enable built-in web search'));const timeoutLabel=document.createElement('label');timeoutLabel.htmlFor='web-search-timeout';timeoutLabel.textContent='Search timeout';const timeoutSelect=document.createElement('select');timeoutSelect.id='web-search-timeout';for(const value of [5,10,15,20,30]){const option=document.createElement('option');option.value=String(value);option.textContent=`${value} seconds`;timeoutSelect.append(option);}timeoutLabel.append(timeoutSelect);const testButton=document.createElement('button');testButton.type='button';testButton.className='secondary';testButton.textContent='Test search';const testStatus=document.createElement('small');testStatus.className='muted';testStatus.id='web-search-test-status';const scopeHeading=document.createElement('h3');scopeHeading.textContent='Sites to ask';const scopeHint=document.createElement('p');scopeHint.className='muted';scopeHint.textContent='Fewer groups means a faster search. At least one stays on.';const scopeList=document.createElement('div');scopeList.className='search-scope-list';for(const [id,label] of SEARCH_SCOPES){const scopeLabel=document.createElement('label');scopeLabel.className='check';const box=document.createElement('input');box.type='checkbox';box.id='search-scope-'+id;box.checked=true;scopeLabel.append(box,document.createTextNode(label));scopeList.append(scopeLabel);box.onchange=()=>{const mask=currentSearchScopeMask();if(!mask){box.checked=true;testStatus.textContent='Keep at least one group of sites.';return;}testStatus.textContent='';runtimeSettings({search_scopes:mask});};}
 searchSettings.append(searchHeading,searchDescription,searchToggleLabel,timeoutLabel,scopeHeading,scopeHint,scopeList,testButton,testStatus);$('setting-opencode').append(searchSettings);searchToggle.onchange=()=>runtimeSettings({web_search:searchToggle.checked});timeoutSelect.onchange=()=>runtimeSettings({web_search_timeout:Number(timeoutSelect.value)});testButton.onclick=async()=>{if(!searchToggle.checked){testStatus.textContent='Enable built-in search first.';return;}testButton.disabled=true;testStatus.textContent='Searching…';try{const response=await api('/api/search',{method:'POST',body:JSON.stringify({query:'ProsperoAI PlayStation 5',limit:3})});const result=await response.json();const answered=(result.providers||[]).filter(provider=>provider.outcome==='ok').length;testStatus.textContent=`Search ready · ${result.data?.length||0} results from ${answered} of ${(result.providers||[]).length} providers`;}catch(error){testStatus.textContent=error.message;}finally{testButton.disabled=false;}};
-for (const [id,key] of [['runtime-context','context'],['length','output_limit'],['runtime-thinking','thinking'],['runtime-idle-unload','idle_unload_minutes']]) {
-  $(id).onchange = () => runtimeSettings({[key]:['thinking'].includes(key) ? $(id).checked : ['idle_unload_minutes','output_limit'].includes(key) ? Number($(id).value) : $(id).value});
-}
+for(const id of ['runtime-context','length','runtime-thinking','runtime-idle-unload'])$(id).onchange=stageWorkspaceSettingsChange;
 const fallbackKokoroVoices=[['af_heart','Heart · en-US'],['af_bella','Bella · en-US'],['af_nicole','Nicole · en-US'],['af_sarah','Sarah · en-US'],['am_adam','Adam · en-US']];
 const kokoroCatalog=window.prosperoVoiceCatalog?.kokoro;
 const kokoroVoices=Array.isArray(kokoroCatalog)&&kokoroCatalog.length?kokoroCatalog.map(voice=>[voice.id,`${voice.name} · ${voice.locale}`]):fallbackKokoroVoices;
@@ -504,7 +568,7 @@ function populateWorkspaceVoicePicker(modelId){
   $('chatterbox-record-controls').hidden=!chatterbox;
   select.value=chatterbox?savedChatterboxVoice:savedKokoroVoice;
   if(![...select.options].some(option=>option.value===select.value))select.selectedIndex=0;
-  select.onchange=()=>runtimeSettings(chatterbox?{chatterbox_voice:select.value}:{kokoro_voice:select.value});
+  select.onchange=()=>{if(chatterbox)savedChatterboxVoice=select.value;else savedKokoroVoice=select.value;};
 }
 function populateWorkspaceLanguagePicker(){
   const select=$('workspace-language'),list=window.prosperoChatterboxLanguages||[];
@@ -513,11 +577,11 @@ function populateWorkspaceLanguagePicker(){
   for(const [value,label] of entries){const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);}
   select.value=savedChatterboxLanguage;
   if(![...select.options].some(option=>option.value===select.value))select.selectedIndex=0;
-  select.onchange=()=>runtimeSettings({chatterbox_language:select.value});
+  select.onchange=()=>{savedChatterboxLanguage=select.value;};
 }
 async function refreshCustomChatterboxVoice(){try{const response=await api('/api/voices/chatterbox/custom');customChatterboxVoiceAvailable=Boolean((await response.json()).available);populateWorkspaceVoicePicker(current?.model||selectedModel);if(!customChatterboxVoiceAvailable&&savedChatterboxVoice==='custom')$('workspace-voice-feedback').textContent='Upload a voice sample to use My voice.';}catch(error){$('workspace-voice-feedback').textContent=error.message;}}
-document.querySelector('[data-page="settings"]').addEventListener('click', () => runtimeSettings());
 void runtimeSettings();
+document.querySelector('[data-page="settings"]').addEventListener('click', () => runtimeSettings());
 
 let recordedVoicePcm=null, recordedVoiceUrl='', voiceRecordSaving=false, nativeVoiceReady=false, nativeRecordToken=0, nativeRecordTimer=null, nativeRecording=false;
 const voiceRecordDialog=$('voice-record-dialog');
@@ -597,8 +661,9 @@ $('voice-record-save').onclick=async()=>{
   try{
     if(nativeVoiceReady){await nativeVoiceAction('save');nativeVoiceReady=false;}
     else {const response=await api('/api/voices/chatterbox/custom',{method:'POST',headers:{'Content-Type':'audio/wav'},body:recordedVoicePcm});if(!response.ok)throw Error('The console could not save this voice sample.');}
-    customChatterboxVoiceAvailable=true;await runtimeSettings({chatterbox_voice:'custom'});
-    populateWorkspaceVoicePicker(current?.model||selectedModel);$('workspace-voice-feedback').textContent='Voice saved on this console. My voice is selected.';
+    customChatterboxVoiceAvailable=true;savedChatterboxVoice='custom';
+    populateWorkspaceVoicePicker(current?.model||selectedModel);$('workspace-voice').value='custom';stageWorkspaceSettingsChange();
+    $('workspace-voice-feedback').textContent='Voice saved on this console. My voice is staged for your next request.';
     voiceRecordDialog.close();
   }catch(error){voiceStatus(error.message,'error');}
   finally{voiceRecordSaving=false;$('voice-record-save').disabled=!recordedVoicePcm&&!nativeVoiceReady;$('voice-record-start').disabled=false;$('voice-record-cancel').disabled=false;}

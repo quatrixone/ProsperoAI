@@ -443,6 +443,7 @@ bool serve_ui_asset(const NetApi &api, int sock, const char *path)
         {"/", "index.html", "text/html; charset=utf-8"},
         {"/app.css", "app.css", "text/css; charset=utf-8"},
         {"/app.js", "app.js", "text/javascript; charset=utf-8"},
+        {"/workspace-audio.js", "workspace-audio.js", "text/javascript; charset=utf-8"},
         {"/voice-catalog.js", "voice-catalog.js", "text/javascript; charset=utf-8"},
         {"/voice-recording.js", "voice-recording.js", "text/javascript; charset=utf-8"},
         {"/lame.min.js", "lame.min.js", "text/javascript; charset=utf-8"},
@@ -2782,7 +2783,7 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
 }
 
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
-// Music Studio: bundle a track's stems into one store-only ZIP (WAV data is
+// Workspace Audio: bundle a track's stems into one store-only ZIP (WAV data is
 // incompressible, so no deflate — headers + raw bytes, streamed in 16 KB
 // chunks with a two-pass CRC so nothing large is buffered in heap).
 namespace stems_zip {
@@ -2942,7 +2943,7 @@ void handle_music_stems_zip(const NetApi &api, int sock, const char *track)
     send_all(api, sock, reinterpret_cast<const char *>(eocd), sizeof(eocd));
 }
 
-// Music Studio: list generated audio + ABC files under work/audio, newest first.
+// Workspace Audio: list generated audio + ABC files under work/audio, newest first.
 void handle_music_files(const NetApi &api, int sock)
 {
     const std::string dir = PROSPERO_AUDIO_DIR;
@@ -2979,7 +2980,7 @@ void handle_music_files(const NetApi &api, int sock)
     send_json(api, sock, nlohmann::json{{"files", std::move(files)}}.dump().c_str());
 }
 
-// Music Studio: persist an ABC score typed in the web editor.
+// Workspace Audio: persist an ABC score typed in the web editor.
 void handle_music_abc(const NetApi &api, int sock, const char *body)
 {
     const auto reject = [&api, sock](const char *reason) {
@@ -3022,7 +3023,7 @@ void handle_music_abc(const NetApi &api, int sock, const char *body)
     send_json(api, sock, nlohmann::json{{"ok", true}, {"path", path}}.dump().c_str());
 }
 
-// Music Studio: persist generation metadata (lyrics/style/seed/abc...) as a
+// Workspace Audio: persist generation metadata (lyrics/style/seed/abc...) as a
 // sidecar <track>.track.json next to the audio file, so the library menu can
 // offer "Cover" (reload the exact settings) later. Values are flat
 // string/number fields; serialized size is capped at 80 KiB.
@@ -3080,7 +3081,7 @@ void handle_music_meta(const NetApi &api, int sock, const char *body)
     send_json(api, sock, nlohmann::json{{"ok", true}, {"path", path}}.dump().c_str());
 }
 
-// Music Studio Cover: append a base64 chunk to work/audio/<name>.wav. The
+// Workspace Audio Cover: append a base64 chunk to work/audio/<name>.wav. The
 // request buffer is 256 KiB, so the browser uploads the Web-Audio-decoded
 // 16 kHz mono WAV in ~150 KiB base64 parts: {name, part, data}. Part 0
 // truncates, later parts append; 24 MiB cap per file. The SheetSage2 adapter
@@ -3190,7 +3191,7 @@ void handle_music_upload(const NetApi &api, int sock, const char *body)
     send_json(api, sock, nlohmann::json{{"ok", true}, {"part", part}}.dump().c_str());
 }
 
-// Music Studio: delete a listed file (wav/mp3/abc) from work/audio by name.
+// Workspace Audio: delete a listed file (wav/mp3/abc) from work/audio by name.
 void handle_music_delete(const NetApi &api, int sock, const char *body)
 {
     const auto j = body != nullptr && *body != '\0'
@@ -3234,7 +3235,7 @@ void handle_music_delete(const NetApi &api, int sock, const char *body)
     send_json(api, sock, nlohmann::json{{"ok", true}, {"deleted", name}}.dump().c_str());
 }
 
-// Music Studio: rename a file inside work/audio (e.g. stamp a friendly track name).
+// Workspace Audio: rename a file inside work/audio (e.g. stamp a friendly track name).
 void handle_music_rename(const NetApi &api, int sock, const char *body)
 {
     const auto j = body != nullptr && *body != '\0'

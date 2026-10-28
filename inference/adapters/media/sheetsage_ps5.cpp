@@ -227,7 +227,7 @@ bool read_pcm_wav(const std::string &path, std::vector<float> &samples, int &sam
 
 // Saves every artifact the run produced (score.abc, midi, events) next to the
 // output name, matching the yue2 adapter so http_server serves them for
-// download and the Music Studio UI can load them into the ABC editor.
+// download and the Workspace Audio UI can load them into the ABC editor.
 std::string write_result_artifacts(const audiocpp_result *result, const std::string &output_path)
 {
     std::string base = output_path;
