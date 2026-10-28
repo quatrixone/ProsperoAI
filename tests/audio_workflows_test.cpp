@@ -131,6 +131,8 @@ bool gpt_runtime_select_model(unsigned index)
 {
     if (index >= 4)
         return false;
+    if (require_serialized)
+        assert(!prospero::model_manager::runtime_mutex().try_lock());
     ++selection_calls;
     if ((selected == 3) != (index == 3))
         ++cross_modality_releases;
@@ -257,19 +259,38 @@ int main(int argc, char **argv)
 
     std::vector<std::string> phases;
     assert(gpt_runtime_select_model(3));
-    runtime_resident = true;
+    runtime_resident = false;
+    available_memory = 12ull << 30;
+    expected_id = "sheetsage-model";
+    expected_prompt = "Cover to ABC: source.wav";
+    expected_lyrics = settings.audio_lyrics;
+    expected_options = "original=option\ninput_audio=" PROSPERO_AUDIO_DIR "source.wav";
+    expected_seed = settings.audio_seed;
+    expected_duration = settings.audio_duration_sec;
+    generation_response =
+        "Cover transcribed locally. Artifacts: " PROSPERO_AUDIO_DIR "source-cover.abc";
     available_memory = 1000ull << 20;
-    const unsigned before_mismatch_selections = selection_calls;
-    const unsigned before_mismatch_generations = generation_calls;
-    verify_generation = false;
-    const auto mismatched_model =
+    const unsigned before_preflight_selections = selection_calls;
+    const unsigned before_preflight_generations = generation_calls;
+    const auto preflight_refusal =
         prospero::audio_workflows::cover_to_abc("sheetsage-model", "source.wav", {});
-    verify_generation = true;
-    assert(!mismatched_model.ok && !mismatched_model.retryable);
-    assert(mismatched_model.response.find("Select the requested audio model") != std::string::npos);
-    assert(selection_calls == before_mismatch_selections &&
-           generation_calls == before_mismatch_generations);
-    assert(selected == 3 && runtime_resident);
+    assert(!preflight_refusal.ok && preflight_refusal.retryable);
+    assert(selection_calls == before_preflight_selections &&
+           generation_calls == before_preflight_generations && selected == 3);
+    available_memory = 12ull << 30;
+    require_serialized = true;
+    const unsigned before_submit_selections = selection_calls;
+    const unsigned before_submit_generations = generation_calls;
+    const auto submitted_model =
+        prospero::audio_workflows::cover_to_abc("sheetsage-model", "source.wav", {});
+    require_serialized = false;
+    assert(submitted_model.ok && submitted_model.artifacts.size() == 1);
+    assert(selection_calls == before_submit_selections + 1 &&
+           generation_calls == before_submit_generations + 1);
+    assert(selected == 1 &&
+           submitted_model.artifacts[0] == std::string(PROSPERO_AUDIO_DIR) + "source-cover.abc");
+    assert_settings_equal(prospero_settings::get(), settings);
+    generation_response.clear();
 
     available_memory = 12ull << 30;
     runtime_resident = false;

@@ -119,6 +119,30 @@ class HttpApiTests(unittest.TestCase):
         self.assertIn("400 Bad Request", head)
         self.assertEqual(self.audio_generate_calls(), calls_before)
 
+    def test_audio_workflow_async_job_polls_to_success_once(self):
+        import wave
+
+        source = self.audio_dir / "uploaded.wav"
+        with wave.open(str(source), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(b"\0\0")
+
+        initial_calls = self.audio_generate_calls()
+        submission, polled = self.request_audio_job_with_poll({
+            "async": True, "audio_workflow": "cover", "model": "sheetsage-test",
+            "source": "uploaded.wav",
+        }, environment={
+            "PROSPERO_TEST_AUDIO_CALLS_FILE": str(self.audio_calls_file),
+            "PROSPERO_TEST_AUDIO_FIXTURE": "1",
+        })
+        self.assertIsInstance(submission.get("job_id"), int)
+        self.assertEqual(polled["id"], submission["job_id"])
+        self.assertEqual(polled["state"], "done")
+        self.assertTrue(polled["result"]["done"])
+        self.assertEqual(self.audio_generate_calls(), initial_calls + 1)
+
     def test_restart_does_not_kill_the_process(self):
         header, body = self.request('/api/system/restart', body={})
         self.assertIn('409 Conflict', header)
@@ -142,6 +166,17 @@ class HttpApiTests(unittest.TestCase):
                                       input="\r\n".join(lines).encode()+b"\r\n\r\n"+payload)
         head, data = wire.split(b"\r\n\r\n", 1)
         return head.decode(), data.decode()
+
+    def request_audio_job_with_poll(self, body, environment=None):
+        payload = json.dumps(body, ensure_ascii=False).encode()
+        request = (f"POST /api/generate HTTP/1.1\r\nHost: test\r\n"
+                   f"Content-Length: {len(payload)}\r\n\r\n").encode() + payload
+        envelope = subprocess.check_output(
+            [str(self.binary), "--test-audio-job-poll"],
+            env={**os.environ, **(environment or {})}, input=request, timeout=10,
+        )
+        responses = json.loads(envelope)
+        return json.loads(responses["submission"]), json.loads(responses["poll"])
 
     def test_binary_music_upload_preserves_existing_tracks_and_cleans_interrupted_uploads(self):
         existing = self.audio_dir / "song.wav"

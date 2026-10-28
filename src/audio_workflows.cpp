@@ -413,10 +413,15 @@ Result run_audio(const std::string &model_id, const std::string &kind, const std
     std::string model_error;
     if (!resolve_model(model_id, kind, model_index, model_error))
         return failure(model_error);
-    if (model_index != gpt_runtime_selected_model())
-        return failure("Select the requested audio model before starting this workflow.");
     if (memory_admission_failed(model_id, kind))
         return failure("GPU memory low; free memory and retry.", true);
+    model_manager::publish(model_id.c_str(), model_manager::Stage::selected);
+    if (model_index != gpt_runtime_selected_model() && !gpt_runtime_select_model(model_index))
+    {
+        const char *reason = "The model cannot be selected while the runtime is busy.";
+        model_manager::publish(model_id.c_str(), model_manager::Stage::failed, reason);
+        return failure(reason);
+    }
 
     const auto previous_settings = prospero_settings::get();
     auto operation_settings = previous_settings;

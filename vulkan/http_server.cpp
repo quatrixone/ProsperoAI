@@ -773,10 +773,6 @@ bool parse_audio_workflow(const nlohmann::json &request, AudioWorkflowRequest &p
 
 prospero::audio_workflows::Result run_audio_workflow(const AudioWorkflowRequest &request)
 {
-    std::string selection_error;
-    if (!prospero::model_manager::select(request.model.c_str(), false, false, &selection_error))
-        return {false, false, std::move(selection_error), {}};
-
     if (request.workflow == "cover")
         return prospero::audio_workflows::cover_to_abc(request.model, request.source, {});
     if (request.workflow == "stems")

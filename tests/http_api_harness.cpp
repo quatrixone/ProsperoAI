@@ -7,6 +7,7 @@
 #include <functional>
 #include <iterator>
 #include <cstdlib>
+#include <chrono>
 #include <barrier>
 #include <thread>
 #include <fstream>
@@ -20,7 +21,7 @@ extern "C"
 {
     std::int64_t sceKernelGetDirectMemorySize()
     {
-        return 0;
+        return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") ? 12ll << 30 : 0;
     }
     int sceKernelDirectMemoryQuery(std::int64_t, int, void *, std::size_t)
     {
@@ -170,6 +171,11 @@ static int fake_recv(int, void *data, unsigned long size, int)
 static int fake_close(int)
 {
     return 0;
+}
+static std::string http_body(const std::string &response)
+{
+    const std::size_t start = response.find("\r\n\r\n");
+    return start == std::string::npos ? std::string() : response.substr(start + 4);
 }
 unsigned gpt_runtime_model_count()
 {
@@ -340,6 +346,39 @@ int main(int argc, char **argv)
             std::cout << responses[0] << '\n' << responses[1] << '\n';
         }
         upload_race_barrier = nullptr;
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--test-audio-job-poll") == 0)
+    {
+        NetApi api{};
+        api.send = fake_send;
+        api.recv = fake_recv;
+        api.socket_close = fake_close;
+        input.assign(std::istreambuf_iterator<char>(std::cin), {});
+        handle_connection(api, 1);
+        const std::string submitted_body = http_body(wire);
+        const auto submitted = nlohmann::json::parse(submitted_body, nullptr, false);
+        std::string poll_body;
+        if (submitted.is_object() && submitted.contains("job_id") &&
+            submitted["job_id"].is_number_unsigned())
+        {
+            const unsigned job_id = submitted["job_id"].get<unsigned>();
+            const std::string poll_request =
+                "GET /api/jobs?id=" + std::to_string(job_id) + " HTTP/1.1\r\nHost: test\r\n\r\n";
+            for (unsigned attempt = 0; attempt < 1000; ++attempt)
+            {
+                input = poll_request;
+                position = 0;
+                wire.clear();
+                handle_connection(api, 1);
+                poll_body = http_body(wire);
+                const auto poll = nlohmann::json::parse(poll_body, nullptr, false);
+                if (poll.is_object() && poll.value("state", "") != "running")
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        std::cout << nlohmann::json{{"submission", submitted_body}, {"poll", poll_body}}.dump();
         return 0;
     }
     if (argc > 1)
