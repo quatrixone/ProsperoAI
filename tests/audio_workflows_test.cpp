@@ -22,7 +22,9 @@ bool fail_generation = false;
 unsigned generation_calls = 0;
 unsigned selection_calls = 0;
 unsigned cross_modality_releases = 0;
+unsigned simulated_cover_releases = 0;
 bool runtime_resident = false;
+bool simulate_cover_release = false;
 std::uint64_t available_memory = 12ull << 30;
 std::string expected_id;
 std::string expected_prompt;
@@ -181,6 +183,11 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         assert(runtime.audio_duration_sec == expected_duration);
     }
     ++generation_calls;
+    if (simulate_cover_release)
+    {
+        ++simulated_cover_releases;
+        runtime_resident = false;
+    }
     if (runtime_progress)
         runtime_progress("fake inference progress");
     const std::string response = generation_response.empty()
@@ -403,7 +410,7 @@ int main(int argc, char **argv)
            generation_calls == generations_before_refusal);
     assert(selected == 0 && !runtime_resident);
     assert(gpt_runtime_select_model(1));
-    runtime_resident = true;
+    runtime_resident = false;
     const unsigned selections_before_cover_refusal = selection_calls;
     const unsigned generations_before_cover_refusal = generation_calls;
     const auto refused_cover =
@@ -411,7 +418,26 @@ int main(int argc, char **argv)
     assert(!refused_cover.ok && refused_cover.retryable);
     assert(selection_calls == selections_before_cover_refusal &&
            generation_calls == generations_before_cover_refusal);
-    assert(selected == 1 && runtime_resident);
+    assert(selected == 1 && !runtime_resident);
+
+    runtime_resident = true;
+    simulate_cover_release = true;
+    fail_generation = true;
+    generation_response = "NEEDS_RESTART GPU memory low. Restart the title and retry.";
+    const unsigned generations_before_resident_cover = generation_calls;
+    const unsigned selections_before_resident_cover = selection_calls;
+    const unsigned releases_before_resident_cover = simulated_cover_releases;
+    verify_generation = false;
+    const auto resident_cover_refusal =
+        prospero::audio_workflows::cover_to_abc("sheetsage-model", "source.wav", {});
+    verify_generation = true;
+    assert(!resident_cover_refusal.ok && resident_cover_refusal.retryable);
+    assert(generation_calls == generations_before_resident_cover + 1);
+    assert(selection_calls == selections_before_resident_cover &&
+           simulated_cover_releases == releases_before_resident_cover + 1);
+    assert(resident_cover_refusal.response.find("NEEDS_RESTART") == std::string::npos);
+    assert(resident_cover_refusal.response.find("Restart the title") == std::string::npos);
+    assert(selected == 1 && !runtime_resident);
 
     assert(prospero_settings::set(previous));
     std::puts("PASS shared audio workflow library and runtime operations");

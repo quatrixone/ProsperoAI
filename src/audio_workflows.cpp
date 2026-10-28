@@ -192,10 +192,8 @@ bool valid_wav_source(const std::string &path, const std::string &kind)
 
 bool memory_admission_failed(const std::string &model_id, const std::string &kind)
 {
-    std::uint64_t minimum_free = 0;
-    if (kind == "cover")
-        minimum_free = kSheetSageMinimumFreeBytes;
-    else if (lower(model_id).find("yue2") != std::string::npos)
+    const bool yue2 = kind != "cover" && lower(model_id).find("yue2") != std::string::npos;
+    if (kind == "cover" || yue2)
     {
         char loaded_id[128]{};
         char loaded_name[128]{};
@@ -203,8 +201,10 @@ bool memory_admission_failed(const std::string &model_id, const std::string &kin
                                      sizeof(loaded_name)) &&
             model_id == loaded_id)
             return false;
-        minimum_free = kYue2MinimumFreeBytes;
     }
+    const std::uint64_t minimum_free = kind == "cover" ? kSheetSageMinimumFreeBytes
+                                       : yue2          ? kYue2MinimumFreeBytes
+                                                       : 0;
     return minimum_free && prospero_memory::free_total() < minimum_free;
 }
 
