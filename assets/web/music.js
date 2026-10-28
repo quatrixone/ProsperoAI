@@ -72,11 +72,9 @@
               return s.result;
             })
             .catch(function (e) {
-              // 404 = the app restarted while our job ran: the usual cause is
-              // the server's own self-heal after a NEEDS_RESTART verdict that
-              // fired before we could read it (20.10, user saw a manual
-              // "Retry now" on Cover+ABC). The restart is exactly what the
-              // retry needs anyway — wait for the app and resubmit ONCE.
+              // 404 means the app restarted while the job was running. Jobs
+              // are process-local, so the user must check the library before
+              // deciding whether to submit the work again.
               if (e && /404|no such job|job lost/.test(e.message)) {
                 throw new Error('The job is no longer available. Check the library before starting another generation.');
               }
@@ -185,6 +183,10 @@
 
   // ---- custom audio player (big seekbar under play, ⋮ menu with WAV/MP3 download) ----
   var activePlayer = null;
+  var playerAudios = [];
+  document.addEventListener('music-vol', function (e) {
+    playerAudios.forEach(function (audio) { audio.volume = e.detail / 100; });
+  });
   function fmtTime(s) {
     if (!isFinite(s)) return '--:--';
     s = Math.max(0, Math.round(s));
@@ -432,7 +434,7 @@
       try { localStorage.setItem('prospero-vol', vol.value); } catch (e) {}
       document.dispatchEvent(new CustomEvent('music-vol', { detail: parseInt(vol.value, 10) }));
     });
-    document.addEventListener('music-vol', function (e) { audio.volume = e.detail / 100; });
+    playerAudios.push(audio);
     var seek = document.createElement('input'); seek.type = 'range'; seek.className = 'pl-seek'; seek.min = '0'; seek.max = '1000'; seek.value = '0';
     wrap.appendChild(row); wrap.appendChild(seek);
     var dragging = false;
@@ -602,6 +604,11 @@
   function loadLibrary() {
     return api('/api/music/files').then(function (j) {
       trackFiles(j);
+      playerAudios.forEach(function (audio) { audio.pause(); });
+      playerAudios = [];
+      stemAudios.forEach(function (player) { player.a.pause(); });
+      stemAudios = [];
+      activePlayer = null;
       var box = $('tracks');
       box.innerHTML = '';
       var files = j.files || [];
@@ -873,10 +880,11 @@
     };
     var wav = null, name = '';
     var rate = 16000;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    var OfflineAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     cstatus('Decoding ' + file.name + '...', 'busy');
     file.arrayBuffer().then(function (buf) {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC || !AudioContext.prototype.decodeAudioData)
+      if (!AC || !AC.prototype.decodeAudioData)
         throw new Error('this browser has no Web Audio decoder');
       var ctx = new AC();
       var p = ctx.decodeAudioData(buf);
@@ -884,7 +892,8 @@
     }).then(function (ab) {
       var frames = Math.max(1, Math.ceil(ab.duration * rate));
       if (frames > 300 * rate) throw new Error('audio longer than 5 min — trim it first');
-      var off = new OfflineAudioContext(1, frames, rate);
+      if (!OfflineAC) throw new Error('this browser has no offline Web Audio renderer');
+      var off = new OfflineAC(1, frames, rate);
       var src = off.createBufferSource();
       src.buffer = ab;
       src.connect(off.destination);

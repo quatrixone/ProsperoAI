@@ -449,9 +449,9 @@ extern "C" int ps5_sheetsage_transcribe(const char *root, const char *prompt, ch
     // pool FIRST, then ggml-vulkan wants one ~3.4 GiB buffer for the encoder
     // graph (4.0 GiB gallocr reservation). Since the RADV arena allocator
     // backs big buffers in 2 MiB pieces, contiguity no longer matters — only
-    // the pool's total free memory does. Below ~7.5 GiB total the title
-    // restarts automatically (the UI reacts to NEEDS_RESTART) instead of dying
-    // 30 s deep in graph build.
+    // the pool's total free memory does. Below ~7.5 GiB total the adapter returns
+    // NEEDS_RESTART so the user can close and reopen the title before retrying,
+    // instead of dying 30 s deep in graph build.
     if (prospero_memory::free_total() < (7500ull << 20))
     {
         const unsigned long long mb =

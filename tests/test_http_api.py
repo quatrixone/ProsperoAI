@@ -15,6 +15,8 @@ class HttpApiTests(unittest.TestCase):
         (ROOT / "build/tests").mkdir(parents=True, exist_ok=True)
         cls.scratch = tempfile.TemporaryDirectory(prefix="prospero-http-", dir=ROOT / "build/tests")
         tmp = Path(cls.scratch.name)
+        cls.audio_dir = tmp / "audio"
+        cls.audio_dir.mkdir()
         cls.binary = tmp / "http-test"
         compiler = shutil.which(os.environ.get("HOST_CXX", "clang++")) or shutil.which("g++")
         if not compiler or not (ROOT / ".deps/llama.cpp/vendor/nlohmann/json.hpp").exists():
@@ -23,6 +25,7 @@ class HttpApiTests(unittest.TestCase):
                         "-DPROSPERO_SESSION_TEST",
                         '-DPROSPERO_WEB_ASSET_ROOT="'+str(ROOT / 'assets/web')+'/"',
                         '-DPROSPERO_SETTINGS_PATH="'+str(tmp / "runtime.cfg")+'"', "-Wl,--gc-sections", "-I"+str(ROOT / "vulkan"), "-I"+str(ROOT / "include"),
+                        '-DPROSPERO_AUDIO_DIR="'+str(cls.audio_dir)+'/"',
                         "-I"+str(ROOT / "search-engine/include"), "-I"+str(ROOT / "search-engine/src"),
                         "-I"+str(ROOT / ".deps/llama.cpp/vendor"),
                         str(ROOT / "tests/http_api_harness.cpp"), str(ROOT / "src/session_store.cpp"),
@@ -58,13 +61,77 @@ class HttpApiTests(unittest.TestCase):
         if body is None and path.endswith("completions"):
             body = {"model": "tiny.gguf", "messages": [{"role": "user", "content": "hello"}]}
         payload = json.dumps(body, ensure_ascii=False).encode() if body is not None else b""
-        lines = [f"{method or ('POST' if body is not None else 'GET')} {path} HTTP/1.1", "Host: test",
-                 f"content-length: {len(payload)}"] + (headers or [])
+        return self.request_raw(path, payload, key, headers, method, environment)
+
+    def request_raw(self, path, payload, key=None, headers=None, method=None, environment=None,
+                    content_length=None):
+        if content_length is None:
+            content_length = len(payload)
+        lines = [f"{method or ('POST' if payload else 'GET')} {path} HTTP/1.1", "Host: test",
+                 f"content-length: {content_length}"] + (headers or [])
         wire = subprocess.check_output([str(self.binary)] + ([key] if key else []),
                                       env={**os.environ, **(environment or {})},
                                       input="\r\n".join(lines).encode()+b"\r\n\r\n"+payload)
         head, data = wire.split(b"\r\n\r\n", 1)
         return head.decode(), data.decode()
+
+    def test_binary_music_upload_preserves_existing_tracks_and_cleans_interrupted_uploads(self):
+        existing = self.audio_dir / "song.wav"
+        existing.write_bytes(b"original track")
+        headers = ["X-Upload-Name: song.wav", "Authorization: Bearer secret"]
+        head, _ = self.request_raw("/api/music/uploadbin", b"replacement", key="secret",
+                                   headers=headers, method="POST")
+        self.assertIn("409 Conflict", head)
+        self.assertEqual(existing.read_bytes(), b"original track")
+
+        head, _ = self.request_raw("/api/music/uploadbin", b"partial", key="secret",
+                                   headers=["X-Upload-Name: interrupted.wav",
+                                            "Authorization: Bearer secret"],
+                                   method="POST", content_length=20)
+        self.assertIn("500 Internal Server Error", head)
+        self.assertFalse((self.audio_dir / "interrupted.wav").exists())
+        self.assertEqual(sorted(path.name for path in self.audio_dir.iterdir()), ["song.wav"])
+
+        temp_collision = self.audio_dir / ".music-upload-0"
+        temp_collision.write_bytes(b"keep this unrelated file")
+        head, _ = self.request_raw("/api/music/uploadbin", b"new track", key="secret",
+                                   headers=["X-Upload-Name: fresh.wav",
+                                            "Authorization: Bearer secret"],
+                                   method="POST")
+        self.assertIn("200 OK", head)
+        self.assertEqual((self.audio_dir / "fresh.wav").read_bytes(), b"new track")
+        self.assertEqual(temp_collision.read_bytes(), b"keep this unrelated file")
+        self.assertEqual(sorted(path.name for path in self.audio_dir.iterdir()),
+                         [".music-upload-0", "fresh.wav", "song.wav"])
+
+    def test_concurrent_same_name_uploads_publish_only_one_complete_track(self):
+        result = subprocess.run([str(self.binary), "--test-upload-race"], check=True,
+                                capture_output=True, text=True, timeout=60)
+        statuses = result.stdout.splitlines()
+        self.assertEqual(len(statuses), 40)
+        for index in range(0, len(statuses), 2):
+            self.assertEqual(sorted(statuses[index:index + 2]),
+                             ["HTTP/1.1 200 OK", "HTTP/1.1 409 Conflict"])
+        final_track = (self.audio_dir / "race.wav").read_bytes()
+        self.assertIn(final_track, [b"a" * (512 * 1024), b"b" * (512 * 1024)])
+
+    def test_mastering_reads_all_bytes_of_odd_sized_24_bit_mono_audio(self):
+        import struct
+
+        wav = bytearray(b"RIFF")
+        wav.extend(struct.pack("<I", 40))
+        wav.extend(b"WAVEfmt ")
+        wav.extend(struct.pack("<IHHIIHH", 16, 1, 1, 44100, 132300, 3, 24))
+        wav.extend(b"data")
+        wav.extend(struct.pack("<I", 3))
+        wav.extend(b"\x01\x00\x7f\x00")  # one full-scale sample plus RIFF padding
+        source = self.audio_dir / "odd-mono.wav"
+        source.write_bytes(wav)
+        head, _ = self.request("/api/music/master", {"file": source.name})
+        self.assertIn("200 OK", head)
+        mastered = self.audio_dir / "odd-mono-mastered.wav"
+        sample = struct.unpack_from("<h", mastered.read_bytes(), 44)[0]
+        self.assertGreater(sample, 30000)
 
     def test_audio_lyrics_round_trip_and_persistence(self):
         config = Path(self.scratch.name) / 'runtime.cfg'

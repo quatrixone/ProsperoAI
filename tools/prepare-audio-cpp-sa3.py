@@ -149,7 +149,7 @@ def include_yue2_dependencies(path: Path) -> None:
         if source.count(anchor) != 1:
             raise SystemExit(f"{path}: cannot restore YuE2 dependency {entry}")
         source = source.replace(anchor, anchor + line, 1)
-    path.write_text(source)
+    write_text_if_changed(path, source)
 
 
 def include_demucs_dependencies(path: Path) -> None:

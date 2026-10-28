@@ -7,6 +7,8 @@
 #include <functional>
 #include <iterator>
 #include <cstdlib>
+#include <barrier>
+#include <thread>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -70,8 +72,9 @@ extern "C"
     }
 }
 
-static std::string input, wire;
-static std::size_t position;
+static thread_local std::string input, wire;
+static thread_local std::size_t position;
+static std::barrier<> *upload_race_barrier = nullptr;
 static unsigned current_model;
 static std::function<void()> generation_hook;
 static bool fail_model_prepare = std::getenv("PROSPERO_TEST_FAIL_PREPARE") != nullptr;
@@ -159,6 +162,8 @@ static int fake_recv(int, void *data, unsigned long size, int)
     size = std::min<unsigned long>({size, 7, input.size() - position});
     std::memcpy(data, input.data() + position, size);
     position += size;
+    if (upload_race_barrier && position == input.size())
+        upload_race_barrier->arrive_and_wait();
     return size;
 }
 static int fake_close(int)
@@ -270,6 +275,47 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
 }
 int main(int argc, char **argv)
 {
+    if (argc > 1 && std::strcmp(argv[1], "--test-upload-race") == 0)
+    {
+        api_key = "secret";
+        std::barrier barrier(2);
+        upload_race_barrier = &barrier;
+        NetApi api{};
+        api.send = fake_send;
+        api.recv = fake_recv;
+        api.socket_close = fake_close;
+        constexpr std::size_t body_size = 512 * 1024;
+        for (unsigned round = 0; round < 20; ++round)
+        {
+            if (round != 0)
+                std::remove((std::string(PROSPERO_AUDIO_DIR) + "race.wav").c_str());
+            std::string responses[2];
+            std::thread workers[2];
+            for (unsigned i = 0; i < 2; ++i)
+            {
+                workers[i] = std::thread(
+                    [&, i]
+                    {
+                        const std::string body(body_size, i == 0 ? 'a' : 'b');
+                        input =
+                            "POST /api/music/uploadbin HTTP/1.1\r\nHost: test\r\nContent-Length: " +
+                            std::to_string(body_size) +
+                            "\r\nX-Upload-Name: race.wav\r\n"
+                            "Authorization: Bearer secret\r\n\r\n" +
+                            body;
+                        wire.clear();
+                        position = 0;
+                        handle_connection(api, 1);
+                        responses[i] = wire.substr(0, wire.find("\r\n"));
+                    });
+            }
+            for (auto &worker : workers)
+                worker.join();
+            std::cout << responses[0] << '\n' << responses[1] << '\n';
+        }
+        upload_race_barrier = nullptr;
+        return 0;
+    }
     if (argc > 1)
         api_key = argv[1];
     const bool runtime_busy = std::getenv("PROSPERO_TEST_RUNTIME_BUSY") != nullptr;

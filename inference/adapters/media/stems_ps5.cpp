@@ -4,6 +4,7 @@
 #include "audiocpp.h"
 #include "../../../include/direct_memory.hpp"
 #include "../../../include/runtime_settings.hpp"
+#include "../../../include/stems_audio_limits.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -73,7 +74,8 @@ void stage_error(const char *stage)
 // INTERLEAVED float [-1, 1]. Unlike the Cover reader this keeps stereo —
 // Demucs separates L/R independently and a mono downmix would ruin it.
 // Mono input is duplicated to stereo so callers can always assume 2 channels.
-bool read_pcm_wav_stereo(const std::string &path, std::vector<float> &samples, int &sample_rate)
+bool read_pcm_wav_stereo(const std::string &path, std::vector<float> &samples, int &sample_rate,
+                         std::size_t &output_frames)
 {
     std::FILE *file = std::fopen(path.c_str(), "rb");
     if (!file)
@@ -144,6 +146,11 @@ bool read_pcm_wav_stereo(const std::string &path, std::vector<float> &samples, i
     }
     const std::size_t bytes_per_frame = static_cast<std::size_t>(channels) * bits / 8u;
     const std::size_t frames = data_bytes / bytes_per_frame;
+    if (!prospero_stems::output_frame_count(frames, rate, output_frames))
+    {
+        std::fclose(file);
+        return false;
+    }
     std::vector<unsigned char> raw(data_bytes);
     if (std::fseek(file, data_at, SEEK_SET) != 0 ||
         std::fread(raw.data(), 1, data_bytes, file) != data_bytes)
@@ -418,11 +425,12 @@ extern "C" int ps5_stems_separate(const char *root, const char *prompt, char *re
     {
         std::vector<float> samples;
         int sample_rate = 0;
-        if (!read_pcm_wav_stereo(cfg.input_audio, samples, sample_rate))
+        std::size_t output_frames = 0;
+        if (!read_pcm_wav_stereo(cfg.input_audio, samples, sample_rate, output_frames))
         {
             stage_log("wav read failed");
             std::snprintf(response, response_capacity,
-                          "Stems input unreadable (need 16-bit PCM WAV): %s",
+                          "Stems input unreadable or outside 8-192 kHz / 5 min limits: %s",
                           cfg.input_audio.c_str());
             result_code = 2;
             break;
@@ -440,13 +448,11 @@ extern "C" int ps5_stems_separate(const char *root, const char *prompt, char *re
         {
             const std::size_t frames = samples.size() / 2u;
             const double ratio = 44100.0 / static_cast<double>(sample_rate);
-            const std::size_t out_frames =
-                std::max<std::size_t>(1u, static_cast<std::size_t>(frames * ratio));
-            std::vector<float> resampled(out_frames * 2u, 0.0f);
+            std::vector<float> resampled(output_frames * 2u, 0.0f);
             constexpr int kTaps = 16;
             const double pi = 3.14159265358979323846;
             const double cutoff = ratio < 1.0 ? ratio : 1.0;
-            for (std::size_t i = 0; i < out_frames; ++i)
+            for (std::size_t i = 0; i < output_frames; ++i)
             {
                 const double src = (static_cast<double>(i) + 0.5) / ratio - 0.5;
                 const long center = static_cast<long>(std::floor(src + 0.5));

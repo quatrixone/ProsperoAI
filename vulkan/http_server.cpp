@@ -55,11 +55,17 @@
 #include <chrono>
 #include <mutex>
 #include <map>
+#include <cerrno>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+#ifndef PROSPERO_AUDIO_DIR
+#define PROSPERO_AUDIO_DIR "/download0/ProsperoAI/work/audio/"
+#endif
 
 extern "C"
 {
@@ -120,6 +126,7 @@ constexpr std::size_t kRequestCapacity = 256 * 1024;
 constexpr std::size_t kResponseTextCapacity = prospero_generation::MaxOutputBytes;
 unsigned short kHttpServerPort = 11434;
 std::atomic<bool> server_stopping{false};
+std::mutex music_upload_publish_mutex;
 void *server_thread = nullptr; // start/stop are owned by the main thread
 constexpr int kSoSendTimeout = 0x1005;
 constexpr int kSoReceiveTimeout = 0x1006;
@@ -1204,12 +1211,38 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
                          "A valid bearer API key is required.");
             return 0;
         }
-        const std::string path = std::string("/download0/ProsperoAI/work/audio/") + up_name;
-        std::FILE *file = std::fopen(path.c_str(), "wb");
+        const std::string path = std::string(PROSPERO_AUDIO_DIR) + up_name;
+        if (::access(path.c_str(), F_OK) == 0)
+        {
+            openai_error(api, sock, "409 Conflict", "upload_exists",
+                         "A track with this name already exists.");
+            return 0;
+        }
+        static std::atomic<unsigned> upload_id{0};
+        std::string temp_path;
+        std::FILE *file = nullptr;
+        for (unsigned attempt = 0; attempt < 64 && !file; ++attempt)
+        {
+            temp_path = std::string(PROSPERO_AUDIO_DIR) + ".music-upload-" +
+                        std::to_string(upload_id.fetch_add(1));
+            const int fd = ::open(temp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0666);
+            if (fd < 0)
+            {
+                if (errno == EEXIST)
+                    continue;
+                break;
+            }
+            file = ::fdopen(fd, "wb");
+            if (!file)
+            {
+                ::close(fd);
+                std::remove(temp_path.c_str());
+            }
+        }
         if (!file)
         {
             openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
-                         path.c_str());
+                         "Could not create a unique temporary upload file.");
             return 0;
         }
         std::size_t written = total > body_start ? total - body_start : 0;
@@ -1233,12 +1266,35 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
             }
             written += static_cast<std::size_t>(received);
         }
-        std::fclose(file);
+        if (std::fclose(file) != 0)
+            ok = false;
         if (!ok || written != content_length)
         {
-            std::remove(path.c_str());
+            std::remove(temp_path.c_str());
             openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
                          "Stream interrupted.");
+            return 0;
+        }
+        bool destination_exists = false;
+        bool publish_failed = false;
+        {
+            std::lock_guard<std::mutex> publish_lock(music_upload_publish_mutex);
+            destination_exists = ::access(path.c_str(), F_OK) == 0;
+            if (!destination_exists)
+                publish_failed = std::rename(temp_path.c_str(), path.c_str()) != 0;
+        }
+        if (destination_exists)
+        {
+            std::remove(temp_path.c_str());
+            openai_error(api, sock, "409 Conflict", "upload_exists",
+                         "A track with this name already exists.");
+            return 0;
+        }
+        if (publish_failed)
+        {
+            std::remove(temp_path.c_str());
+            openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
+                         "Could not publish completed upload.");
             return 0;
         }
         send_json(api, sock,
@@ -2626,7 +2682,7 @@ void handle_music_stems_zip(const NetApi &api, int sock, const char *track)
     }
     static const char *stems[] = {"drums", "bass", "other", "vocals", "instrumental"};
     const std::string base = name.substr(0, name.size() - 4);
-    const std::string dir = "/download0/ProsperoAI/work/audio/";
+    const std::string dir = PROSPERO_AUDIO_DIR;
     struct Entry
     {
         std::string path, member;
@@ -3182,7 +3238,7 @@ bool prospero_master_wav(const std::string &in_path, const std::string &out_path
         std::fclose(f);
         return false;
     }
-    std::vector<unsigned char> raw(data_sz & ~1u);
+    std::vector<unsigned char> raw(data_sz);
     std::fseek(f, data_off, SEEK_SET);
     const std::size_t got = std::fread(raw.data(), 1, raw.size(), f);
     std::fclose(f);
@@ -3309,7 +3365,7 @@ void handle_music_master(const NetApi &api, int sock, const char *body)
             return;
         }
     }
-    const std::string dir = "/download0/ProsperoAI/work/audio/";
+    const std::string dir = PROSPERO_AUDIO_DIR;
     const std::string in_path = dir + name;
     const std::string base = name.substr(0, name.rfind('.'));
     const std::string out_name = base + "-mastered.wav";
