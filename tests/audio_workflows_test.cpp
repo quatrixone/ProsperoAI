@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
@@ -47,9 +46,6 @@ struct RuntimeLockProbe
     bool release_selection = false;
     bool generation_entered = false;
     bool release_generation = false;
-    bool contender_started = false;
-    bool contender_completed = false;
-    bool contender_succeeded = false;
 };
 
 RuntimeLockProbe *runtime_lock_probe = nullptr;
@@ -68,6 +64,21 @@ void progress(std::vector<std::string> &phases, std::string_view phase)
 bool has_phase(const std::vector<std::string> &phases, const std::string &phase)
 {
     return std::find(phases.begin(), phases.end(), phase) != phases.end();
+}
+
+bool try_selection_reports_runtime_busy()
+{
+    bool selected_model = true;
+    std::string error;
+    std::thread probe(
+        [&]
+        {
+            selected_model =
+                prospero::model_manager::select("not-installed-test-model", false, true, &error);
+        });
+    probe.join();
+    return !selected_model &&
+           error == "The runtime is busy. Try again when the current operation finishes.";
 }
 
 void write_wav(const std::filesystem::path &path, std::uint16_t format = 1,
@@ -326,43 +337,20 @@ int main(int argc, char **argv)
     bool selection_entered = false;
     {
         std::unique_lock<std::mutex> lock(lock_probe.mutex);
-        selection_entered = lock_probe.changed.wait_for(lock, std::chrono::seconds(5), [&]
-                                                        { return lock_probe.selection_entered; });
+        lock_probe.changed.wait(lock, [&] { return lock_probe.selection_entered; });
+        selection_entered = lock_probe.selection_entered;
     }
 
-    bool contender_started = false;
-    bool completed_during_selection = false;
+    const unsigned selections_at_selection_probe = selection_calls;
+    const unsigned generations_at_selection_probe = generation_calls;
+    const unsigned selected_at_selection_probe = selected;
+    const bool selection_probe_busy = try_selection_reports_runtime_busy();
+    const bool selection_probe_left_runtime_unchanged =
+        selection_calls == selections_at_selection_probe &&
+        generation_calls == generations_at_selection_probe &&
+        selected == selected_at_selection_probe;
+
     bool generation_entered = false;
-    bool completed_during_generation = false;
-    std::thread competing_selection;
-    if (selection_entered)
-    {
-        competing_selection = std::thread(
-            [&]
-            {
-                {
-                    std::lock_guard<std::mutex> lock(lock_probe.mutex);
-                    lock_probe.contender_started = true;
-                }
-                lock_probe.changed.notify_all();
-                std::string error;
-                const bool ok =
-                    prospero::model_manager::select("htdemucs-model", false, false, &error);
-                {
-                    std::lock_guard<std::mutex> lock(lock_probe.mutex);
-                    lock_probe.contender_succeeded = ok;
-                    lock_probe.contender_completed = true;
-                }
-                lock_probe.changed.notify_all();
-            });
-        std::unique_lock<std::mutex> lock(lock_probe.mutex);
-        contender_started = lock_probe.changed.wait_for(lock, std::chrono::seconds(5), [&]
-                                                        { return lock_probe.contender_started; });
-        if (contender_started)
-            completed_during_selection =
-                lock_probe.changed.wait_for(lock, std::chrono::milliseconds(100),
-                                            [&] { return lock_probe.contender_completed; });
-    }
     {
         std::lock_guard<std::mutex> lock(lock_probe.mutex);
         lock_probe.release_selection = true;
@@ -370,23 +358,33 @@ int main(int argc, char **argv)
     lock_probe.changed.notify_all();
     {
         std::unique_lock<std::mutex> lock(lock_probe.mutex);
-        generation_entered = lock_probe.changed.wait_for(lock, std::chrono::seconds(5), [&]
-                                                         { return lock_probe.generation_entered; });
-        if (contender_started)
-            completed_during_generation =
-                lock_probe.changed.wait_for(lock, std::chrono::milliseconds(100),
-                                            [&] { return lock_probe.contender_completed; });
+        lock_probe.changed.wait(lock, [&] { return lock_probe.generation_entered; });
+        generation_entered = lock_probe.generation_entered;
+    }
+    const unsigned selections_at_generation_probe = selection_calls;
+    const unsigned generations_at_generation_probe = generation_calls;
+    const unsigned selected_at_generation_probe = selected;
+    const bool generation_probe_busy = try_selection_reports_runtime_busy();
+    const bool generation_probe_left_runtime_unchanged =
+        selection_calls == selections_at_generation_probe &&
+        generation_calls == generations_at_generation_probe &&
+        selected == selected_at_generation_probe;
+    {
+        std::lock_guard<std::mutex> lock(lock_probe.mutex);
         lock_probe.release_generation = true;
     }
     lock_probe.changed.notify_all();
     audio_operation.join();
-    if (competing_selection.joinable())
-        competing_selection.join();
     runtime_lock_probe = nullptr;
+    std::string selection_error;
+    const bool selected_afterward =
+        prospero::model_manager::select("htdemucs-model", false, false, &selection_error);
     assert(submitted_model.ok && submitted_model.artifacts.size() == 1);
-    assert(selection_entered && contender_started && generation_entered);
-    assert(!completed_during_selection && !completed_during_generation);
-    assert(lock_probe.contender_completed && lock_probe.contender_succeeded);
+    assert(selection_entered && generation_entered);
+    assert(selection_probe_busy);
+    assert(generation_probe_busy);
+    assert(selection_probe_left_runtime_unchanged && generation_probe_left_runtime_unchanged);
+    assert(selected_afterward);
     assert(selection_calls == before_submit_selections + 2 &&
            generation_calls == before_submit_generations + 1);
     assert(selected == 2 &&
