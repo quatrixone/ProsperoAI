@@ -249,6 +249,12 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
 int main(int argc, char **argv)
 {
     assert(argc == 2);
+    assert(prospero::audio_workflows::supports_music_model("ace-step-1.5-turbo-q8-0"));
+    assert(prospero::audio_workflows::supports_music_model("stable-audio-3-small-sfx-q8_0.gguf"));
+    assert(prospero::audio_workflows::supports_music_model("yue2-music-model"));
+    assert(!prospero::audio_workflows::supports_music_model("SheetSage2-model"));
+    assert(!prospero::audio_workflows::supports_music_model("HTDemucs-model"));
+    assert(!prospero::audio_workflows::supports_music_model(""));
     const std::filesystem::path root(argv[1]);
     std::filesystem::create_directories(root);
     std::ofstream(root / "one.wav", std::ios::binary) << "wav";

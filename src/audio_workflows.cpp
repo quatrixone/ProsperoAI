@@ -366,8 +366,7 @@ bool resolve_model(const std::string &id, const std::string &kind, unsigned &ind
                 return false;
             }
             const std::string lowered = lower(id);
-            if ((kind == "music" && (lowered.find("sheetsage") != std::string::npos ||
-                                     lowered.find("htdemucs") != std::string::npos)) ||
+            if ((kind == "music" && !supports_music_model(id)) ||
                 (kind == "cover" && lowered.find("sheetsage") == std::string::npos) ||
                 (kind == "stems" && lowered.find("htdemucs") == std::string::npos))
             {
@@ -467,6 +466,13 @@ Result run_audio(const std::string &model_id, const std::string &kind, const std
     return {true, false, std::move(response), std::move(artifacts)};
 }
 } // namespace
+
+bool supports_music_model(std::string_view model_id)
+{
+    const std::string lowered = lower(std::string(model_id));
+    return !lowered.empty() && lowered.find("sheetsage") == std::string::npos &&
+           lowered.find("htdemucs") == std::string::npos;
+}
 
 std::vector<LibraryEntry> list_library(const std::string &root)
 {

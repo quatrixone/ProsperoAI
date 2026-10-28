@@ -1,6 +1,7 @@
 // Host checks for real controller ownership, persistence, and multilingual layout.
 #include "native_app.hpp"
 #include "audio_workflows.hpp"
+#include "native_audio_queue.hpp"
 #include "debug_log.hpp"
 #include "model_manager.hpp"
 #include "runtime_settings.hpp"
@@ -55,6 +56,23 @@ void settle(prospero::App &app)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     assert(false && "worker did not complete");
+}
+
+void test_stopped_queue_waiting_for_busy_worker()
+{
+    bool active = true;
+    bool stop_requested = false;
+    constexpr int no_active_item = -1;
+    std::vector<std::string> pending{"pending", "pending"};
+
+    assert(prospero::native_audio_queue::dispatch_decision(active, stop_requested, no_active_item,
+                                                           true) ==
+           prospero::native_audio_queue::DispatchDecision::wait);
+    stop_requested = true;
+    assert(prospero::native_audio_queue::dispatch_decision(active, stop_requested, no_active_item,
+                                                           false) ==
+           prospero::native_audio_queue::DispatchDecision::stopped);
+    assert(!active && !stop_requested && pending[0] == "pending" && pending[1] == "pending");
 }
 } // namespace
 
@@ -262,6 +280,7 @@ int main(int argc, char **argv)
 {
     assert(argc == 4);
     prospero::debug::start(argv[3]);
+    test_stopped_queue_waiting_for_busy_worker();
     std::remove(PROSPERO_SETTINGS_PATH);
     {
         std::ofstream settings(PROSPERO_SETTINGS_PATH);

@@ -46,3 +46,24 @@ pre-runtime source rejection, worker/runtime failures, and busy-operation reject
   are likewise preserved.
 - The current branch is `fix/pr43-must-fix`; the requested Task 4 commit will be made here, without
   pushing.
+
+## Fix round — queue Stop interleaving and music-model eligibility
+
+The queue's next-item dispatch now passes through a small tested decision helper. If the queue is
+active with no current item while another App worker is busy, a Stop request is consumed once that
+worker clears; the queue becomes inactive without changing pending item states or starting another
+variant. The regression exercises the busy → Stop → idle sequence.
+
+The native Create music and Queue variants actions now check the shared workflow's music-model
+eligibility before prompting. The guard follows the local shared-operation contract: SheetSage and
+HTDemucs IDs are reserved for Cover and stems, while the runtime registry routes ACE-Step and Yue2
+to their dedicated generation adapters and other audio IDs through Stable Audio. Ineligible
+selections receive an explanatory message without starting a job.
+
+- RED: `PYTHONPATH=tests HOST_CXX=clang++-18 HOST_CC=clang-18 python3 -m unittest test_native_controller.NativeController.test_workspace_modes_and_audio_actions -v` failed while compiling the new queue regression because the dispatch helper did not yet exist.
+- GREEN: the same focused controller command passed after introducing the decision helper and wiring it into queue dispatch.
+- `HOST_CXX=clang++-18 HOST_CC=clang-18 make test` — PASS: 110 tests, 2 skipped (optional real-model cache and host Vulkan parity tests). The run emitted two `ResourceWarning`s for unclosed sockets in existing search MCP tests; both tests passed.
+- `make format-check` — initially reported formatting violations in the new UI/test lines; after applying targeted clang-format, rerun passed.
+- `PROSPERO_APP_TITLE=PPSA99023 bash tools/build-vulkan-native.sh` — PASS; local native app built under `build/vulkan-runtime/PPSA99023`.
+- Eligibility checks in `tests/audio_workflows_test.cpp` cover ACE-Step, Stable Audio and Yue2 as music-eligible, and reject SheetSage, HTDemucs and an empty ID.
+- No console commands, deployment, launch, or hardware tests were run; no push was performed.

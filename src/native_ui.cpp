@@ -1108,8 +1108,11 @@ void NativeUI::Impl::update_audio_queue()
             }
         }
     }
-    if (!queue_active_ || active_queue_item_ >= 0 || app_.busy())
+    const auto decision = prospero::native_audio_queue::dispatch_decision(
+        queue_active_, queue_stop_requested_, active_queue_item_, app_.busy());
+    if (decision != prospero::native_audio_queue::DispatchDecision::start)
     {
+        changed |= decision == prospero::native_audio_queue::DispatchDecision::stopped;
         if (changed)
             refresh_sessions();
         return;
@@ -1390,6 +1393,10 @@ void NativeUI::Impl::handle_workspace(const InputFrame &input, ui::Feedback &fee
                     app_.state().models[static_cast<std::size_t>(model)].capability !=
                         Capability::Audio)
                     begin_model_selection();
+                else if (!audio_workflows::supports_music_model(
+                             app_.state().models[static_cast<std::size_t>(model)].id))
+                    toasts_.push(ui::StatusKind::warning, "Choose a music-generation model",
+                                 "SheetSage is for Cover to ABC; HTDemucs is for stem separation.");
                 else
                 {
                     queue_after_music_prompt_ = false;
@@ -1426,6 +1433,11 @@ void NativeUI::Impl::handle_workspace(const InputFrame &input, ui::Feedback &fee
                         app_.state().models[static_cast<std::size_t>(model)].capability !=
                             Capability::Audio)
                         begin_model_selection();
+                    else if (!audio_workflows::supports_music_model(
+                                 app_.state().models[static_cast<std::size_t>(model)].id))
+                        toasts_.push(
+                            ui::StatusKind::warning, "Choose a music-generation model",
+                            "SheetSage is for Cover to ABC; HTDemucs is for stem separation.");
                     else
                     {
                         queue_after_music_prompt_ = true;

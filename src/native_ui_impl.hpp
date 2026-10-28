@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "native_ui.hpp"
+#include "native_audio_queue.hpp"
 #include "model_downloader_ps5.hpp"
 #include "update.hpp"
 #include "voice_recorder.hpp"

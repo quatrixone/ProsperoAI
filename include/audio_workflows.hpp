@@ -36,6 +36,7 @@ using ProgressCallback = std::function<void(std::string_view)>;
 std::vector<LibraryEntry> list_library(const std::string &root);
 bool read_library_text(const std::string &root, const std::string &name, std::string &contents);
 bool save_abc(const std::string &root, const std::string &name, const std::string &contents);
+bool supports_music_model(std::string_view model_id);
 Result create_music(const MusicRequest &request, ProgressCallback progress);
 Result cover_to_abc(const std::string &model_id, const std::string &source_name,
                     ProgressCallback progress);
