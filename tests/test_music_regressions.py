@@ -17,19 +17,22 @@ class MusicRegressionTests(unittest.TestCase):
         self.assertLess(guard, allocation)
 
     def test_cover_uses_selected_web_audio_constructors(self):
-        source = (ROOT / "assets/web/workspace-audio.js").read_text()
-        cover = source[source.index("async function localFileToWav"):]
+        source = (ROOT / "assets/web/music.js").read_text()
+        start = source.index("$('cover-go').addEventListener")
+        end = source.index("$('regen').addEventListener", start)
+        cover = source[start:end]
         self.assertIn("window.webkitAudioContext", cover)
         self.assertIn("window.webkitOfflineAudioContext", cover)
-        self.assertNotIn("AudioContext.prototype", cover)
+        self.assertIn("new OfflineAC(", cover)
         self.assertNotIn("new OfflineAudioContext(", cover)
 
-    def test_audio_library_uses_native_players_and_exposes_stem_downloads(self):
-        source = (ROOT / "assets/web/workspace-audio.js").read_text()
-        library = source[source.index("function renderLibrary()"):source.index("async function refreshLibrary()")]
-        self.assertIn("player.controls = true", library)
-        self.assertIn("stemPlayer.controls = true", library)
-        self.assertIn("stemLink.download = stem.name", library)
+    def test_music_library_players_and_stem_downloads(self):
+        source = (ROOT / "assets/web/music.js").read_text()
+        library = source[source.index("function makePlayer("):source.index("function loadLibrary()")]
+        stems = source[source.index("function makeStemGroup("):source.index("function loadLibrary()")]
+        self.assertIn("function loadLibrary()", source)
+        self.assertIn("playerAudios.push(audio)", library)
+        self.assertIn("setAttribute('download', st.name)", stems)
 
     def test_stems_resampling_limits(self):
         compiler = shutil.which("clang++") or shutil.which("g++")

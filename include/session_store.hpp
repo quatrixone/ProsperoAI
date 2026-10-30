@@ -27,6 +27,7 @@ struct Message
     char role[12];
     char timestamp[9];
     std::string content;
+    std::string image;
 };
 
 struct Record
@@ -103,6 +104,12 @@ bool archive_text(const char *id, unsigned message_index, const char *text,
 bool archive_media(const char *id, unsigned message_index, const char *kind, const char *source,
                    char *output, std::size_t output_capacity,
                    const OutputMetadata *metadata = nullptr);
+bool write_optional_image_sidecar(const char *id, unsigned index, const char *path);
+bool read_optional_image_sidecar(const char *id, unsigned index, std::string *output);
+bool remove_optional_image_sidecar(const char *id, unsigned index);
+bool valid_optional_image_path(const char *id, unsigned index, const char *path);
+bool archive_image(const char *conversation_id, unsigned message_index, const char *source,
+                   char *output, std::size_t output_capacity);
 bool valid_id(const char *id);
 
 } // namespace prospero_session

@@ -28,6 +28,7 @@ unsigned cross_modality_releases = 0;
 unsigned simulated_cover_releases = 0;
 bool runtime_resident = false;
 bool simulate_cover_release = false;
+bool simulate_release_recovers_memory = false;
 std::uint64_t available_memory = 12ull << 30;
 std::string expected_id;
 std::string expected_prompt;
@@ -170,7 +171,14 @@ bool gpt_runtime_select_model(unsigned index)
     }
     ++selection_calls;
     if ((selected == 3) != (index == 3))
+    {
         ++cross_modality_releases;
+        if (simulate_release_recovers_memory && runtime_resident)
+        {
+            runtime_resident = false;
+            available_memory = 12ull << 30;
+        }
+    }
     selected = index;
     return true;
 }
@@ -203,8 +211,10 @@ extern "C" int sceKernelDirectMemoryQuery(std::int64_t, int, void *, std::size_t
 
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *output, std::size_t capacity,
-                         gpt_runtime_stats_t *, gpt_runtime_progress_fn runtime_progress)
+                         gpt_runtime_stats_t *, gpt_runtime_progress_fn runtime_progress,
+                         const char *image_path)
 {
+    assert(image_path == nullptr);
     if (verify_generation)
     {
         assert(count == 1 && std::strcmp(messages[0].role, "user") == 0);
@@ -326,9 +336,23 @@ int main(int argc, char **argv)
     const auto preflight_refusal =
         prospero::audio_workflows::cover_to_abc("sheetsage-model", "source.wav", {});
     assert(!preflight_refusal.ok && preflight_refusal.retryable);
-    assert(selection_calls == before_preflight_selections &&
-           generation_calls == before_preflight_generations && selected == 3);
+    assert(selection_calls == before_preflight_selections + 1 &&
+           generation_calls == before_preflight_generations && selected == 1);
+    assert(gpt_runtime_select_model(3));
+    runtime_resident = true;
+    available_memory = 1000ull << 20;
+    simulate_release_recovers_memory = true;
+    const unsigned before_recovered_selections = selection_calls;
+    const unsigned before_recovered_generations = generation_calls;
+    const auto recovered_cover =
+        prospero::audio_workflows::cover_to_abc("sheetsage-model", "source.wav", {});
+    simulate_release_recovers_memory = false;
+    assert(recovered_cover.ok && !recovered_cover.retryable);
+    assert(selection_calls == before_recovered_selections + 1 &&
+           generation_calls == before_recovered_generations + 1 && selected == 1 &&
+           available_memory == (12ull << 30) && !runtime_resident);
     available_memory = 12ull << 30;
+    assert(gpt_runtime_select_model(3));
     const unsigned before_submit_selections = selection_calls;
     const unsigned before_submit_generations = generation_calls;
     RuntimeLockProbe lock_probe;

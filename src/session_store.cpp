@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "session_store.hpp"
+#include "image_codec.hpp"
 
 #include <dirent.h>
 #include <cstdio>
@@ -285,6 +286,8 @@ bool read_message(const char *id, unsigned index, Message *message)
     }
     parsed.content.resize(bytes);
     std::fclose(file);
+    if (!read_optional_image_sidecar(id, index, &parsed.image))
+        return false;
     *message = parsed;
     return true;
 }
@@ -375,6 +378,49 @@ bool save_output_reference(const char *id, unsigned index, const char *output)
     return ok;
 }
 
+bool image_sidecar_path(char *output, std::size_t capacity, const char *id, unsigned index)
+{
+    if (!output || !valid_id(id) || index >= MessageCapacity)
+        return false;
+    const int length =
+        std::snprintf(output, capacity, "%s/%s/message-%03u.image", kRoot, id, index);
+    return length >= 0 && static_cast<std::size_t>(length) < capacity;
+}
+
+bool valid_image_reference(const char *id, unsigned index, const char *path)
+{
+    if (!valid_id(id) || index >= MessageCapacity || !path)
+        return false;
+    char prefix[256];
+    const int prefix_length = std::snprintf(prefix, sizeof(prefix), "%s/image/%s/", kWork, id);
+    if (prefix_length < 0 || static_cast<std::size_t>(prefix_length) >= sizeof(prefix))
+        return false;
+    const std::size_t length = std::strlen(path);
+    const std::size_t prefix_size = static_cast<std::size_t>(prefix_length);
+    if (length <= prefix_size || std::strncmp(path, prefix, prefix_size) != 0)
+        return false;
+
+    char leaf_prefix[16];
+    const int leaf_prefix_length = std::snprintf(leaf_prefix, sizeof(leaf_prefix), "%03u-", index);
+    if (leaf_prefix_length < 0 ||
+        static_cast<std::size_t>(leaf_prefix_length) >= sizeof(leaf_prefix))
+        return false;
+    const char *leaf = path + prefix_size;
+    const std::size_t leaf_length = length - prefix_size;
+    const std::size_t leaf_prefix_size = static_cast<std::size_t>(leaf_prefix_length);
+    constexpr char extension[] = ".png";
+    if (leaf_length <= leaf_prefix_size + sizeof(extension) - 1 ||
+        std::strncmp(leaf, leaf_prefix, leaf_prefix_size) != 0 ||
+        std::strcmp(leaf + leaf_length - (sizeof(extension) - 1), extension) != 0)
+        return false;
+    const char *timestamp = leaf + leaf_prefix_size;
+    const char *end = leaf + leaf_length - (sizeof(extension) - 1);
+    for (const char *at = timestamp; at != end; ++at)
+        if (*at < '0' || *at > '9')
+            return false;
+    return true;
+}
+
 } // namespace
 
 bool valid_id(const char *id)
@@ -386,6 +432,78 @@ bool valid_id(const char *id)
               (*at >= '0' && *at <= '9') || *at == '-'))
             return false;
     return true;
+}
+
+bool valid_optional_image_path(const char *id, unsigned index, const char *path)
+{
+    return valid_image_reference(id, index, path);
+}
+
+bool write_optional_image_sidecar(const char *id, unsigned index, const char *path)
+{
+    if (!valid_image_reference(id, index, path))
+        return false;
+    char reference[256], temporary[272];
+    if (!image_sidecar_path(reference, sizeof(reference), id, index))
+        return false;
+    const int length = std::snprintf(temporary, sizeof(temporary), "%s.tmp", reference);
+    if (length < 0 || static_cast<std::size_t>(length) >= sizeof(temporary))
+        return false;
+    std::FILE *file = std::fopen(temporary, "wb");
+    if (!file)
+        return false;
+    const std::size_t path_length = std::strlen(path);
+    bool ok =
+        std::fwrite(path, 1, path_length, file) == path_length && std::fputc('\n', file) != EOF;
+    ok = std::fclose(file) == 0 && ok;
+    if (ok)
+        ok = std::rename(temporary, reference) == 0;
+    if (!ok)
+        std::remove(temporary);
+    return ok;
+}
+
+bool read_optional_image_sidecar(const char *id, unsigned index, std::string *output)
+{
+    if (!output)
+        return false;
+    output->clear();
+    char reference[256];
+    if (!image_sidecar_path(reference, sizeof(reference), id, index))
+        return false;
+    std::FILE *file = std::fopen(reference, "rb");
+    if (!file)
+        return errno == ENOENT;
+    char bytes[320];
+    const std::size_t count = std::fread(bytes, 1, sizeof(bytes), file);
+    const bool has_extra = std::fgetc(file) != EOF;
+    const bool read_ok = !std::ferror(file) && !has_extra;
+    const bool close_ok = std::fclose(file) == 0;
+    if (!read_ok || !close_ok || count == 0 || std::memchr(bytes, '\0', count))
+        return false;
+    if (bytes[count - 1] == '\n')
+        output->assign(bytes, count - 1);
+    else
+        output->assign(bytes, count);
+    if (!valid_image_reference(id, index, output->c_str()))
+    {
+        output->clear();
+        return false;
+    }
+    return true;
+}
+
+bool remove_optional_image_sidecar(const char *id, unsigned index)
+{
+    char reference[256], temporary[272];
+    if (!image_sidecar_path(reference, sizeof(reference), id, index))
+        return false;
+    const int length = std::snprintf(temporary, sizeof(temporary), "%s.tmp", reference);
+    if (length < 0 || static_cast<std::size_t>(length) >= sizeof(temporary))
+        return false;
+    const bool reference_removed = std::remove(reference) == 0 || errno == ENOENT;
+    const bool temporary_removed = std::remove(temporary) == 0 || errno == ENOENT;
+    return reference_removed && temporary_removed;
 }
 
 bool create(Record *record, const char *model_id, const char *model_name, const char *purpose)
@@ -436,8 +554,17 @@ bool save(Record *record, const Message *messages, unsigned message_count)
     record->updated_us = now_microseconds();
     current_time(record->updated_time, sizeof(record->updated_time));
     for (unsigned index = 0; index < message_count; ++index)
+    {
         if (!write_message(record->id, index, messages[index]))
             return false;
+        if (!messages[index].image.empty())
+        {
+            if (!write_optional_image_sidecar(record->id, index, messages[index].image.c_str()))
+                return false;
+        }
+        else if (!remove_optional_image_sidecar(record->id, index))
+            return false;
+    }
 
     char path[256];
     char temporary[272];
@@ -571,6 +698,8 @@ bool erase(const char *id)
         make_path(path, sizeof(path), id, leaf);
         if (std::remove(path) != 0 && errno != ENOENT)
             return false;
+        if (!remove_optional_image_sidecar(id, index))
+            return false;
         const int length = std::snprintf(leaf, sizeof(leaf), "message-%03u.txt.tmp", index);
         if (length < 0 || static_cast<std::size_t>(length) >= sizeof(leaf))
             return false;
@@ -661,6 +790,34 @@ bool archive_media(const char *id, unsigned message_index, const char *kind, con
     if (!ok)
         std::remove(output);
     return ok;
+}
+
+bool archive_image(const char *conversation_id, unsigned message_index, const char *source,
+                   char *output, std::size_t output_capacity)
+{
+    if (!valid_id(conversation_id) || message_index >= MessageCapacity || !source || !output ||
+        output_capacity < 2)
+        return false;
+    prospero_image::DecodedImage decoded{};
+    if (!prospero_image::decode_file(source, &decoded))
+        return false;
+    std::FILE *file =
+        open_output(conversation_id, message_index, "image", ".png", output, output_capacity);
+    const bool encoded = file && prospero_image::write_png(file, decoded);
+    const bool closed = !file || std::fclose(file) == 0;
+    prospero_image::free_image(&decoded);
+    if (!encoded || !closed)
+    {
+        if (file)
+            std::remove(output);
+        return false;
+    }
+    if (!write_optional_image_sidecar(conversation_id, message_index, output))
+    {
+        std::remove(output);
+        return false;
+    }
+    return true;
 }
 
 bool archive_text(const char *id, unsigned message_index, const char *text,

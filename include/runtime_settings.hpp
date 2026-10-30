@@ -23,6 +23,7 @@ inline bool valid_context(unsigned n) {
     return n == 0 || n == 4096 || n == 8192 || n == 16384 || n == 32768 || n == 65536 ||
            n == 131072 || n == 262144;
 }
+inline bool valid_kv(unsigned n) { return n <= 3; }
 inline bool valid_idle_unload_minutes(unsigned n) {
     return n == 1 || n == 2 || n == 5 || n == 10 || n == 30 || n == 60;
 }
@@ -85,7 +86,7 @@ inline Runtime read_unlocked() {
         while (std::fgets(line, sizeof(line), f)) {
             if (std::sscanf(line, "context=%u", &v) == 1 && valid_context(v)) p.context = v;
             else if (std::sscanf(line, "tokens=%u", &v) == 1 && prospero_generation::valid_output_limit(v)) p.output_limit = v;
-            // Legacy kv= values are ignored: cache precision is automatic.
+            else if (std::sscanf(line, "kv=%u", &v) == 1 && valid_kv(v)) p.kv = v;
             else if (std::sscanf(line, "thinking=%u", &v) == 1) p.thinking = v != 0;
             else if (std::sscanf(line, "idle_unload_minutes=%u", &v) == 1 && valid_idle_unload_minutes(v)) p.idle_unload_minutes = v;
             else if (std::sscanf(line, "kokoro_voice=%u", &v) == 1 && v < 128) p.kokoro_voice = v;
@@ -121,7 +122,7 @@ inline Runtime read_unlocked() {
 }
 inline Runtime get() { std::lock_guard<std::mutex> lock(mutex); return read_unlocked(); }
 inline bool set_unlocked(Runtime p) {
-    if (!valid_context(p.context) || !prospero_generation::valid_output_limit(p.output_limit) || p.kv != 0 || !valid_idle_unload_minutes(p.idle_unload_minutes) || p.kokoro_voice >= 128 || p.chatterbox_voice >= 128 || !prospero_language::valid_chatterbox_language(p.chatterbox_language) || !valid_audio_duration_sec(p.audio_duration_sec) || !valid_sd_dimensions(p.sd_width,p.sd_height) || !valid_web_search_timeout(p.web_search_timeout_seconds) || !valid_search_scopes(p.search_scopes) || !valid_audio_lyrics(p.audio_lyrics) || !valid_audio_options(p.audio_options)) return false;
+    if (!valid_context(p.context) || !prospero_generation::valid_output_limit(p.output_limit) || !valid_kv(p.kv) || !valid_idle_unload_minutes(p.idle_unload_minutes) || p.kokoro_voice >= 128 || p.chatterbox_voice >= 128 || !prospero_language::valid_chatterbox_language(p.chatterbox_language) || !valid_audio_duration_sec(p.audio_duration_sec) || !valid_sd_dimensions(p.sd_width,p.sd_height) || !valid_web_search_timeout(p.web_search_timeout_seconds) || !valid_search_scopes(p.search_scopes) || !valid_audio_lyrics(p.audio_lyrics) || !valid_audio_options(p.audio_options)) return false;
     std::string contents;
     if (auto *f = std::fopen(PROSPERO_SETTINGS_PATH, "rb")) {
         char line[8192];

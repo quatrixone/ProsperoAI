@@ -447,7 +447,7 @@ int gpt_runtime_prepare() {
     std::lock_guard<std::mutex> lock(runtime_mutex);
     try {
         const auto settings = prospero_settings::get();
-        configure_context(settings.context, "auto");
+        configure_context(settings.context, prospero_settings::kv_name(settings.kv));
         if (prepare()) return 0;
         release_model(); // a refused model must not keep its weights resident
         return 1;

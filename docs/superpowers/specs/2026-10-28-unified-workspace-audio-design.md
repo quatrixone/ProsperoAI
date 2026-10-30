@@ -1,7 +1,6 @@
 # Unified Workspace and cross-platform audio workflows
 
-Status: design, approved conversationally on 2026-10-28. Implementation has not
-started.
+Status: approved design, implementation in progress.
 
 ## Goal
 
@@ -25,11 +24,20 @@ controls in the native application.
   respectively. The SD label maps to the existing image capability; TTS maps to
   the existing voice capability.
 - Changing mode filters choices but does not silently select or load a
-  different model. A user explicitly chooses a model before generation.
+  different model. Choosing a model only stages it in Workspace/conversation
+  state; it does not call the runtime, load or unload a model, or apply
+  generation settings. The user may adjust generation options before sending.
+- Submitting a request explicitly selects and loads the staged model, then
+  applies the final generation options to that request.
 - The web and native interfaces use the capability metadata already exposed by
   the model runtime; they do not infer model type from its name.
 - Existing conversations and the Models page remain available. Conversation
   history is not partitioned or rewritten by the selected mode.
+- The header in both interfaces shows the loaded model and current Vulkan
+  allocation while a model is resident, refreshed in near real time; when no
+  model is resident it continues to say that no model is loaded. Reported
+  allocation is device-wide Vulkan heap use (`total - free`), not a per-model
+  estimate, and unavailable measurements must not be presented as zero.
 
 ### Audio workflows
 
@@ -98,8 +106,12 @@ browser is explicitly out of scope.
 
 - Invalid, missing, or unsupported source files fail before model execution and
   leave existing library files untouched.
-- Cover and stems memory-admission failures return a retryable message after
-  releasing any resident model they own; they do not request an app restart.
+- Mode/model choice is runtime-neutral. On request submission, shared audio
+  operations validate the source and perform their pre-admission check before
+  selecting the requested model under the runtime lock. A preflight refusal is
+  retryable and leaves the current runtime selection unchanged; after explicit
+  submit-time selection, adapters may release only resources belonging to the
+  requested operation. Memory refusal never requests an app restart.
 - A failed queue item is recorded as failed and does not silently resubmit.
   Remaining pending items stay visible and can be retried or cleared.
 - The shared runtime admits only one heavy operation at a time, respecting
@@ -119,7 +131,9 @@ browser is explicitly out of scope.
 
 1. Web and native Workspace both expose Text, Audio, SD, and TTS modes.
 2. Each mode filters by model capability, including an empty state when no
-   installed model has that capability; changing mode does not load a model.
+   installed model has that capability; changing mode or staging a model does
+   not load one, and submitting a request loads the staged model with the final
+   options.
 3. The web Audio workspace can upload a source and complete Cover, stems,
    single-track generation, and a multi-item queue.
 4. The native Audio workspace can choose the same uploaded/generated source
@@ -135,9 +149,14 @@ browser is explicitly out of scope.
 8. Existing audio files, metadata, ABC files, and conversation records survive
    the transition unchanged.
 9. Host tests cover the shared workflow contract, HTTP adapter, native action
-   handling, mode filtering, queue boundaries, and error paths. Web and native
-   UI states are rendered/inspected, and each workflow is exercised on test
-   title `PPSA99023`; the main title `PPSA99004` is never modified.
+   handling, staged model/options, mode filtering, queue boundaries, and error
+   paths. Web UI states are rendered/inspected locally. Console tests and
+   deployment are deferred until all implementation and local validation are
+   complete; ask the user before any console action, then use only test title
+   `PPSA99023`. The main title `PPSA99004` is never modified.
+10. Both headers show live Vulkan heap allocation and total capacity alongside
+    the loaded model when available, then return to the no-model state after
+    unload; the displayed quantity is explicitly device-wide allocation.
 
 ## Verification plan
 
@@ -146,9 +165,12 @@ browser is explicitly out of scope.
 - Build the PS5 app, confirm the pinned llama.cpp, audio.cpp, and
   stable-diffusion.cpp inputs, and compare the ELF NEEDED list and program
   headers against the working build.
-- Deploy only to `PPSA99023`. Exercise mode selection and each Audio workflow
-  from web and native UI, using an uploaded audio-library input for native
-  Cover/stems. Confirm output artifacts and that the title remains alive.
+- After host, build, and local web verification are complete, ask the user
+  whether to deploy and run the live workflow checks on `PPSA99023`; do not
+  perform any console action before that approval. If approved, exercise mode
+  selection and each Audio workflow from web and native UI, using an uploaded
+  audio-library input for native Cover/stems. Confirm output artifacts and
+  that the title remains alive.
 - Do not reboot the console. Do not alter or deploy to `PPSA99004`.
 
 ## Open implementation questions

@@ -1,6 +1,7 @@
 // ProsperoAI - Saved conversations are read back as they were written.
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "session_store.hpp"
+#include "image_codec.hpp"
 
 #include <cassert>
 #include <cstdio>
@@ -68,6 +69,7 @@ int main()
     assert(std::strcmp(read[0].role, "user") == 0 && std::strcmp(read[0].timestamp, "02:08") == 0);
     assert(std::strcmp(read[1].timestamp, "02:09") == 0);
     assert(read[1].content == written[1].content);
+    assert(read[0].image.empty() && read[1].image.empty());
 
     assert(matches(loaded, "text", "LINKED") == false); // title is still default
     assert(matches(loaded, "text", "QWEN"));
@@ -104,6 +106,42 @@ int main()
         std::fclose(input);
         return bytes;
     };
+    const std::string message_path =
+        std::string("/tmp/prosperoai-session-test/sessions/") + record.id + "/message-000.txt";
+    const std::string legacy_message = read_file(message_path);
+    char archived_image[320]{};
+    assert(archive_image(record.id, 0, "tests/fixtures/one-pixel.jpg", archived_image,
+                         sizeof(archived_image)));
+    written[0].image = archived_image;
+    assert(save(&record, written, 2));
+    assert(load(record.id, &loaded, read, 4));
+    assert(read[0].image == archived_image);
+    assert(read_file(archived_image).starts_with("\x89PNG\r\n\x1a\n"));
+    prospero_image::EncodedFormat image_format{};
+    unsigned image_width = 0, image_height = 0;
+    assert(
+        prospero_image::inspect_file(archived_image, &image_format, &image_width, &image_height));
+    assert(image_format == prospero_image::EncodedFormat::Png && image_width == 1 &&
+           image_height == 1);
+    assert(!write_optional_image_sidecar(record.id, 0, "/tmp/unowned-image.png"));
+    assert(!write_optional_image_sidecar(record.id, 1, archived_image));
+    const std::string sidecar_path =
+        std::string("/tmp/prosperoai-session-test/sessions/") + record.id + "/message-000.image";
+    auto *sidecar = std::fopen(sidecar_path.c_str(), "wb");
+    assert(sidecar);
+    std::fputs("/tmp/unowned-image.png\n", sidecar);
+    std::fclose(sidecar);
+    std::string malformed_image = "stale value";
+    assert(!read_optional_image_sidecar(record.id, 0, &malformed_image) && malformed_image.empty());
+    assert(write_optional_image_sidecar(record.id, 0, archived_image));
+    const std::string persisted_image = read[0].image;
+    written[0].image.clear();
+    assert(save(&record, written, 2) && load(record.id, &loaded, read, 4));
+    assert(read[0].image.empty());
+    written[0].image = persisted_image;
+    assert(save(&record, written, 2) && load(record.id, &loaded, read, 4));
+    assert(read[0].image == persisted_image);
+    assert(read_file(message_path) == legacy_message);
     assert(read_file(media) == "wave fixture");
     assert(!std::filesystem::exists(std::string(media) + ".json"));
     assert(read_file(std::string("/tmp/prosperoai-session-test/sessions/") + record.id +
@@ -133,8 +171,18 @@ int main()
     std::snprintf(written[0].timestamp, sizeof(written[0].timestamp), "2:08");
     assert(save(&record, written, 2) && !load(record.id, &loaded, read, 4));
     assert(!load("session-missing", &loaded, read, 4));
+    auto *sidecar_tmp = std::fopen((sidecar_path + ".tmp").c_str(), "wb");
+    assert(sidecar_tmp);
+    std::fputs("partial", sidecar_tmp);
+    std::fclose(sidecar_tmp);
     assert(erase(record.id));
     assert(access(media, F_OK) != 0);
     assert(access(text_output, F_OK) != 0);
+    assert(access(archived_image, F_OK) != 0);
+    assert(access((std::string("/tmp/prosperoai-session-test/sessions/") + record.id +
+                   "/message-000.image")
+                      .c_str(),
+                  F_OK) != 0);
+    assert(access((sidecar_path + ".tmp").c_str(), F_OK) != 0);
     assert(!load(record.id, &loaded, read, 4));
 }

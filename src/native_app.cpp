@@ -136,7 +136,8 @@ void validate(Preferences &p)
     p.style = std::min(p.style, 2U);
     if (!prospero_settings::valid_context(p.context_length))
         p.context_length = 0;
-    p.kv_cache = 0; // Cache precision is always automatic.
+    if (!prospero_settings::valid_kv(p.kv_cache))
+        p.kv_cache = 0;
     if (!prospero_settings::valid_idle_unload_minutes(p.idle_unload_minutes))
         p.idle_unload_minutes = 5;
     p.kokoro_voice = std::min(p.kokoro_voice, 127U);

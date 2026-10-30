@@ -275,6 +275,17 @@ const char *gpt_runtime_model_purpose(unsigned i)
     scan();
     return i < models.size() ? modality_name(models[i].modality) : "unknown";
 }
+bool gpt_runtime_model_is_qwen_image_2_1(const char *model_id)
+{
+    if (!model_id || !*model_id)
+        return false;
+    std::lock_guard<std::mutex> lock(mutex);
+    scan();
+    const auto found = std::find_if(models.begin(), models.end(), [&](const Model &model)
+                                    { return model.id == model_id; });
+    return found != models.end() && found->modality == Modality::Image &&
+           supported_qwen_image_2_1_directory(found->root);
+}
 const char *gpt_runtime_name()
 {
     return gpt_runtime_model_name(gpt_runtime_selected_model());
@@ -474,7 +485,8 @@ int gpt_runtime_prepare()
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *output, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const char *image_path)
 {
     if (!messages || !count || !output || !capacity)
         return 1;
@@ -515,7 +527,8 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         ~GenerationCounterGuard() { active_generations.fetch_sub(1, std::memory_order_acq_rel); }
     } generation_guard;
     const int result = adapter->generate(
-        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress});
+        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress,
+                          image_path});
     note_inference_activity();
     return result;
 }

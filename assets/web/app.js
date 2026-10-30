@@ -49,35 +49,103 @@ let conversationSyncReady = load('prospero-sync-initialized', false), conversati
 let presetCatalog = [], modelFilter = 'all', downloadState = {state:'idle',active_preset:-1}, pendingDelete = '';
 const kindNames = ['Text','Image','Audio','Voice'];
 const modelKind = model => ['text-to-text','text-to-image','text-to-audio','text-to-speech'].indexOf(model.purpose || 'text-to-text');
-let current = null, models = [], modelsLoaded = false, selectedModel = '', selectedModelState = 'unknown', pendingModel = '', controller = null, currentModelChosen = false;
+let current = null, models = [], modelsStatus = 'loading', selectedModel = '', selectedModelState = 'unknown', pendingModel = '', controller = null, currentModelChosen = false;
 const modelChooser=$('workspace-model');
+const imageAttachment=window.ProsperoQwenImageAttachment.createAttachmentState();
+let imagePreviewFile=null,imagePreviewUrl='';
 const workspaceUI=window.ProsperoWorkspace;
-let workspaceModeName=new URLSearchParams(location.search).get('mode')==='audio'?'audio':'text';
+let workspaceModeName=location.pathname === '/audio' ? 'audio' : 'text';
+let audioSectionName='music';
+let imageSectionName='text-to-image';
 let stagedWorkspaceModel='',workspaceChatOpen=false,preparedModel='',preparation=null,submitting=false,finalWorkspaceOptions={};
 const workspaceMode=workspaceUI.createWorkspaceMode({models,selectModel:selectWorkspaceModel,prepareModel:prepareWorkspaceModel});
 workspaceMode.setMode(workspaceModeName);
+workspaceMode.setAudioSection(audioSectionName);
 const modelMemoryEstimate=document.createElement('p');modelMemoryEstimate.id='model-memory-estimate';modelMemoryEstimate.className='muted';modelMemoryEstimate.setAttribute('role','status');modelMemoryEstimate.textContent='Checking past memory measurements…';$('model-description').after(modelMemoryEstimate);
-function workspaceModelValue(){return [current?.model,stagedWorkspaceModel,selectedModel].find(id=>workspaceUI.filterModels(models,workspaceModeName).some(model=>model.id===id))||'';}
+function workspaceSection(){return workspaceModeName==='image'?imageSectionName:audioSectionName;}
+function workspaceModelValue(){return [current?.model,stagedWorkspaceModel,selectedModel].find(id=>workspaceUI.filterModels(models,workspaceModeName,workspaceSection()).some(model=>model.id===id))||'';}
+function clearQwenImageAttachment(){imageAttachment.clear();if(imagePreviewUrl)URL.revokeObjectURL(imagePreviewUrl);imagePreviewFile=null;imagePreviewUrl='';$('qwen-image-file').value='';$('qwen-image-preview-image').removeAttribute('src');$('qwen-image-preview').hidden=true;$('qwen-image-attach').hidden=false;$('qwen-image-filename').textContent='';}
+function renderQwenImageAttachment(){const modelId=current?.model||modelChooser.value||stagedWorkspaceModel||selectedModel;const qwenSelected=models.some(model=>model.id===modelId)&&modelId==='qwen-image-2.1';const enabled=qwenSelected&&workspaceUI.imageReferenceRequired(workspaceModeName,imageSectionName);$('qwen-image-attachment').hidden=!enabled;if(!qwenSelected){if(imageAttachment.file)clearQwenImageAttachment();return;}const file=imageAttachment.file;$('qwen-image-attach').hidden=Boolean(file);$('qwen-image-preview').hidden=!file;if(!file)return;if(imagePreviewFile!==file){if(imagePreviewUrl)URL.revokeObjectURL(imagePreviewUrl);imagePreviewFile=file;imagePreviewUrl=URL.createObjectURL(file);}$('qwen-image-preview-image').src=imagePreviewUrl;$('qwen-image-filename').textContent=file.name||'Reference image';}
+function chooseQwenImageFile(){ $('qwen-image-file').click(); }
+$('qwen-image-attach').onclick=chooseQwenImageFile;$('qwen-image-replace').onclick=chooseQwenImageFile;
+$('qwen-image-remove').onclick=()=>{clearQwenImageAttachment();renderQwenImageAttachment();};
+$('qwen-image-file').onchange=event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;const error=window.ProsperoQwenImageAttachment.validateFile(file);if(error){$('feedback').textContent=error;return;}imageAttachment.select(file);$('feedback').textContent='';renderQwenImageAttachment();};
 let sessionToken = ''; try { sessionToken = sessionStorage.getItem('prospero-session') || ''; sessionStorage.removeItem('prospero-key'); } catch {}
 function page(name) { for (const p of ['workspace','media','models','settings']) $(p).hidden = p !== name; document.querySelectorAll('[data-page]').forEach(b => { b.classList.toggle('selected', b.dataset.page === name); b.setAttribute('aria-current', b.dataset.page === name ? 'page' : 'false'); }); }
 document.querySelectorAll('[data-page]').forEach(b => b.onclick = () => page(b.dataset.page));
 function renderWorkspaceModels(){
-    const selected=workspaceModelValue(),available=workspaceUI.filterModels(models,workspaceModeName);
+    const selected=workspaceModelValue(),available=workspaceUI.filterModels(models,workspaceModeName,workspaceSection());
+    if(currentModelChosen&&current?.model&&!available.some(model=>model.id===current.model))currentModelChosen=false;
     modelChooser.replaceChildren();
     const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose a model…';modelChooser.append(placeholder);
     for(const model of available){const option=document.createElement('option');option.value=model.id;option.textContent=model.name||model.id;modelChooser.append(option);}
     modelChooser.value=selected;
-    $('audio-empty-models').hidden=!modelsLoaded||workspaceUI.filterModels(models,'audio').length>0;
+    const ttsState=workspaceUI.ttsAvailability(models,modelsStatus);
+    $('workspace-tts-loading').hidden=ttsState!=='loading';
+    $('workspace-tts-empty').hidden=ttsState!=='empty';
+    $('workspace-tts-unavailable').hidden=ttsState!=='unavailable';
+    $('workspace-tts-ready').hidden=ttsState!=='available';
+    $('workspace-tts-install').hidden=ttsState!=='empty';
+    $('workspace-tts-start').hidden=ttsState!=='available'||workspaceChatOpen;
+    renderWorkspaceImage();
 }
 function setWorkspaceMode(mode){
     workspaceModeName=mode;workspaceMode.setMode(mode);
     for(const button of document.querySelectorAll('[data-mode]')){const active=button.dataset.mode===mode;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
     renderWorkspaceModels();
-    const audio=mode==='audio';$('workspace-audio').hidden=!audio;
-    if(audio){$('welcome').hidden=true;$('chat').hidden=true;}
-    else{$('chat').hidden=!workspaceChatOpen;$('welcome').hidden=workspaceChatOpen;}
+    renderWorkspaceAudio();
+    renderQwenImageAttachment();
+    $('welcome').hidden=workspaceChatOpen||mode==='audio';
+    $('chat').hidden=!workspaceChatOpen||(mode==='audio'&&audioSectionName!=='tts');
 }
-document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>setWorkspaceMode(button.dataset.mode));
+function setAudioSection(section,recordHistory=true){
+    const changed=audioSectionName!==section;
+    workspaceMode.setAudioSection(section);audioSectionName=section;
+    for(const button of document.querySelectorAll('[data-audio-section]')){const active=button.dataset.audioSection===section;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
+    renderWorkspaceModels();renderWorkspaceAudio();
+    if(recordHistory&&changed&&workspaceModeName==='audio')history.pushState({workspaceMode:workspaceModeName,audioSection:section},'',location.pathname);
+}
+function setImageSection(section,recordHistory=true){
+    if(section!=='text-to-image'&&section!=='image-to-image')throw new Error('Unknown Image section.');
+    const changed=imageSectionName!==section;imageSectionName=section;
+    for(const button of document.querySelectorAll('[data-image-section]')){const active=button.dataset.imageSection===section;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
+    renderWorkspaceModels();renderQwenImageAttachment();
+    if(recordHistory&&changed&&workspaceModeName==='image')history.pushState({workspaceMode:workspaceModeName,imageSection:section},'',location.pathname);
+}
+function renderWorkspaceImage(){
+    const imageMode=workspaceModeName==='image',editing=imageSectionName==='image-to-image';
+    $('workspace-image').hidden=!imageMode;
+    $('workspace-image-text').hidden=!imageMode||editing;
+    $('workspace-image-edit').hidden=!imageMode||!editing;
+    const state=workspaceUI.imageToImageAvailability(models,modelsStatus);
+    $('workspace-image-i2i-ready').hidden=state!=='available';
+    $('workspace-image-i2i-loading').hidden=state!=='loading';
+    $('workspace-image-i2i-empty').hidden=state!=='empty';
+    $('workspace-image-i2i-install').hidden=state!=='empty';
+    $('workspace-image-i2i-unavailable').hidden=state!=='unavailable';
+}
+function renderWorkspaceAudio(){
+    const audioMode=workspaceModeName==='audio';
+    $('workspace-audio').hidden=!audioMode;
+    $('workspace-audio-music').hidden=!audioMode||audioSectionName!=='music';
+    $('workspace-audio-tts').hidden=!audioMode||audioSectionName!=='tts'||workspaceChatOpen;
+    $('workspace-model-controls').hidden=!workspaceUI.workspaceModelControlsVisible(workspaceModeName,audioSectionName);
+    $('chat').hidden=!workspaceChatOpen||(audioMode&&audioSectionName!=='tts');
+}
+function navigateWorkspaceMode(mode){
+    setWorkspaceMode(mode);syncWorkspaceGenerationSettings();
+    const path=mode==='audio'?'/audio':'/';
+    if(location.pathname!==path||history.state?.workspaceMode!==mode)history.pushState({workspaceMode:mode,audioSection:audioSectionName,imageSection:imageSectionName},'',path);
+}
+document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>navigateWorkspaceMode(button.dataset.mode));
+document.querySelectorAll('[data-audio-section]').forEach(button=>button.onclick=()=>{setAudioSection(button.dataset.audioSection);syncWorkspaceGenerationSettings();});
+document.querySelectorAll('[data-image-section]').forEach(button=>button.onclick=()=>setImageSection(button.dataset.imageSection));
+window.addEventListener('popstate',event=>{
+    const mode=event.state?.workspaceMode||(location.pathname==='/audio'?'audio':'text');
+    const audioSection=event.state?.audioSection==='tts'?'tts':'music';
+    const imageSection=event.state?.imageSection==='image-to-image'?'image-to-image':'text-to-image';
+    setWorkspaceMode(['text','image','audio'].includes(mode)?mode:'text');setAudioSection(audioSection,false);setImageSection(imageSection,false);syncWorkspaceGenerationSettings();
+});
 async function renderMediaLibrary(){const root=$('media-library');root.replaceChildren();const loading=document.createElement('p');loading.className='muted';loading.textContent='Loading media…';root.append(loading);try{const payload=await api('/api/media');const files=payload.data||[];root.replaceChildren();if(!files.length){const note=document.createElement('p');note.className='muted';note.textContent='Generated images and audio linked to saved conversations will appear here.';root.append(note);return;}for(const file of files){const card=document.createElement('article');card.className='glass model-card';const heading=document.createElement('strong');heading.textContent=file.path.split('/').at(-1)||'Generated media';const source=document.createElement('button');source.className='secondary';source.type='button';source.textContent=`From: ${file.title||'Conversation'}`;source.onclick=async()=>{try{let conversation=conversations.find(item=>item.id===file.conversation_id);if(!conversation)conversation=await api(`/api/conversations/${encodeURIComponent(file.conversation_id)}`).then(r=>r.json());if(!conversations.some(item=>item.id===conversation.id)){conversations.unshift(conversation);save('prospero-conversations',conversations.slice(0,50));}current=conversation;currentModelChosen=false;openChat();renderMessages();renderHistory();}catch(error){$('feedback').textContent=error.message;}};const model=document.createElement('small');model.className='muted';model.textContent=`Model: ${file.modelName||file.model||'Unknown'}`;const preview=document.createElement('div');preview.className='media-library-preview';const remove=document.createElement('button');remove.className='secondary';remove.type='button';remove.textContent='Delete archived copy';remove.title='Deletes only the archived copy stored with this conversation';remove.onclick=async()=>{if(!confirm(`Delete archived media “${heading.textContent}”? The generated source file is kept.`))return;remove.disabled=true;try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});card.remove();if(!root.children.length){const note=document.createElement('p');note.className='muted';note.textContent='Generated images and audio linked to saved conversations will appear here.';root.append(note);}}catch(error){$('feedback').textContent=error.message;remove.disabled=false;}};card.append(heading,source,model,preview,remove);appendMedia(preview,{path:file.path,kind:file.kind});root.append(card);}}catch(error){root.replaceChildren();const note=document.createElement('p');note.className='muted';note.textContent=`Could not load media: ${error.message}`;root.append(note);}}
 document.querySelector('[data-page="media"]').addEventListener('click',renderMediaLibrary);
 document.querySelector('.brand').onclick = e => { e.preventDefault(); showWelcome(); };
@@ -90,20 +158,21 @@ function drawMark() { const svg = document.querySelector('.mark'); for (let i=0;
 function drawSculpture(time) { const ctx=$('sculpture').getContext('2d'), size=300,cx=360,cy=360,turn=0.46+0.025*Math.sin(time*0.35);ctx.clearRect(0,0,720,720);ctx.lineWidth=1.25;const color=getComputedStyle(document.body).getPropertyValue('--accent').trim(); for(let band=0;band<40;band++){const v=band*2*Math.PI/40;let lx,ly;for(let step=0;step<=72;step++){const u=step*2*Math.PI/72,r=size*(0.70+0.24*Math.cos(v)),x=r*Math.cos(u),y=r*Math.sin(u),z=size*0.24*Math.sin(v),ty=y*0.62-z*0.78,depth=y*0.78+z*0.62,px=cx+x*Math.cos(turn)-ty*Math.sin(turn),py=cy+x*Math.sin(turn)+ty*Math.cos(turn);if(step){ctx.globalAlpha=0.22+0.70*(depth/size+1)*0.5;ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(px,py);ctx.stroke();}lx=px;ly=py;}}ctx.globalAlpha=1; }
 let lastArt=0;function animate(t){if(t-lastArt>66&&!$('welcome').hidden&&!$('workspace').hidden&&!preferences.motion&&!matchMedia('(prefers-reduced-motion:reduce)').matches){drawSculpture(t/1000);lastArt=t;}requestAnimationFrame(animate);}drawMark();applyPreferences();requestAnimationFrame(animate);
 async function api(path, options={}) { if(path==='/v1/chat/completions'&&options.body&&current){try{const request=JSON.parse(options.body),model=models.find(item=>item.id===request.model);request.options={...(request.options||{}),...finalWorkspaceOptions,num_predict:Number(finalWorkspaceOptions.output_limit)||0,num_ctx:(Number.parseInt(finalWorkspaceOptions.context,10)||0)*1024};if(model&&modelKind(model)===0){request.output_session_id=current.id;request.output_message_index=current.messages.length;}options={...options,body:JSON.stringify(request)};}catch{}}const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{}),...(sessionToken?{Authorization:`Bearer ${sessionToken}`}:{})}});if(response.status===401){sessionToken='';try{sessionStorage.removeItem('prospero-session');}catch{}if(!$('key-dialog').open)$('key-dialog').showModal();throw Error('A connection key is required, or the browser session has expired.');}if(!response.ok){let message=`Connection failed (${response.status}).`;try{const body=await response.json();message=body.error?.message||body.error||message;}catch{}throw Error(message);}return response; }
+window.ProsperoWorkspaceApi = api;
 async function refreshModels(){
     try {
         const response=await api('/v1/models');
         const data=await response.json();
         models=(data.data||[]).filter(m=>typeof m.id==='string');
+        modelsStatus='ready';
         const presets=await api('/api/models/presets');
         presetCatalog=(await presets.json()).data||[];
         const selection=await api('/api/models/selection');
         const selectionData=await selection.json();
         selectedModel=models.some(m=>m.id===selectionData.id)?selectionData.id:'';selectedModelState=selectionData.state||'unknown';
-        modelsLoaded=true;
         if(selectedModelState==='ready')preparedModel=selectedModel;
         workspaceMode.setModels(models);
-        if(!stagedWorkspaceModel&&workspaceUI.filterModels(models,workspaceModeName).some(model=>model.id===selectedModel))stagedWorkspaceModel=selectedModel;
+        if(!stagedWorkspaceModel&&workspaceUI.filterModels(models,workspaceModeName,workspaceSection()).some(model=>model.id===selectedModel))stagedWorkspaceModel=selectedModel;
         renderWorkspaceModels();
         $('status').textContent=models.length?'PS5 · Connected':'No models installed';
         for(const [kind,id] of ['text-count','image-count','audio-count','voice-count'].entries()){
@@ -113,7 +182,8 @@ async function refreshModels(){
         renderModels();
         renderHistory();
         updateModelChip();
-    }catch(error){$('status').textContent='PS5 · Disconnected';$('feedback').textContent=error.message;}
+        renderQwenImageAttachment();
+    }catch(error){if(modelsStatus==='loading')modelsStatus='unavailable';renderWorkspaceModels();$('status').textContent='PS5 · Disconnected';$('feedback').textContent=error.message;}
 }
 const refreshInstalled = document.createElement('button');
 refreshInstalled.id='refresh-models';refreshInstalled.type='button';refreshInstalled.className='secondary';refreshInstalled.textContent='Refresh installed models';
@@ -131,7 +201,7 @@ async function refreshMemoryModel(){
  catch{$('memory-model').textContent='Memory: unavailable';}
  finally{memoryRefreshBusy=false;}
 }
-async function refreshSelectedModel(){try{const response=await api('/api/models/selection');const selection=await response.json();selectedModel=models.some(model=>model.id===selection.id)?selection.id:'';selectedModelState=selection.state||'unknown';modelChooser.value=workspaceModelValue();if(selectedModel===current?.model||!currentModelChosen){if(selectedModelState==='preparing')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is loading…`;else if(selectedModelState==='ready')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is ready.`;else if(selectedModelState==='failed')$('model-load-status').textContent=selection.error||'Model preparation failed. Retry from Models.';}renderModels();}catch{}}
+async function refreshSelectedModel(){try{const response=await api('/api/models/selection');const selection=await response.json();selectedModel=models.some(model=>model.id===selection.id)?selection.id:'';selectedModelState=selection.state||'unknown';modelChooser.value=workspaceModelValue();if(selectedModel===current?.model||!currentModelChosen){if(selectedModelState==='preparing')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is loading…`;else if(selectedModelState==='ready')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is ready.`;else if(selectedModelState==='failed')$('model-load-status').textContent=selection.error||'Model preparation failed. Retry from Models.';}renderModels();renderQwenImageAttachment();}catch{}}
 function renderModels(){
     const list=$('model-list');list.replaceChildren();
     const term=$('search').value.toLowerCase();
@@ -236,13 +306,14 @@ async function prepareConversationModel(){
 function chooseInstalledModel(id,beginConversation=false){
     if(controller){modelChooser.value=current?.model||'';return;}
     const chosen=models.find(model=>model.id===id);
-    if(!chosen||!workspaceUI.filterModels(models,workspaceModeName).some(model=>model.id===id))return;
+    if(!chosen||!workspaceUI.filterModels(models,workspaceModeName,workspaceSection()).some(model=>model.id===id))return;
     if(beginConversation||!current||(current.model&&current.model!==id))newConversation();
     workspaceMode.stageModel(id);stagedWorkspaceModel=id;currentModelChosen=true;
     if(current){current.model=id;current.modelName=chosen.name||id;current.purpose=chosen.purpose||'text-to-text';current.updatedAt=Date.now();}
     modelChooser.value=id;$('model-load-status').textContent=`${chosen.name||id} staged. It loads when you submit.`;
     updateModelChip();renderModels();renderHistory();
-    if(current)openChat();else syncAudioDurationVisibility();
+    if(current)openChat();else syncWorkspaceGenerationSettings();
+    closeHistory();
 }
 $('search').oninput=renderModels;$('model-dialog').addEventListener('close',()=>{if($('model-dialog').returnValue==='use')chooseInstalledModel(pendingModel,true);});
 modelChooser.onchange=()=>{if(modelChooser.value)chooseInstalledModel(modelChooser.value);};
@@ -283,6 +354,11 @@ async function persistConversation(conversation){
         conversation.updatedAt=conversation._serverUpdatedUs/1000;
         save('prospero-conversations',conversations.slice(0,50));
     }catch(error){$('feedback').textContent=`Saved in this browser; console sync failed: ${error.message}`;}
+}
+function shouldPersistConversation(conversation,imageResponseUncertain){
+    if(!imageResponseUncertain)return true;
+    conversation.updatedAt=Number(conversation._serverUpdatedUs||0)/1000;
+    return false;
 }
 async function syncConversations(){
     if(conversationSyncBusy||controller||document.visibilityState==='hidden')return;
@@ -330,41 +406,131 @@ $('delete-dialog').addEventListener('close',async()=>{
     if(current?.id===pendingDelete)newConversation();
     renderHistory();
 });
-function updateModelChip(){const chip=$('model-chip'),model=models.find(item=>item.id===current?.model),name=current?.modelName||model?.name||current?.model||'';chip.textContent=name?`Model: ${name}`:'Choose a model';chip.title=name?`This conversation uses ${name}`:'Choose a model for this conversation';chip.hidden=false;}
-function openChat(){workspaceChatOpen=true;page('workspace');setWorkspaceMode(workspaceModeName);$('chat-title').textContent=current?.title||'A little room for big ideas.';updateModelChip();modelChooser.value=workspaceModelValue();$('model-load-status').textContent=currentModelChosen?`${current.modelName||current.model} is staged. It loads when you submit.`:current?.model?'Choose this conversation’s model before submitting.':'Choose a model. It loads when you submit.';const model=models.find(item=>item.id===(current?.model||stagedWorkspaceModel)),tts=currentModelChosen&&(current?.purpose==='text-to-speech'||model?.purpose==='text-to-speech');$('workspace-voice-group').hidden=!tts;syncAudioDurationVisibility();if(tts){populateWorkspaceVoicePicker(model?.id||current?.model||stagedWorkspaceModel);const chatterbox=String(model?.id||current?.model||stagedWorkspaceModel).includes('chatterbox');if($('chatterbox-upload-label'))$('chatterbox-upload-label').hidden=!chatterbox;if(chatterbox)void refreshCustomChatterboxVoice();}}
+function updateModelChip(){const chip=$('model-chip'),model=models.find(item=>item.id===current?.model),name=current?.modelName||model?.name||current?.model||'';chip.textContent=name?`Model: ${name}`:'Model not selected';chip.title=name?`This conversation uses ${name}`:'Choose a model in Generation settings';chip.hidden=!name;}
+function openChat(){workspaceChatOpen=true;page('workspace');setWorkspaceMode(workspaceModeName);$('chat-title').textContent=current?.title||'A little room for big ideas.';updateModelChip();modelChooser.value=workspaceModelValue();renderQwenImageAttachment();$('model-load-status').textContent=currentModelChosen?`${current.modelName||current.model} is staged. It loads when you submit.`:current?.model?'Choose this conversation’s model before submitting.':'Choose a model. It loads when you submit.';const model=models.find(item=>item.id===(current?.model||stagedWorkspaceModel)),tts=current?.purpose==='text-to-speech'||model?.purpose==='text-to-speech';syncWorkspaceGenerationSettings();if(tts){populateWorkspaceVoicePicker(model?.id||current?.model||stagedWorkspaceModel);const chatterbox=String(model?.id||current?.model||stagedWorkspaceModel).includes('chatterbox');if($('chatterbox-upload-label'))$('chatterbox-upload-label').hidden=!chatterbox;if(chatterbox)void refreshCustomChatterboxVoice();}}
 $('history-kind').onchange=renderHistory;$('history-archive-mode').onchange=renderHistory;
 $('history-search').oninput=renderHistory;
 function newConversation(){
     if(controller){$('feedback').textContent='Stop the current response before starting a new conversation.';return;}
     currentModelChosen=false;current={id:globalThis.crypto?.randomUUID?.()||String(Date.now()),title:'New conversation',model:'',modelName:'',purpose:'other',messages:[],updatedAt:Date.now()};
+    $('workspace-generation').open=true;
+    if(matchMedia('(max-width:700px)').matches)$('chat').classList.add('show-history');
     openChat();renderMessages();renderHistory();$('prompt').focus();
 }
-function startKind(kind){if(controller){$('feedback').textContent='Stop the current response before starting a new conversation.';return;}const mode=['text','sd','audio','tts'][kind]||'text';setWorkspaceMode(mode);syncAudioDurationVisibility();if(mode==='audio')return;newConversation();modelChooser.focus();$('model-load-status').textContent=`Choose a ${kindNames[kind].toLowerCase()} model; it loads when you submit.`;}
+function startKind(mode){if(controller){$('feedback').textContent='Stop the current response before starting a new conversation.';return;}if(mode==='tts'){navigateWorkspaceMode('audio');setAudioSection('tts');}else navigateWorkspaceMode(mode);if(mode==='audio')return;newConversation();modelChooser.focus();const kind={text:0,image:1,tts:3}[mode]??0;$('model-load-status').textContent=`Choose a ${kindNames[kind].toLowerCase()} model; it loads when you submit.`;}
 function closeHistory(){$('chat').classList.remove('show-history');$('history-toggle').setAttribute('aria-expanded','false');}
-$('start').onclick=()=>startKind(0);for(const [kind,id] of ['converse','imagine','compose','speak'].entries())$(id).onclick=()=>startKind(kind);$('new').onclick=()=>{newConversation();closeHistory();};$('history-close').onclick=closeHistory;$('history-toggle').onclick=()=>{$('chat').classList.toggle('show-history');$('history-toggle').setAttribute('aria-expanded',String($('chat').classList.contains('show-history')));};
+$('start').onclick=()=>startKind('text');$('converse').onclick=()=>startKind('text');$('imagine').onclick=()=>startKind('image');$('compose').onclick=()=>startKind('audio');$('workspace-tts-start').onclick=()=>startKind('tts');$('new').onclick=newConversation;$('history-close').onclick=closeHistory;$('history-toggle').onclick=()=>{$('chat').classList.toggle('show-history');$('history-toggle').setAttribute('aria-expanded',String($('chat').classList.contains('show-history')));};
 function extractMedia(text){const paths=[...text.matchAll(/\/download0\/[^\s]+\.(?:png|tga|wav)/g)];if(!paths.length)return null;const match=paths.find(item=>item[0].startsWith('/download0/ProsperoAI/sessions/')||item[0].startsWith('/download0/ProsperoAI/work/image/'))||paths[0],path=match[0],kind=path.endsWith('.wav')?'audio':'image';return{path,kind,before:text.slice(0,match.index)};}
 function decodeTGA(buffer){const d=new DataView(buffer);if(d.getUint8(2)!==2||d.getUint8(16)!==32)return null;const idLength=d.getUint8(0),colorMapType=d.getUint8(1),colorMapLength=d.getUint16(5,true),colorMapDepth=d.getUint8(7),width=d.getUint16(12,true),height=d.getUint16(14,true),topToBottom=(d.getUint8(17)&0x20)!==0;const colorMapBytes=colorMapType?Math.ceil(colorMapDepth/8)*colorMapLength:0,offset=18+idLength+colorMapBytes;if(width<=0||height<=0||offset+width*height*4>buffer.byteLength)return null;const out=new Uint8ClampedArray(width*height*4);for(let y=0;y<height;y++){const row=topToBottom?y:height-1-y;for(let x=0;x<width;x++){const si=offset+(y*width+x)*4,di=(row*width+x)*4;out[di]=d.getUint8(si+2);out[di+1]=d.getUint8(si+1);out[di+2]=d.getUint8(si);out[di+3]=d.getUint8(si+3);}}return{width,height,data:out};}
-function renderImageMedia(el,blob,path){const url=URL.createObjectURL(blob),filename=path.split('/').at(-1)||'prosperoai-image.png';if(path.endsWith('.png')){const image=new Image();image.src=url;image.alt='Generated image';image.className='message-media';el.append(image);const link=document.createElement('a');link.href=url;link.download=filename;link.className='message-media-link';link.textContent='Download image';el.append(link);return;}blob.arrayBuffer().then(buf=>{const decoded=decodeTGA(buf);if(!decoded)return;const canvas=document.createElement('canvas');canvas.width=decoded.width;canvas.height=decoded.height;canvas.className='message-media';canvas.getContext('2d').putImageData(new ImageData(decoded.data,decoded.width,decoded.height),0,0);el.append(canvas);canvas.toBlob(png=>{if(!png)return;const link=document.createElement('a');link.href=URL.createObjectURL(png);link.download=filename.replace(/\.tga$/i,'.png');link.className='message-media-link';link.textContent='Download image';el.append(link);});}).catch(()=>{});}
+function renderImageMedia(el,blob,path,alt='Generated image'){const url=URL.createObjectURL(blob),filename=path.split('/').at(-1)||'prosperoai-image.png';if(path.endsWith('.png')){const image=new Image();image.src=url;image.alt=alt;image.className='message-media';el.append(image);const link=document.createElement('a');link.href=url;link.download=filename;link.className='message-media-link';link.textContent='Download image';el.append(link);return;}blob.arrayBuffer().then(buf=>{const decoded=decodeTGA(buf);if(!decoded)return;const canvas=document.createElement('canvas');canvas.width=decoded.width;canvas.height=decoded.height;canvas.className='message-media';canvas.getContext('2d').putImageData(new ImageData(decoded.data,decoded.width,decoded.height),0,0);el.append(canvas);canvas.toBlob(png=>{if(!png)return;const link=document.createElement('a');link.href=URL.createObjectURL(png);link.download=filename.replace(/\.tga$/i,'.png');link.className='message-media-link';link.textContent='Download image';el.append(link);});}).catch(()=>{});}
 function renderAudioMedia(el,blob,path){const url=URL.createObjectURL(blob);const audio=document.createElement('audio');audio.controls=true;audio.src=url;audio.className='message-media';el.append(audio);const link=document.createElement('a');link.href=url;link.download=path.split('/').at(-1)||'prosperoai-audio.wav';link.className='message-media-link';link.textContent='Download audio';el.append(link);}
-function appendMedia(el,media,text){api(media.path).then(r=>r.blob()).then(blob=>{if(media.kind==='image')renderImageMedia(el,blob,media.path);else renderAudioMedia(el,blob,media.path);}).catch(()=>{});if(text)appendArtifacts(el,text,media.path);}
+function appendMedia(el,media,text,alt){api(media.path).then(r=>r.blob()).then(blob=>{if(media.kind==='image')renderImageMedia(el,blob,media.path,alt);else renderAudioMedia(el,blob,media.path);}).catch(()=>{});if(text)appendArtifacts(el,text,media.path);}
 // Runs can attach extra files next to the main media (YuE2 score.abc, semantic.json).
 // They are listed in the response text; render a plain download link for each.
 function extractArtifacts(text,primary){return [...new Set([...text.matchAll(/\/download0\/[^\s,]+\.(?:abc|json|mid)/g)].map(m=>m[0]))].filter(p=>p!==primary);}
 function appendArtifacts(el,text,primary){for(const path of extractArtifacts(text,primary))api(path).then(r=>r.ok?r.blob():Promise.reject()).then(blob=>{const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=path.split('/').at(-1)||'artifact';link.className='message-media-link';link.textContent='Download '+(path.split('/').at(-1));el.append(link);}).catch(()=>{});}
-function addMessage(message){const el=document.createElement('div');el.className=`message ${message.role==='user'?'user':'assistant'}`;const media=message.role!=='user'&&extractMedia(message.content||'');if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,message.content||'');}else el.textContent=message.content||'';$('messages').append(el);return el;}
+function addMessage(message){const el=document.createElement('div');el.className=`message ${message.role==='user'?'user':'assistant'}`;const media=message.role!=='user'&&extractMedia(message.content||'');if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,message.content||'');}else{el.textContent=message.content||'';if(message.role==='user'&&message.image)appendMedia(el,{path:message.image,kind:'image'},'','Reference image');}$('messages').append(el);return el;}
 function showGenerationStats(el,usage,isText,fallbackSeconds){const rate=Number(usage?.tokens_per_second),seconds=Number(usage?.generation_time_ms)/1000||fallbackSeconds;if(isText&&Number.isFinite(rate)&&rate>0){const meta=document.createElement('div');meta.className='message-metrics';meta.textContent=`${rate.toFixed(1)} tok/s · ${seconds.toFixed(1)} s`;el.append(meta);}else if(!isText&&Number.isFinite(seconds)&&seconds>0){const meta=document.createElement('div');meta.className='message-metrics';meta.textContent=`Generated in ${seconds.toFixed(1)} s`;el.append(meta);}}
 function renderMessages(){$('messages').replaceChildren();for(const message of current?.messages||[])addMessage(message);$('messages').scrollTop=$('messages').scrollHeight;}
 $('prompt').oninput=()=>{$('prompt').style.height='auto';$('prompt').style.height=Math.min(180,$('prompt').scrollHeight)+'px';};$('prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&matchMedia('(min-width:701px)').matches){e.preventDefault();$('composer').requestSubmit();}};
-$('composer').onsubmit=async e=>{e.preventDefault();if(controller){controller.abort();return;}const text=$('prompt').value.trim();if(!text)return;if(!current)newConversation();if(!currentModelChosen){if(!modelChooser.value){$('feedback').textContent='Choose a model for this conversation before sending.';modelChooser.focus();return;}await chooseInstalledModel(modelChooser.value);if(!currentModelChosen)return;}if(submitting)return;submitting=true;const conversation=current;try{await prepareConversationModel();}catch(error){$('feedback').textContent=error.message;return;}finally{submitting=false;}if(current!==conversation)return;if(!conversations.includes(conversation))conversations.unshift(conversation);conversation.messages.push({role:'user',content:text});if(conversation.messages.length===1)conversation.title=text.slice(0,70);conversation.updatedAt=Date.now();$('prompt').value='';$('prompt').style.height='auto';openChat();renderHistory();addMessage(conversation.messages.at(-1));const answer={role:'assistant',content:''};const el=addMessage(answer);controller=new AbortController();$('send').textContent='■';$('send').setAttribute('aria-label','Stop response');$('prompt').disabled=true;$('feedback').textContent='Thinking…';const start=performance.now();const selectedModel=models.find(model=>model.id===conversation.model);const isTextModel=!selectedModel?.purpose||modelKind(selectedModel)===0;let usage=null,received=false,requestMessages=conversation.messages;try{await persistConversation(conversation);requestMessages=await prosperoPrepareSearch(text,requestMessages,isTextModel);const response=await api('/v1/chat/completions',{method:'POST',signal:controller.signal,body:JSON.stringify({model:conversation.model,messages:requestMessages,stream:isTextModel,stream_options:isTextModel?{include_usage:true}:undefined,temperature:preferences.temperature})});if(!response.headers.get('Content-Type')?.includes('text/event-stream')){
-    const result=await response.json();usage=result.usage||null;answer.content=result.choices?.[0]?.message?.content||'';received=Boolean(answer.content);const media=extractMedia(answer.content);if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,answer.content);}else el.textContent=answer.content;
-}else{
-const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';const event=block=>{const data=block.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');if(!data||data==='[DONE]')return;const part=JSON.parse(data);if(part.error)throw Error(part.error.message||'The response could not be completed.');if(part.usage)usage=part.usage;const token=part.choices?.[0]?.delta?.content;if(typeof token==='string'){received=true;answer.content+=token;el.textContent=answer.content;const log=$('messages');if(log.scrollHeight-log.scrollTop-log.clientHeight<180)log.scrollTop=log.scrollHeight;}};while(true){const {value,done}=await reader.read();pending+=decoder.decode(value||new Uint8Array(),{stream:!done}).replace(/\r\n/g,'\n');let split;while((split=pending.indexOf('\n\n'))>=0){event(pending.slice(0,split));pending=pending.slice(split+2);}if(done){if(pending.trim())event(pending);break;}}}
-if(!received)throw Error('The model returned an empty response.');showGenerationStats(el,usage,isTextModel,(performance.now()-start)/1000);$('feedback').textContent=`Completed · ${((performance.now()-start)/1000).toFixed(1)}s`;}catch(error){$('feedback').textContent=error.name==='AbortError'?'Response stopped.':error.message;if(!received)el.remove();}finally{if(answer.content)conversation.messages.push(answer);conversation.updatedAt=Date.now();save('prospero-conversations',conversations.slice(0,50));controller=null;$('send').textContent='↑';$('send').setAttribute('aria-label','Send message');$('prompt').disabled=false;renderHistory();void persistConversation(conversation);}};
+$('composer').onsubmit=async event=>{
+    event.preventDefault();
+    if(controller){controller.abort();return;}
+    const text=$('prompt').value.trim();
+    if(!text)return;
+    if(!current)newConversation();
+    if(!currentModelChosen){
+        if(!modelChooser.value){$('feedback').textContent='Choose a model for this conversation before sending.';modelChooser.focus();return;}
+        await chooseInstalledModel(modelChooser.value);
+        if(!currentModelChosen)return;
+    }
+    if(workspaceUI.imageReferenceMissing(workspaceModeName,imageSectionName,imageAttachment.file)){
+        $('feedback').textContent='Attach a PNG or JPEG reference image before editing.';
+        $('qwen-image-attach').focus();
+        return;
+    }
+    if(submitting)return;
+    submitting=true;
+    const conversation=current;
+    try{await prepareConversationModel();}
+    catch(error){$('feedback').textContent=error.message;return;}
+    finally{submitting=false;}
+    if(current!==conversation)return;
+    if(!conversations.includes(conversation))conversations.unshift(conversation);
+    const userMessage={role:'user',content:text};
+    conversation.messages.push(userMessage);
+    if(conversation.messages.length===1)conversation.title=text.slice(0,70);
+    conversation.updatedAt=Date.now();
+    $('prompt').value='';$('prompt').style.height='auto';
+    openChat();renderHistory();
+    const userElement=addMessage(userMessage);
+    const answer={role:'assistant',content:''};
+    const el=addMessage(answer);
+    controller=new AbortController();
+    $('send').textContent='■';$('send').setAttribute('aria-label','Stop response');
+    $('prompt').disabled=true;$('feedback').textContent='Thinking…';
+    const start=performance.now();
+    const selectedModel=models.find(model=>model.id===conversation.model);
+    const isTextModel=!selectedModel?.purpose||modelKind(selectedModel)===0;
+    let usage=null,received=false,requestMessages=conversation.messages,imageId='',imageResponseUncertain=false;
+    try{
+        await persistConversation(conversation);
+        requestMessages=await prosperoPrepareSearch(text,requestMessages,isTextModel);
+        if(workspaceUI.imageReferenceRequired(workspaceModeName,imageSectionName))imageId=await window.ProsperoQwenImageAttachment.ensureUploadId(imageAttachment,api);
+        const requestBody={model:conversation.model,messages:requestMessages,stream:isTextModel,stream_options:isTextModel?{include_usage:true}:undefined,temperature:preferences.temperature};
+        if(imageId){requestBody.image_id=imageId;requestBody.conversation_id=conversation.id;}
+        const response=await api('/v1/chat/completions',{method:'POST',signal:controller.signal,body:JSON.stringify(requestBody)});
+        if(!response.headers.get('Content-Type')?.includes('text/event-stream')){
+            const result=await response.json(),responseMessage=result.choices?.[0]?.message;
+            usage=result.usage||null;answer.content=responseMessage?.content||'';received=Boolean(answer.content);
+            const media=extractMedia(answer.content);
+            if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,answer.content);}
+            else el.textContent=answer.content;
+            if(imageId&&typeof responseMessage?.image==='string'){
+                userMessage.image=responseMessage.image;
+                appendMedia(userElement,{path:userMessage.image,kind:'image'},'','Reference image');
+                clearQwenImageAttachment();renderQwenImageAttachment();
+            }
+        }else{
+            const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
+            const event=block=>{
+                const data=block.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trim()).join('\n');
+                if(!data||data==='[DONE]')return;
+                const part=JSON.parse(data);
+                if(part.error)throw Error(part.error.message||'The response could not be completed.');
+                if(part.usage)usage=part.usage;
+                const token=part.choices?.[0]?.delta?.content;
+                if(typeof token==='string'){received=true;answer.content+=token;el.textContent=answer.content;const log=$('messages');if(log.scrollHeight-log.scrollTop-log.clientHeight<180)log.scrollTop=log.scrollHeight;}
+            };
+            while(true){
+                const {value,done}=await reader.read();
+                pending+=decoder.decode(value||new Uint8Array(),{stream:!done}).replace(/\r\n/g,'\n');
+                let split;
+                while((split=pending.indexOf('\n\n'))>=0){event(pending.slice(0,split));pending=pending.slice(split+2);}
+                if(done){if(pending.trim())event(pending);break;}
+            }
+        }
+        if(!received)throw Error('The model returned an empty response.');
+        showGenerationStats(el,usage,isTextModel,(performance.now()-start)/1000);
+        $('feedback').textContent=`Completed · ${((performance.now()-start)/1000).toFixed(1)}s`;
+    }catch(error){
+        if(imageId&&(error.name==='AbortError'||error instanceof TypeError)){
+            imageAttachment.invalidateUploadId();
+            imageResponseUncertain=true;
+        }
+        $('feedback').textContent=error.name==='AbortError'?'Response stopped.':error.message;
+        if(!received)el.remove();
+    }finally{
+        if(answer.content)conversation.messages.push(answer);
+        conversation.updatedAt=Date.now();
+        const persistOnServer=shouldPersistConversation(conversation,imageResponseUncertain);
+        save('prospero-conversations',conversations.slice(0,50));
+        controller=null;$('send').textContent='↑';$('send').setAttribute('aria-label','Send message');$('prompt').disabled=false;
+        renderHistory();if(persistOnServer)void persistConversation(conversation);
+    }
+};
 $('access').onclick=()=>{$('key-error').textContent='';$('key-dialog').showModal();};$('key-dialog').addEventListener('close',async()=>{if($('key-dialog').returnValue==='connect'){const apiKey=$('key').value.trim();$('key').value='';try{const response=await fetch('/api/auth/session',{method:'POST',headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'}});if(!response.ok){let message='Could not create a browser session.';try{const body=await response.json();message=body.error?.message||body.error||message;}catch{}throw new Error(message);}const session=await response.json();sessionToken=session.token;try{sessionStorage.setItem('prospero-session',sessionToken);}catch{}$('key-error').textContent='';refreshModels();}catch(error){$('key-error').textContent=error.message;$('key-dialog').showModal();}}});
 $('export-diagnostics').onclick=async()=>{try{const response=await api('/api/diagnostics/events');const blob=new Blob([JSON.stringify(await response.json(),null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='prosperoai-diagnostics.json';link.click();URL.revokeObjectURL(url);}catch(error){$('feedback').textContent=error.message;}};
-workspaceUI.mount({api,getModel:()=>modelChooser.value,getModels:()=>models,
-    onSubmit:async(_model,body)=>api('/api/generate',{method:'POST',body:JSON.stringify(body)}).then(response=>response.json()),
-    onComplete:()=>{void refreshModels();void refreshMemoryModel();}});
 renderHistory();refreshModels();pollDownloads();
 void syncConversations();setInterval(syncConversations,4000);setInterval(refreshSelectedModel,4000);void refreshMemoryModel();setInterval(refreshMemoryModel,2000);
 
@@ -380,6 +546,7 @@ $('preview-send').onclick=()=>{newConversation();$('prompt').value='Tell me a st
 
 let savedKokoroVoice='af_heart',savedChatterboxVoice='cemo',savedChatterboxLanguage='en',customChatterboxVoiceAvailable=false,savedAudioDuration=0,savedAudioSeed=42,savedAudioOptions='',savedSdSeed=42,savedSdSize='0,0',savedSdUpscale=false;
 let savedWebSearch=false,savedWebSearchTimeout=15,savedSearchScopes=511;
+let savedKvCache='auto';
 // Scope bit order follows the search engine: web through image.
 const SEARCH_SCOPES=[['web','General web'],['code','Code hosting'],['video','Video'],['reference','Reference'],['qa','Question sites'],['package','Packages'],['paper','Papers'],['music','Music'],['image','Images']];
 function searchScopeMask(checked){let mask=0;SEARCH_SCOPES.forEach(([id],index)=>{if(checked[id])mask|=1<<index;});return mask;}
@@ -389,13 +556,15 @@ function currentSearchScopeMask(){const checked={};for(const [id] of SEARCH_SCOP
 let runtimeSettingsQueue=Promise.resolve();
 function runtimeSettings(change){const result=runtimeSettingsQueue.then(()=>applyRuntimeSettings(change));runtimeSettingsQueue=result.catch(()=>{});return result;}
 async function applyRuntimeSettings(change) {
-  const controls = ['runtime-context','length','runtime-thinking','runtime-idle-unload','runtime-audio-duration','runtime-audio-seed','audio-options','sd-seed','sd-size','sd-upscale','kokoro-voice','workspace-voice','web-search-enabled','web-search-timeout'].map($).filter(Boolean);
+  const controls = ['runtime-context','runtime-kv','length','runtime-thinking','runtime-idle-unload','runtime-audio-duration','runtime-audio-seed','audio-options','sd-seed','sd-size','sd-upscale','workspace-voice','web-search-enabled','web-search-timeout'].map($).filter(Boolean);
   controls.forEach(el => el.disabled = true);
   try {
     const response = await api('/api/settings/runtime', change ? {method:'POST',body:JSON.stringify(change)} : {});
     if (!response.ok) throw new Error('Could not save or load runtime settings.');
     const settings = await response.json();
     $('runtime-context').value = settings.context;
+    if($('runtime-kv'))$('runtime-kv').value=settings.kv||'auto';
+    savedKvCache=settings.kv||'auto';
     $('length').value = String(settings.output_limit ?? 0);
     $('runtime-thinking').checked = settings.thinking;
     $('runtime-idle-unload').value = String(settings.idle_unload_minutes);
@@ -419,13 +588,12 @@ async function applyRuntimeSettings(change) {
     savedChatterboxLanguage = settings.chatterbox_language || 'en';
     if(settings.chatterbox_languages)window.prosperoChatterboxLanguages=settings.chatterbox_languages;
     window.prosperoRuntimeVoiceCatalog={kokoro:settings.kokoro_voices||[],chatterbox:settings.chatterbox_voices||[]};
-    if($('kokoro-voice')){const select=$('kokoro-voice'),voices=window.prosperoRuntimeVoiceCatalog.kokoro;select.replaceChildren(...voices.map(voice=>{const option=document.createElement('option');option.value=voice.id;option.textContent=`${voice.name} · ${voice.locale}`;return option;}));}
-    if($('kokoro-voice'))$('kokoro-voice').value=savedKokoroVoice;
     populateWorkspaceVoicePicker(current?.model || selectedModel);
     $('runtime-feedback').textContent = '';
     if($('workspace-voice-feedback'))$('workspace-voice-feedback').textContent = '';
     stageWorkspaceSettings();
   } catch (error) {
+    if(change?.kv!==undefined&&$('runtime-kv'))$('runtime-kv').value=savedKvCache;
     if(change?.audio_duration_sec!==undefined&&$('runtime-audio-duration'))$('runtime-audio-duration').value=String(savedAudioDuration);
     if(change?.audio_seed!==undefined&&$('runtime-audio-seed'))$('runtime-audio-seed').value=String(savedAudioSeed);
     if(change?.audio_options!==undefined&&$('audio-options'))$('audio-options').value=savedAudioOptions;
@@ -435,7 +603,6 @@ async function applyRuntimeSettings(change) {
     if(change?.web_search&&$('web-search-enabled'))$('web-search-enabled').checked=savedWebSearch;
     if(change?.web_search_timeout&&$('web-search-timeout'))$('web-search-timeout').value=String(savedWebSearchTimeout);
     if(change?.search_scopes)applySearchScopeMask(savedSearchScopes);
-    if(change?.kokoro_voice && $('kokoro-voice'))$('kokoro-voice').value=savedKokoroVoice;
     if(change?.chatterbox_voice||change?.chatterbox_language)populateWorkspaceVoicePicker(current?.model || selectedModel);
     $('runtime-feedback').textContent = error.message;
     if($('workspace-voice-feedback'))$('workspace-voice-feedback').textContent = error.message;
@@ -446,6 +613,7 @@ function stageWorkspaceSettings(){
   const settings={context:$('runtime-context').value,
     output_limit:Number($('length').value),thinking:$('runtime-thinking').checked,
     idle_unload_minutes:Number($('runtime-idle-unload').value)};
+  if($('runtime-kv'))settings.kv=$('runtime-kv').value;
   const model=models.find(item=>item.id===(modelChooser.value||current?.model));
   if(model?.purpose==='text-to-image')Object.assign(settings,{sd_seed:Number($('sd-seed').value),
     sd_width:Number($('sd-size').value.split(',')[0]),sd_height:Number($('sd-size').value.split(',')[1]),
@@ -459,6 +627,25 @@ function stageWorkspaceSettings(){
   return settings;
 }
 function stageWorkspaceSettingsChange(){stageWorkspaceSettings();$('runtime-feedback').textContent='Changes apply when you submit a request.';}
+const kvCacheLabel=document.createElement('label');
+kvCacheLabel.htmlFor='runtime-kv';
+kvCacheLabel.textContent='KV cache type';
+const kvCacheSelect=document.createElement('select');
+kvCacheSelect.id='runtime-kv';
+for(const [value,label] of [['auto','Automatic'],['f16','F16'],['q8_0','Q8_0'],['q4_0','Q4_0']]){
+  const option=document.createElement('option');
+  option.value=value;
+  option.textContent=label;
+  kvCacheSelect.append(option);
+}
+kvCacheLabel.append(kvCacheSelect);
+const kvCacheHint=document.createElement('small');
+kvCacheHint.className='muted';
+kvCacheHint.textContent='Lower-precision KV caches use less memory, with a possible quality trade-off.';
+const kvContextLabel=$('runtime-context').parentElement;
+const oldKvCacheHint=kvContextLabel.nextElementSibling;
+if(oldKvCacheHint?.textContent.includes('KV cache is selected automatically'))oldKvCacheHint.remove();
+kvContextLabel.after(kvCacheLabel,kvCacheHint);
 const audioDurationLabel=document.createElement('label');
 audioDurationLabel.textContent='Audio clip duration';
 const audioDuration=document.createElement('select');
@@ -536,11 +723,8 @@ sdUpscaleHint.textContent='Optional post-processing. Requires RealESRGAN_x4plus.
 $('runtime-feedback').before(sdUpscaleLabel,sdUpscaleHint);
 sdUpscaleLabel.hidden=true;
 sdUpscaleHint.hidden=true;
-function syncAudioDurationVisibility(){const model=models.find(item=>item.id===(current?.model||modelChooser.value||selectedModel));const audioVisible=Boolean(model&&modelKind(model)===2&&workspaceModeName!=='audio'),imageVisible=Boolean(model&&modelKind(model)===1);audioDurationLabel.hidden=!audioVisible;audioDurationHint.hidden=!audioVisible;audioSeedLabel.hidden=!audioVisible;audioSeedHint.hidden=!audioVisible;audioOptionsLabel.hidden=!audioVisible;audioOptionsHint.hidden=!audioVisible;sdSeedLabel.hidden=!imageVisible;sdSeedHint.hidden=!imageVisible;sdSizeLabel.hidden=!imageVisible;sdSizeHint.hidden=!imageVisible;sdUpscaleLabel.hidden=!imageVisible;sdUpscaleHint.hidden=!imageVisible;}
-document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>{setWorkspaceMode(button.dataset.mode);syncAudioDurationVisibility();});
-setWorkspaceMode(workspaceModeName);syncAudioDurationVisibility();
-const workspaceUrl=new URL(location.href);
-if(workspaceUrl.searchParams.has('mode')){workspaceUrl.searchParams.delete('mode');history.replaceState(null,'',workspaceUrl);}
+function syncWorkspaceGenerationSettings(){const modelId=current?.model||modelChooser.value||stagedWorkspaceModel||selectedModel,model=models.find(item=>item.id===modelId),purpose=model?.purpose||(current?.model===modelId?current?.purpose:'');const textVisible=purpose==='text-to-text',imageVisible=purpose==='text-to-image',ttsVisible=purpose==='text-to-speech';$('workspace-text-settings').hidden=!textVisible;$('workspace-voice-group').hidden=!ttsVisible;$('workspace-tts-duration-note').hidden=!ttsVisible;sdSeedLabel.hidden=!imageVisible;sdSeedHint.hidden=!imageVisible;sdSizeLabel.hidden=!imageVisible;sdSizeHint.hidden=!imageVisible;sdUpscaleLabel.hidden=!imageVisible;sdUpscaleHint.hidden=!imageVisible;}
+setWorkspaceMode(workspaceModeName);setAudioSection(audioSectionName);syncWorkspaceGenerationSettings();
 audioDuration.onchange=stageWorkspaceSettingsChange;
 audioSeed.onchange=()=>{const value=Number(audioSeed.value);if(!Number.isInteger(value)||value<0||value>4294967295){audioSeed.value=String(savedAudioSeed);$('runtime-feedback').textContent='Enter a whole seed from 0 to 4294967295.';return;}stageWorkspaceSettingsChange();};
 audioOptions.onchange=stageWorkspaceSettingsChange;
@@ -550,11 +734,8 @@ sdUpscale.onchange=stageWorkspaceSettingsChange;
 const memoryGroup=document.createElement('div');memoryGroup.className='model-memory-settings';const memoryHeading=document.createElement('h2');memoryHeading.textContent='Model memory';const memoryDescription=document.createElement('p');memoryDescription.className='muted';memoryDescription.textContent='Release the active model after it has been idle.';const idleLabel=document.createElement('label');idleLabel.htmlFor='runtime-idle-unload';idleLabel.textContent='Unload model after';const idleSelect=document.createElement('select');idleSelect.id='runtime-idle-unload';for(const [value,label] of [[1,'1 minute'],[2,'2 minutes'],[5,'5 minutes'],[10,'10 minutes'],[30,'30 minutes'],[60,'60 minutes']]){const option=document.createElement('option');option.value=String(value);option.textContent=label;idleSelect.append(option);}idleLabel.append(idleSelect);memoryGroup.append(memoryHeading,memoryDescription,idleLabel);$('runtime-feedback').before(memoryGroup);
 const searchSettings=document.createElement('div');searchSettings.className='model-memory-settings';const searchHeading=document.createElement('h2');searchHeading.textContent='Web search';const searchDescription=document.createElement('p');searchDescription.className='muted';searchDescription.textContent='Use /search followed by a question in a text conversation, and /fetch followed by an address to read one page. The search runs on the console and asks the groups of sites you select below.';const searchToggleLabel=document.createElement('label');searchToggleLabel.className='check';const searchToggle=document.createElement('input');searchToggle.type='checkbox';searchToggle.id='web-search-enabled';searchToggleLabel.append(searchToggle,document.createTextNode('Enable built-in web search'));const timeoutLabel=document.createElement('label');timeoutLabel.htmlFor='web-search-timeout';timeoutLabel.textContent='Search timeout';const timeoutSelect=document.createElement('select');timeoutSelect.id='web-search-timeout';for(const value of [5,10,15,20,30]){const option=document.createElement('option');option.value=String(value);option.textContent=`${value} seconds`;timeoutSelect.append(option);}timeoutLabel.append(timeoutSelect);const testButton=document.createElement('button');testButton.type='button';testButton.className='secondary';testButton.textContent='Test search';const testStatus=document.createElement('small');testStatus.className='muted';testStatus.id='web-search-test-status';const scopeHeading=document.createElement('h3');scopeHeading.textContent='Sites to ask';const scopeHint=document.createElement('p');scopeHint.className='muted';scopeHint.textContent='Fewer groups means a faster search. At least one stays on.';const scopeList=document.createElement('div');scopeList.className='search-scope-list';for(const [id,label] of SEARCH_SCOPES){const scopeLabel=document.createElement('label');scopeLabel.className='check';const box=document.createElement('input');box.type='checkbox';box.id='search-scope-'+id;box.checked=true;scopeLabel.append(box,document.createTextNode(label));scopeList.append(scopeLabel);box.onchange=()=>{const mask=currentSearchScopeMask();if(!mask){box.checked=true;testStatus.textContent='Keep at least one group of sites.';return;}testStatus.textContent='';runtimeSettings({search_scopes:mask});};}
 searchSettings.append(searchHeading,searchDescription,searchToggleLabel,timeoutLabel,scopeHeading,scopeHint,scopeList,testButton,testStatus);$('setting-opencode').append(searchSettings);searchToggle.onchange=()=>runtimeSettings({web_search:searchToggle.checked});timeoutSelect.onchange=()=>runtimeSettings({web_search_timeout:Number(timeoutSelect.value)});testButton.onclick=async()=>{if(!searchToggle.checked){testStatus.textContent='Enable built-in search first.';return;}testButton.disabled=true;testStatus.textContent='Searching…';try{const response=await api('/api/search',{method:'POST',body:JSON.stringify({query:'ProsperoAI PlayStation 5',limit:3})});const result=await response.json();const answered=(result.providers||[]).filter(provider=>provider.outcome==='ok').length;testStatus.textContent=`Search ready · ${result.data?.length||0} results from ${answered} of ${(result.providers||[]).length} providers`;}catch(error){testStatus.textContent=error.message;}finally{testButton.disabled=false;}};
-for(const id of ['runtime-context','length','runtime-thinking','runtime-idle-unload'])$(id).onchange=stageWorkspaceSettingsChange;
+for(const id of ['runtime-context','runtime-kv','length','runtime-thinking','runtime-idle-unload'])$(id).onchange=stageWorkspaceSettingsChange;
 const fallbackKokoroVoices=[['af_heart','Heart · en-US'],['af_bella','Bella · en-US'],['af_nicole','Nicole · en-US'],['af_sarah','Sarah · en-US'],['am_adam','Adam · en-US']];
-const kokoroCatalog=window.prosperoVoiceCatalog?.kokoro;
-const kokoroVoices=Array.isArray(kokoroCatalog)&&kokoroCatalog.length?kokoroCatalog.map(voice=>[voice.id,`${voice.name} · ${voice.locale}`]):fallbackKokoroVoices;
-const kokoroLabel=document.createElement('label');kokoroLabel.className='kokoro-voice-setting';kokoroLabel.htmlFor='kokoro-voice';kokoroLabel.textContent='Kokoro voice';const kokoroVoice=document.createElement('select');kokoroVoice.id='kokoro-voice';for(const [value,label] of kokoroVoices){const option=document.createElement('option');option.value=value;option.textContent=label;kokoroVoice.append(option);}kokoroLabel.append(kokoroVoice);$('setting-sound').prepend(kokoroLabel);kokoroVoice.onchange=()=>runtimeSettings({kokoro_voice:kokoroVoice.value});
 function populateWorkspaceVoicePicker(modelId){
   const select=$('workspace-voice');if(!select)return;
   const chatterbox=String(modelId||'').includes('chatterbox'),catalog=window.prosperoRuntimeVoiceCatalog||window.prosperoVoiceCatalog||{};

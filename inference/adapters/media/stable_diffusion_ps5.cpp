@@ -5,6 +5,9 @@ static_assert(GGML_MAX_NAME == 160, "SD and llama must share the tensor ABI");
 #include "stable-diffusion.h"
 #include "../../../include/generated_output_path.hpp"
 #include "../../../include/model_paths.hpp"
+#include "../../../include/image_codec.hpp"
+#include "../../../include/qwen_image_editing.hpp"
+#include "../../../include/qwen_image_vram_budget.hpp"
 #include "../../../third_party/miniz/miniz_tdef.h"
 #include "../../../third_party/miniz/miniz.h"
 
@@ -15,6 +18,7 @@ static_assert(GGML_MAX_NAME == 160, "SD and llama must share the tensor ABI");
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 extern "C"
@@ -27,7 +31,7 @@ namespace
 {
 
 sd_ctx_t *context;
-char context_root[192];
+std::string context_identity;
 void (*progress_callback)(const char *);
 bool backend_registered;
 
@@ -215,14 +219,22 @@ void release_context()
     {
         free_sd_ctx(context);
         context = nullptr;
-        context_root[0] = '\0';
+        context_identity.clear();
     }
     log_line("[prosperoai] sd_context_released=1\n");
 }
 
-bool ensure_context(const char *root)
+bool ensure_context(const char *root, bool image_edit)
 {
-    if (context && std::strcmp(context_root, root) == 0)
+    const bool qwen_image_2_1 = is_qwen_image_2_1_model(root);
+    char vision_path[512]{};
+    if (qwen_image_2_1 && image_edit &&
+        !prospero_sd::qwen_projector_path(root, true, vision_path, sizeof(vision_path)))
+        return false;
+    const std::string desired_identity =
+        qwen_image_2_1 ? "qwen:" + prospero_sd::qwen_context_identity(root, vision_path)
+                       : "model:" + std::string(root);
+    if (context && context_identity == desired_identity)
         return true;
     release_context();
     if (!backend_registered)
@@ -237,8 +249,8 @@ bool ensure_context(const char *root)
 
     sd_ctx_params_t parameters;
     sd_ctx_params_init(&parameters);
+    std::string qwen_max_vram;
     const bool flux2_klein = is_flux2_klein_model(root);
-    const bool qwen_image_2_1 = is_qwen_image_2_1_model(root);
     char diffusion_model_path[512];
     char llm_path[512];
     char vae_path[512];
@@ -291,8 +303,11 @@ bool ensure_context(const char *root)
         parameters.diffusion_model_path = diffusion_model_path;
         parameters.llm_path = llm_path;
         parameters.vae_path = vae_path;
+        if (image_edit)
+            parameters.llm_vision_path = vision_path;
         parameters.prediction = FLOW_PRED;
-        parameters.max_vram = "10";
+        qwen_max_vram = prospero_sd::qwen_image_max_vram("/app0");
+        parameters.max_vram = qwen_max_vram.c_str();
         parameters.model_args = "qwen_image_2_1_prefix_cache_type=q8_0";
     }
     if (realistic_vision)
@@ -318,7 +333,7 @@ bool ensure_context(const char *root)
         release_context();
         return false;
     }
-    std::snprintf(context_root, sizeof(context_root), "%s", root);
+    context_identity = desired_identity;
     return true;
 }
 
@@ -329,7 +344,8 @@ extern "C" void ps5_sd_shutdown()
     release_context();
 }
 
-extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *response,
+extern "C" int ps5_sd_generate(const char *root, const char *prompt, const char *image_path,
+                               char *response,
                                std::size_t response_capacity, std::uint64_t *elapsed_microseconds,
                                void (*progress)(const char *))
 {
@@ -347,6 +363,23 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     const bool qwen_image_2_1 = is_qwen_image_2_1_model(root);
     const bool sdxl = model_index_has(root, "StableDiffusionXLPipeline") || is_sdxl_checkpoint(root);
     const bool flux2_klein = is_flux2_klein_model(root);
+    const bool image_edit = image_path && *image_path;
+    if (image_edit && !qwen_image_2_1)
+    {
+        std::snprintf(response, response_capacity, "Image input is only supported by Qwen Image 2.1.");
+        return 3;
+    }
+    if (qwen_image_2_1 && image_edit)
+    {
+        char projector_path[512]{};
+        if (!prospero_sd::qwen_projector_path(root, true, projector_path,
+                                              sizeof(projector_path)))
+        {
+            std::snprintf(response, response_capacity,
+                          "Qwen Image 2.1 editing requires mmproj-Qwen3VL-8B-Instruct-F16.gguf.");
+            return 3;
+        }
+    }
     progress_callback = progress;
     if (progress_callback)
         progress_callback(qwen_image_2_1 ? "Loading Qwen-Image 2.1"
@@ -376,16 +409,35 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
         }
         std::fclose(upscaler_file);
     }
-    if (!ensure_context(root))
+    if (!ensure_context(root, image_edit))
     {
         std::snprintf(response, response_capacity, "Could not load the image model.");
         return 2;
+    }
+
+    struct DecodedImageOwner
+    {
+        prospero_image::DecodedImage image{};
+        ~DecodedImageOwner() { prospero_image::free_image(&image); }
+    } decoded;
+    sd_image_t reference_image{};
+    if (image_edit)
+    {
+        if (!prospero_image::decode_file_rgba(image_path, &decoded.image))
+        {
+            std::snprintf(response, response_capacity, "The reference image could not be decoded.");
+            return 3;
+        }
+        reference_image = {decoded.image.width, decoded.image.height, decoded.image.channels,
+                           decoded.image.pixels};
     }
 
     sd_img_gen_params_t parameters;
     sd_img_gen_params_init(&parameters);
     parameters.prompt = prompt;
     parameters.negative_prompt = "";
+    parameters.ref_images = image_edit ? &reference_image : nullptr;
+    parameters.ref_images_count = image_edit ? 1 : 0;
     const unsigned default_size = (sd3 || flux2_klein) ? 768 : 512;
     parameters.width = runtime_settings.sd_width ? runtime_settings.sd_width : default_size;
     parameters.height = runtime_settings.sd_height ? runtime_settings.sd_height : default_size;

@@ -2102,6 +2102,11 @@ void NativeUI::Impl::build_generation_form()
             selected_context);
         context_field.description = "How much of the conversation the text model can consider. "
                                     "Larger contexts need more memory.";
+        auto &kv_field = form_.add_choice(18, "KV cache", {"Auto", "F16", "Q8_0", "Q4_0"},
+                                          static_cast<int>(p.kv_cache));
+        kv_field.description =
+            "Auto is recommended. Quantized caches use less memory; the Vulkan budget check "
+            "runs before cache allocation.";
         auto &thinking_field = form_.add_toggle(19, "Thinking", p.thinking);
         thinking_field.description =
             "Allow supported text models to spend extra tokens reasoning before answering.";
@@ -2233,7 +2238,7 @@ void NativeUI::Impl::apply_generation_form()
         p.output_limit = limits[std::clamp(form_.choice_index(7), 0, 13)];
         constexpr unsigned contexts[] = {0, 4096, 8192, 16384, 32768, 65536, 131072, 262144};
         p.context_length = contexts[std::clamp(form_.choice_index(17), 0, 7)];
-        p.kv_cache = 0;
+        p.kv_cache = static_cast<unsigned>(std::clamp(form_.choice_index(18), 0, 3));
         p.thinking = form_.toggle_value(19);
     }
     constexpr unsigned idle_minutes[] = {1, 2, 5, 10, 30, 60};

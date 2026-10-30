@@ -28,6 +28,10 @@ audiocpp_model *g_model;
 audiocpp_options *g_options;
 audiocpp_session *g_session;
 std::string g_model_root;
+enum class EngineStatus { ready, low_memory, failed };
+constexpr std::uint64_t kSheetSageMinimumFree = 7500ull << 20;
+constexpr std::uint64_t kSheetSageGraphMinimumFree = 7000ull << 20;
+constexpr std::uint64_t kSheetSageMinimumLargestFree = 3600ull << 20;
 
 void release_engine()
 {
@@ -275,13 +279,13 @@ std::string write_result_artifacts(const audiocpp_result *result, const std::str
     return note;
 }
 
-bool ensure_engine(const std::string &root, const std::string &weight_type,
-                   const std::string &backend,
-                   const std::vector<std::pair<std::string, std::string>> &engine_options,
-                   void (*progress)(const char *))
+EngineStatus ensure_engine(const std::string &root, const std::string &weight_type,
+                           const std::string &backend,
+                           const std::vector<std::pair<std::string, std::string>> &engine_options,
+                           void (*progress)(const char *))
 {
     if (g_model && g_session && g_model_root == root)
-        return true;
+        return EngineStatus::ready;
     release_engine();
     const audiocpp_model_config model_config = {"sheetsage2", nullptr, nullptr, nullptr};
     if (audiocpp_registry_create(nullptr, &g_registry) != AUDIOCPP_OK ||
@@ -291,15 +295,35 @@ bool ensure_engine(const std::string &root, const std::string &weight_type,
         stage_error("model_load");
         log_error("model load failed");
         release_engine();
-        return false;
+        return EngineStatus::failed;
     }
     stage_log("model_load ok");
+    const auto graph_free = prospero_memory::free_total();
+    if (backend != "cpu" && graph_free < kSheetSageGraphMinimumFree)
+    {
+        char line[128];
+        std::snprintf(line, sizeof(line), "memory gate after weights: pool free %llu MiB",
+                      static_cast<unsigned long long>(graph_free >> 20));
+        stage_log(line);
+        release_engine();
+        return EngineStatus::low_memory;
+    }
+    const auto largest_free = prospero_memory::largest_free_block();
+    if (backend != "cpu" && largest_free < kSheetSageMinimumLargestFree)
+    {
+        char line[128];
+        std::snprintf(line, sizeof(line), "memory gate: largest block %llu MiB",
+                      static_cast<unsigned long long>(largest_free >> 20));
+        stage_log(line);
+        release_engine();
+        return EngineStatus::low_memory;
+    }
     g_options = audiocpp_options_create();
     if (!g_options)
     {
         log_error("session options creation failed");
         release_engine();
-        return false;
+        return EngineStatus::failed;
     }
     // weight_type comes from the Cover settings; the pinned GGUF ships fp32
     // and q4_0/q4_k keep the MERT encoder inside the PS5 base 12 GiB heap.
@@ -342,11 +366,11 @@ bool ensure_engine(const std::string &root, const std::string &weight_type,
         stage_error("session_create");
         log_error("Vulkan session creation failed");
         release_engine();
-        return false;
+        return EngineStatus::failed;
     }
     g_model_root = root;
     prospero_runtime::set_model_resident(true);
-    return true;
+    return EngineStatus::ready;
 }
 
 // audio_options keys the Cover flow understands. input_audio is consumed by
@@ -445,23 +469,21 @@ extern "C" int ps5_sheetsage_transcribe(const char *root, const char *prompt, ch
                       "audio/<file>.wav'");
         return 1;
     }
-    // Memory gate: SheetSage needs ~2.7 GiB of weights loaded into the direct
-    // pool FIRST, then ggml-vulkan wants one ~3.4 GiB buffer for the encoder
-    // graph (4.0 GiB gallocr reservation). Since the RADV arena allocator
-    // backs big buffers in 2 MiB pieces, contiguity no longer matters — only
-    // the pool's total free memory does. Below ~7.5 GiB total the adapter returns
-    // NEEDS_RESTART so the user can close and reopen the title before retrying,
-    // instead of dying 30 s deep in graph build.
-    if (prospero_memory::free_total() < (7500ull << 20))
+    // A prior Cover engine can hold enough pool memory to fail admission; unload
+    // it before measuring. A fresh load needs about 7.5 GiB and must leave 7,000
+    // MiB for the Vulkan encoder graph (successful: 7,082; failed: 6,954 MiB).
+    if (g_registry || g_model || g_options || g_session)
+        release_engine();
+    const auto free_before_load = prospero_memory::free_total();
+    if (free_before_load < kSheetSageMinimumFree)
     {
-        const unsigned long long mb =
-            static_cast<unsigned long long>(prospero_memory::free_total() >> 20);
+        const auto mb = static_cast<unsigned long long>(free_before_load >> 20);
         char line[128];
         std::snprintf(line, sizeof(line), "memory gate: pool free %llu MiB", mb);
         stage_log(line);
         std::snprintf(response, response_capacity,
-                      "NEEDS_RESTART GPU memory low: only %llu MiB free and SheetSage needs "
-                      "~7.5 GiB. Restart the title and retry.", mb);
+                      "GPU memory low: only %llu MiB free and SheetSage needs ~7.5 GiB. "
+                      "Any resident SheetSage model was unloaded; free memory and retry.", mb);
         return 1;
     }
     const std::string model_root(root);
@@ -494,8 +516,17 @@ extern "C" int ps5_sheetsage_transcribe(const char *root, const char *prompt, ch
                           sample_rate);
             stage_log(line);
         }
-        if (!ensure_engine(model_root, cover.weight_type, cover.backend, cover.engine_options,
-                           progress))
+        const auto engine_status = ensure_engine(model_root, cover.weight_type, cover.backend,
+                                                 cover.engine_options, progress);
+        if (engine_status == EngineStatus::low_memory)
+        {
+            std::snprintf(response, response_capacity,
+                          "GPU memory low after loading SheetSage weights; the SheetSage model "
+                          "was unloaded. Free memory and retry Cover.");
+            result_code = 1;
+            break;
+        }
+        if (engine_status == EngineStatus::failed)
         {
             stage_error("engine load failed");
             std::snprintf(response, response_capacity, "Could not load SheetSage2 engine: %s",

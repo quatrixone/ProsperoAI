@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <utime.h>
 #include <unistd.h>
 
 extern "C"
@@ -91,6 +92,7 @@ static thread_local std::size_t position;
 static std::barrier<> *upload_race_barrier = nullptr;
 static unsigned current_model;
 static std::function<void()> generation_hook;
+static std::string last_generation_image_path;
 static bool fail_model_prepare = std::getenv("PROSPERO_TEST_FAIL_PREPARE") != nullptr;
 namespace prospero_model_download
 {
@@ -191,7 +193,9 @@ static std::string http_body(const std::string &response)
 }
 unsigned gpt_runtime_model_count()
 {
-    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") ? 3 : 2;
+    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") || std::getenv("PROSPERO_TEST_QWEN_IMAGE")
+               ? 3
+               : 2;
 }
 unsigned gpt_runtime_selected_model()
 {
@@ -205,7 +209,10 @@ void gpt_runtime_set_idle_unload_timeout(unsigned)
 }
 const char *gpt_runtime_model_id(unsigned i)
 {
-    return i == 0 ? "tiny.gguf" : i == 1 ? "second.gguf" : "sheetsage-test";
+    return i == 0                                    ? "tiny.gguf"
+           : i == 1                                  ? "second.gguf"
+           : std::getenv("PROSPERO_TEST_QWEN_IMAGE") ? "qwen-image-test"
+                                                     : "sheetsage-test";
 }
 const char *gpt_runtime_model_name(unsigned index)
 {
@@ -213,8 +220,15 @@ const char *gpt_runtime_model_name(unsigned index)
 }
 const char *gpt_runtime_model_purpose(unsigned index)
 {
+    if (std::getenv("PROSPERO_TEST_QWEN_IMAGE") && index == 2)
+        return "text-to-image";
     return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && index == 2 ? "text-to-audio"
                                                                     : "text-to-text";
+}
+bool gpt_runtime_model_is_qwen_image_2_1(const char *model_id)
+{
+    return std::getenv("PROSPERO_TEST_QWEN_IMAGE") && model_id &&
+           std::strcmp(model_id, "qwen-image-test") == 0;
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
 {
@@ -248,15 +262,43 @@ bool gpt_runtime_delete_model(const char *id)
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *out, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const char *image_path)
 {
+    last_generation_image_path = image_path ? image_path : "";
     if (generation_hook)
         generation_hook();
     if (settings.model_id)
-        current_model = std::strcmp(settings.model_id, "sheetsage-test") == 0 ? 2
-                        : std::strcmp(settings.model_id, "second.gguf") == 0  ? 1
-                                                                              : 0;
+        current_model = (std::strcmp(settings.model_id, "sheetsage-test") == 0 ||
+                         std::strcmp(settings.model_id, "qwen-image-test") == 0)
+                            ? 2
+                        : std::strcmp(settings.model_id, "second.gguf") == 0 ? 1
+                                                                             : 0;
     std::string last = messages[count - 1].content;
+    if (std::getenv("PROSPERO_TEST_QWEN_IMAGE") && current_model == 2)
+    {
+        if (const char *calls_file = std::getenv("PROSPERO_TEST_IMAGE_CALLS_FILE"))
+        {
+            std::ofstream calls(calls_file, std::ios::app);
+            calls << "call\n";
+        }
+        if (const char *path_file = std::getenv("PROSPERO_TEST_IMAGE_PATH_FILE"))
+            std::ofstream(path_file) << last_generation_image_path;
+        if (last == "fail")
+        {
+            std::snprintf(out, capacity, "Context full");
+            return 1;
+        }
+        const std::string artifact = std::string(PROSPERO_IMAGE_DIR) + "qwen-generated.png";
+        std::ifstream fixture("tests/fixtures/one-pixel.png", std::ios::binary);
+        std::ofstream generated(artifact, std::ios::binary);
+        generated << fixture.rdbuf();
+        if (!fixture || !generated)
+            return 1;
+        std::snprintf(out, capacity, "%s", artifact.c_str());
+        *stats = {};
+        return 0;
+    }
     if (const char *calls_file = std::getenv("PROSPERO_TEST_AUDIO_CALLS_FILE"))
     {
         std::ofstream calls(calls_file, std::ios::app);
@@ -320,6 +362,72 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
 }
 int main(int argc, char **argv)
 {
+    if (argc > 1 && std::strcmp(argv[1], "--test-image-path-forwarding") == 0)
+    {
+        const gpt_runtime_message_t message{"user", "edit"};
+        char output[64]{};
+        gpt_runtime_stats_t stats{};
+        const bool generated = run_generation(&message, 1, output, sizeof(output), 512, &stats,
+                                              "tiny.gguf", 0, 0, 0, "/server-owned/reference.png");
+        if (!generated)
+            return 1;
+        std::cout << last_generation_image_path << '\n';
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--test-image-upload-lifecycle") == 0)
+    {
+        if (!ensure_image_upload_directory())
+            return 2;
+        ImageUploadLease created{};
+        std::FILE *file = nullptr;
+        if (!create_image_upload(&created, &file))
+            return 3;
+        if (std::fwrite("fixture", 1, 7, file) != 7 || std::fclose(file) != 0)
+        {
+            finish_image_upload(&created, true);
+            return 4;
+        }
+        const std::string id = created.id;
+        const std::string path = created.path;
+        finish_image_upload(&created, false);
+
+        ImageUploadLease leased{};
+        if (!acquire_image_upload(id.c_str(), &leased))
+            return 5;
+        const std::time_t cleanup_now = std::time(nullptr) + 1;
+        struct utimbuf old_times
+        {
+        };
+        old_times.actime = cleanup_now - 901;
+        old_times.modtime = cleanup_now - 901;
+        if (::utime(path.c_str(), &old_times) != 0)
+        {
+            finish_image_upload(&leased, true);
+            return 6;
+        }
+
+        const std::string sentinel = image_upload_directory() + ".qwen-image-unrelated.upload";
+        {
+            std::ofstream marker(sentinel, std::ios::binary);
+            marker << "keep";
+            if (!marker)
+            {
+                finish_image_upload(&leased, true);
+                return 7;
+            }
+        }
+        cleanup_expired_image_uploads(cleanup_now);
+        const bool active_file_retained = ::access(path.c_str(), F_OK) == 0;
+        finish_image_upload(&leased, false);
+        cleanup_expired_image_uploads(cleanup_now);
+        const bool released_file_removed = ::access(path.c_str(), F_OK) != 0;
+        const bool unrelated_file_retained = ::access(sentinel.c_str(), F_OK) == 0;
+        ::unlink(sentinel.c_str());
+        if (!active_file_retained || !released_file_removed || !unrelated_file_retained)
+            return 8;
+        std::cout << "image upload lifecycle: ok\n";
+        return 0;
+    }
     if (argc > 1 && std::strcmp(argv[1], "--test-upload-race") == 0)
     {
         api_key = "secret";

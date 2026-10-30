@@ -8,8 +8,11 @@
   <link rel="stylesheet" href="/app.css">
   <script src="/voice-catalog.js" defer></script>
   <script src="/voice-recording.js" defer></script>
-  <script src="/workspace-audio.js" defer></script>
+  <script src="/workspace.js" defer></script>
+  <script src="/qwen-image-attachment.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/lame.min.js" defer></script>
+  <script src="/music.js" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -31,18 +34,112 @@
       <section class="workspace-toolbar" aria-label="Workspace controls">
         <div class="workspace-modes" role="tablist" aria-label="Workspace mode">
           <button type="button" role="tab" aria-selected="true" class="selected" data-mode="text">Text</button>
+          <button type="button" role="tab" aria-selected="false" data-mode="image">Image</button>
           <button type="button" role="tab" aria-selected="false" data-mode="audio">Audio</button>
-          <button type="button" role="tab" aria-selected="false" data-mode="sd">SD</button>
-          <button type="button" role="tab" aria-selected="false" data-mode="tts">TTS</button>
         </div>
-        <div id="workspace-model-controls" class="workspace-model-controls">
-          <label class="workspace-model-label" for="workspace-model">Model
-            <select id="workspace-model" aria-label="Choose a model">
-              <option value="">Choose a model…</option>
-            </select>
-          </label>
-          <small id="model-load-status" class="muted" role="status">Choose a model. It loads when you submit.</small>
+      </section>
+
+      <section id="workspace-image" class="workspace-image" hidden aria-label="Image Workspace">
+        <div class="workspace-audio-sections" role="tablist" aria-label="Image section">
+          <button id="workspace-image-text-tab" type="button" role="tab" aria-selected="true" class="selected" aria-controls="workspace-image-text" data-image-section="text-to-image">Text to image</button>
+          <button id="workspace-image-edit-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-image-edit" data-image-section="image-to-image">Image to image</button>
         </div>
+        <section id="workspace-image-text" role="tabpanel" aria-labelledby="workspace-image-text-tab">
+          <p class="muted">Create an image from a text prompt.</p>
+        </section>
+        <section id="workspace-image-edit" role="tabpanel" aria-labelledby="workspace-image-edit-tab" hidden>
+          <p id="workspace-image-i2i-ready" class="muted" hidden>Choose Qwen Image 2.1, then attach a PNG or JPEG reference image to your prompt.</p>
+          <p id="workspace-image-i2i-loading" class="muted" role="status" hidden>Checking for Qwen Image 2.1…</p>
+          <p id="workspace-image-i2i-empty" class="audio-empty-models" hidden>Image-to-image needs Qwen Image 2.1. Install it from Models to edit a reference image.</p>
+          <p><button id="workspace-image-i2i-install" class="secondary" type="button" data-page="models" hidden>Install Qwen Image 2.1</button></p>
+          <p id="workspace-image-i2i-unavailable" class="muted" role="status" hidden>Could not check installed image models. Reconnect to your PS5 and try again.</p>
+        </section>
+      </section>
+
+      <section id="workspace-audio" class="workspace-audio" hidden aria-label="Audio Workspace">
+        <div class="workspace-audio-sections" role="tablist" aria-label="Audio section">
+          <button id="workspace-audio-music-tab" type="button" role="tab" aria-selected="true" class="selected" aria-controls="workspace-audio-music" data-audio-section="music">Music</button>
+          <button id="workspace-audio-tts-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-audio-tts" data-audio-section="tts">TTS</button>
+        </div>
+        <section id="workspace-audio-music" class="workspace-audio-panel" role="tabpanel" aria-labelledby="workspace-audio-music-tab">
+          <div class="audio-heading">
+            <div><h1>Music Studio</h1><p class="muted">Compose, arrange, and explore your audio creations.</p></div>
+          </div>
+          <div class="audio-layout music-studio">
+            <section id="music-composer" class="audio-create">
+              <div class="music-model-controls">
+                <label for="model">Music model<select id="model" aria-label="Music generation model"></select></label>
+                <label for="chat-model">Enhance model<select id="chat-model" aria-label="Text model for Enhance"></select></label>
+                <span id="status-dot" class="dot" role="status" aria-label="Model list status"></span>
+              </div>
+              <label for="lyrics">Lyrics</label>
+              <textarea id="lyrics" rows="10" placeholder="[verse]&#10;Write your lyrics here..."></textarea>
+              <label for="style">Style (prompt)</label>
+              <textarea id="style" rows="3" placeholder="romanian pop, female vocal, deep bass..."></textarea>
+              <details id="row-abc" class="audio-abc" open>
+                <summary id="abc-summary">ABC notation &amp; advanced options</summary>
+                <div id="abc-col">
+                  <label for="abc">ABC notation (optional)</label>
+                  <textarea id="abc" rows="8" placeholder="X:1&#10;M:2/4&#10;L:1/16&#10;K:C..."></textarea>
+                  <div id="abc-status" hidden></div>
+                  <div id="abc-actions" class="audio-actions">
+                    <input id="abc-name" type="text" value="studio.abc" aria-label="ABC filename">
+                    <button id="abc-save" type="button">Save ABC</button>
+                    <button id="abc-load" type="button">Load into editor</button>
+                    <select id="abc-files" title="Existing .abc files" aria-label="Existing ABC files"></select>
+                    <input id="abc-disk" type="file" accept=".abc,text/plain" hidden>
+                    <button id="abc-open" type="button">From file</button>
+                    <button id="abc-clear" type="button">Clear</button>
+                  </div>
+                  <div id="cover-row">
+                    <label for="cover-file">Cover: upload a song (MP3/WAV/…) — SheetSage2 transcribes it to ABC on the console</label>
+                    <div id="cover-actions" class="audio-actions">
+                      <input id="cover-file" type="file" accept="audio/*" aria-label="Choose a song for Cover">
+                      <button id="cover-go" type="button">Convert to ABC</button>
+                      <button id="lib-save" type="button" title="Store the chosen MP3/WAV in the console library as-is">Save to library</button>
+                    </div>
+                    <div id="cover-status" role="status"></div>
+                  </div>
+                </div>
+                <div id="opts-col" class="music-options">
+                  <label for="cot">Melody guidance<select id="cot"><option value="melody">ABC as guide</option><option value="">Lyrics/style only</option></select></label>
+                  <label for="abc-max">ABC max tokens<input id="abc-max" type="number" value="2000" min="100" max="4000" step="100"></label>
+                  <label id="duration-control" for="duration">Duration (seconds)<span id="dur-row"><input id="duration" type="range" min="30" max="300" step="5" value="240"><output id="dur-val">240</output></span></label>
+                  <label for="seed">Seed<span id="seed-row"><input id="seed" type="number" value="42" min="1" max="4294967295"><button id="dice" type="button" title="Random seed">🎲</button></span></label>
+                </div>
+              </details>
+              <label for="track-name">Track name (optional)</label>
+              <input id="track-name" type="text" placeholder="e.g. summer-sunshine" autocomplete="off">
+              <div id="gen-row" class="audio-actions">
+                <button id="generate" class="primary" type="button">Generate</button>
+                <button id="regen" type="button" title="Keep everything and generate again with seed +1">Seed +1</button>
+              </div>
+              <div id="queue-row" class="audio-queue-controls">
+                <label for="q-count">Queue count<input id="q-count" type="number" value="3" min="1" max="20"></label>
+                <button id="q-add" type="button" title="Queue this setup with consecutive seeds">Add to queue</button>
+                <button id="q-run" type="button">Run queue</button>
+                <button id="q-clear" type="button" aria-label="Clear queue">Clear</button>
+              </div>
+              <div id="queue-log" class="audio-queue" role="status"></div>
+              <div id="gen-status" role="status"></div>
+              <div id="result"></div>
+            </section>
+            <section id="library" class="audio-library-panel">
+              <div class="audio-library-heading"><h2>Library</h2><button id="refresh" type="button" title="Refresh library" aria-label="Refresh library">⟳</button></div>
+              <div id="tracks" class="audio-library"></div>
+            </section>
+          </div>
+        </section>
+        <section id="workspace-audio-tts" class="workspace-audio-panel" role="tabpanel" aria-labelledby="workspace-audio-tts-tab" hidden>
+          <h1>Voice</h1>
+          <p id="workspace-tts-loading" class="muted" role="status">Loading compatible voice models…</p>
+          <p id="workspace-tts-empty" class="audio-empty-models" hidden>No compatible voice model is installed. Install a compatible voice model from Models to start a voice conversation.</p>
+          <p><button id="workspace-tts-install" class="secondary" type="button" data-page="models" hidden>Install a voice model</button></p>
+          <p id="workspace-tts-unavailable" class="muted" role="status" hidden>Could not check installed voice models. Reconnect to your PS5 and try again.</p>
+          <p id="workspace-tts-ready" class="muted" hidden>Turn your words into speech with a voice model.</p>
+          <small id="voice-count" class="muted">Connecting…</small>
+          <p><button id="workspace-tts-start" class="primary" type="button" hidden>Start a voice conversation</button></p>
+        </section>
       </section>
 
       <section id="welcome">
@@ -55,9 +152,8 @@
         <div class="hero-art"><canvas id="sculpture" width="720" height="720" aria-hidden="true"></canvas><p class="eyebrow">THOUGHT, TAKING SHAPE</p></div>
         <div class="kinds">
           <button id="converse" class="glass" type="button"><span class="eyebrow">TEXT</span><strong>Converse</strong><small id="text-count">Connecting…</small><span class="kind-icon">◎</span></button>
-          <button id="imagine" class="glass" type="button"><span class="eyebrow">SD · IMAGE</span><strong>Imagine</strong><small id="image-count">Connecting…</small><span class="kind-icon image-art">◇</span></button>
+          <button id="imagine" class="glass" type="button"><span class="eyebrow">IMAGE</span><strong>Imagine</strong><small id="image-count">Connecting…</small><span class="kind-icon image-art">◇</span></button>
           <button id="compose" class="glass" type="button"><span class="eyebrow">AUDIO</span><strong>Compose</strong><small id="audio-count">Connecting…</small><span class="kind-icon sound-art">≋</span></button>
-          <button id="speak" class="glass" type="button"><span class="eyebrow">TTS · VOICE</span><strong>Speak</strong><small id="voice-count">Connecting…</small><span class="kind-icon voice-art">◉</span></button>
         </div>
       </section>
 
@@ -65,13 +161,24 @@
         <aside class="glass">
           <div class="side-title"><span class="eyebrow">YOUR SPACE</span><div class="side-title-actions"><button id="new" aria-label="New conversation">＋</button><button id="history-close" aria-label="Close conversation list">✕</button></div></div>
           <details id="workspace-generation"><summary>Generation settings</summary>
-            <label>Temperature<input id="temperature" type="range" min="0" max="1.5" step="0.05" value="0.7"><output id="temperature-value">0.7</output></label>
-            <label>Response limit<select id="length"><option value="0" selected>Auto</option><option value="64">64 tokens</option><option value="128">128 tokens</option><option value="192">192 tokens</option><option value="256">256 tokens</option><option value="512">512 tokens</option><option value="1024">1024 tokens</option><option value="2048">2048 tokens</option><option value="4096">4096 tokens</option><option value="8192">8192 tokens</option><option value="16384">16384 tokens</option><option value="32768">32768 tokens</option><option value="65536">65536 tokens</option><option value="131072">131072 tokens</option></select></label>
-            <label>Context length<select id="runtime-context"><option value="auto">Auto</option><option value="4k">4K</option><option value="8k">8K</option><option value="16k">16K</option><option value="32k">32K</option><option value="64k">64K</option><option value="128k">128K</option><option value="256k">256K</option></select></label>
-            <small class="muted">KV cache is selected automatically for the model and context.</small>
-            <label class="check"><input id="runtime-thinking" type="checkbox">Thinking</label><p id="runtime-feedback" class="muted" role="status"></p>
+            <div id="workspace-model-controls" class="workspace-model-controls">
+              <label class="history-control" for="workspace-model">Model</label>
+              <select id="workspace-model" aria-label="Choose a model">
+                <option value="">Choose a model…</option>
+              </select>
+              <small id="model-load-status" class="muted" role="status">Choose a model. It loads when you submit.</small>
+            </div>
+            <div id="workspace-voice-group" hidden><label class="history-control" id="workspace-voice-label" for="workspace-voice">Voice</label><select id="workspace-voice" aria-label="Voice"></select><label class="history-control" id="workspace-language-label" for="workspace-language" hidden>Language</label><select id="workspace-language" aria-label="Spoken language" hidden></select><div id="chatterbox-record-controls" hidden><button id="voice-record-open" type="button" class="secondary">Record my voice</button></div><small id="workspace-voice-feedback" class="muted" role="status"></small></div>
+            <small id="workspace-tts-duration-note" class="muted" hidden>Audio duration depends on the length of the text you submit.</small>
+            <div id="workspace-text-settings">
+              <label>Temperature<input id="temperature" type="range" min="0" max="1.5" step="0.05" value="0.7"><output id="temperature-value">0.7</output></label>
+              <label>Response limit<select id="length"><option value="0" selected>Auto</option><option value="64">64 tokens</option><option value="128">128 tokens</option><option value="192">192 tokens</option><option value="256">256 tokens</option><option value="512">512 tokens</option><option value="1024">1024 tokens</option><option value="2048">2048 tokens</option><option value="4096">4096 tokens</option><option value="8192">8192 tokens</option><option value="16384">16384 tokens</option><option value="32768">32768 tokens</option><option value="65536">65536 tokens</option><option value="131072">131072 tokens</option></select></label>
+              <label>Context length<select id="runtime-context"><option value="auto">Auto</option><option value="4k">4K</option><option value="8k">8K</option><option value="16k">16K</option><option value="32k">32K</option><option value="64k">64K</option><option value="128k">128K</option><option value="256k">256K</option></select></label>
+              <small class="muted">KV cache is selected automatically for the model and context.</small>
+              <label class="check"><input id="runtime-thinking" type="checkbox">Thinking</label>
+            </div>
+            <p id="runtime-feedback" class="muted" role="status"></p>
           </details>
-          <div id="workspace-voice-group" hidden><label class="history-control" id="workspace-voice-label" for="workspace-voice">Voice</label><select id="workspace-voice" aria-label="Voice"></select><label class="history-control" id="workspace-language-label" for="workspace-language" hidden>Language</label><select id="workspace-language" aria-label="Spoken language" hidden></select><div id="chatterbox-record-controls" hidden><button id="voice-record-open" type="button" class="secondary">Record my voice</button></div><small id="workspace-voice-feedback" class="muted" role="status"></small></div>
           <label class="history-control" for="history-kind">Conversation type</label><select id="history-kind"><option value="all">All types</option><option value="text-to-text">Text</option><option value="text-to-image">Image</option><option value="text-to-audio">Audio</option><option value="text-to-speech">Voice</option><option value="other">Other</option></select>
           <label class="history-control" for="history-archive-mode">Show</label><select id="history-archive-mode"><option value="active">Active conversations</option><option value="archived">Archived conversations</option><option value="all">All conversations</option></select>
           <label class="history-control" for="history-search">Search conversations</label><input id="history-search" type="search" placeholder="Title, model or message…">
@@ -81,44 +188,21 @@
         <div class="conversation">
           <div class="chat-heading"><button id="workspace-back" class="secondary" type="button">← Back to Workspace</button><button id="history-toggle" aria-label="Show conversations" aria-expanded="false">☰</button><div><p class="eyebrow">WORKSPACE</p><h2 id="chat-title">A little room for big ideas.</h2></div><span id="model-chip" class="chip" hidden></span></div>
           <div id="messages" role="log" aria-live="polite" aria-relevant="additions text"></div><p id="feedback" role="status"></p>
-          <form id="composer" class="glass"><textarea id="prompt" rows="1" placeholder="What’s on your mind?" aria-label="Message ProsperoAI" required></textarea><button id="send" class="primary" aria-label="Send message">↑</button></form>
+          <form id="composer" class="glass">
+            <div id="qwen-image-attachment" class="qwen-image-attachment" hidden>
+              <input id="qwen-image-file" class="visually-hidden" type="file" accept="image/png,image/jpeg" aria-label="Attach a reference image" tabindex="-1">
+              <button id="qwen-image-attach" class="secondary" type="button" aria-label="Attach a reference image">＋ Image</button>
+              <div id="qwen-image-preview" class="qwen-image-preview" hidden>
+                <img id="qwen-image-preview-image" alt="Reference image preview">
+                <div><span id="qwen-image-filename"></span><button id="qwen-image-replace" class="secondary" type="button" aria-label="Replace reference image">Replace</button><button id="qwen-image-remove" class="secondary" type="button" aria-label="Remove reference image">Remove</button></div>
+              </div>
+            </div>
+            <textarea id="prompt" rows="1" placeholder="What’s on your mind?" aria-label="Message ProsperoAI" required></textarea><button id="send" class="primary" aria-label="Send message">↑</button>
+          </form>
           <small class="composer-note">Entirely on your PS5. A conversation remembers its model.</small>
         </div>
       </section>
 
-      <section id="workspace-audio" class="workspace-audio" hidden>
-        <div class="audio-heading"><div><p class="eyebrow">AUDIO WORKSPACE</p><h1>Make something you can hear.</h1><p class="muted">Create music, shape a score, or split a track. Your audio stays in the shared library.</p></div><p id="audio-empty-models" class="audio-empty-models" role="status" hidden>No audio model is installed. Install an audio-capable model from Models to generate music.</p></div>
-        <div class="audio-layout">
-          <section class="glass audio-create">
-            <h2>Create music</h2>
-            <label for="audio-lyrics">Lyrics</label><textarea id="audio-lyrics" rows="6" placeholder="[verse]&#10;Write your lyrics here…"></textarea>
-            <label for="audio-style">Style</label><textarea id="audio-style" rows="3" placeholder="Dream pop, warm vocals, bright piano…"></textarea>
-            <details class="audio-abc" open><summary>ABC score</summary>
-              <label for="audio-abc">ABC notation</label><textarea id="audio-abc" rows="7" placeholder="X:1&#10;M:2/4&#10;L:1/16&#10;K:C"></textarea>
-              <label for="audio-abc-name">Score name</label><input id="audio-abc-name" type="text" value="workspace.abc">
-              <div class="audio-actions"><button id="audio-abc-save" class="secondary" type="button">Save score</button><select id="audio-abc-library" aria-label="Existing ABC scores"><option value="">Choose an ABC file…</option></select><button id="audio-abc-load" class="secondary" type="button">Load into editor</button><input id="audio-abc-file" type="file" accept=".abc,text/plain" hidden><button id="audio-abc-open" class="secondary" type="button">Open local ABC</button><button id="audio-abc-clear" class="secondary" type="button">Clear</button></div>
-            </details>
-            <div class="audio-options">
-              <label for="audio-duration">Duration <span><input id="audio-duration" type="range" min="30" max="300" step="5" value="240"><output id="audio-duration-value">240</output> seconds</span></label>
-              <label for="audio-seed">Seed<input id="audio-seed" type="number" min="1" max="4294967295" value="42"></label>
-              <label for="audio-track-name">Track name<input id="audio-track-name" type="text" maxlength="96" placeholder="Optional"></label>
-            </div>
-            <div class="audio-actions"><button id="audio-generate" class="primary" type="button">Generate track</button><button id="audio-regen" class="secondary" type="button">Seed +1</button></div>
-            <div class="audio-queue-controls"><label for="audio-queue-count">Variants<input id="audio-queue-count" type="number" min="1" max="20" value="3"></label><button id="audio-queue-add" class="secondary" type="button">Add to queue</button><button id="audio-queue-run" class="primary" type="button">Run queue</button><button id="audio-queue-stop" class="secondary" type="button" disabled>Stop after current</button><button id="audio-queue-clear" class="secondary" type="button">Clear queue</button></div>
-            <ul id="audio-queue" class="audio-queue" aria-live="polite"></ul>
-            <p id="audio-status" role="status" aria-live="polite"></p>
-          </section>
-          <section class="glass audio-library-panel">
-            <div class="audio-library-heading"><h2>Audio library</h2><button id="audio-refresh" class="secondary" type="button" aria-label="Refresh audio library">Refresh</button></div>
-            <label for="audio-source">Source for Cover and stems</label><select id="audio-source"><option value="">Choose an audio file…</option></select>
-            <div class="audio-actions"><button id="audio-cover" class="secondary" type="button">Cover to ABC</button><button id="audio-stems" class="secondary" type="button">Split into stems</button></div>
-            <label for="audio-upload">Upload audio from this device</label><input id="audio-upload" type="file" accept="audio/*">
-            <div class="audio-actions"><button id="audio-cover-upload" class="secondary" type="button">Upload and Cover</button><button id="audio-upload-save" class="secondary" type="button">Save WAV/MP3 to library</button></div>
-            <p class="muted">Uploads are web-only. The native app uses this shared library.</p>
-            <div id="audio-library" class="audio-library" aria-live="polite"></div>
-          </section>
-        </div>
-      </section>
     </main>
 
     <main id="media" hidden><p class="eyebrow">YOUR CREATIONS</p><h1>Media library</h1><p class="muted">Generated images and audio referenced by saved conversations. Files stay on your PS5.</p><div id="media-library" class="model-grid" aria-live="polite"></div></main>

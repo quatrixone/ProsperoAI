@@ -8,7 +8,7 @@
 
 extern "C"
 {
-int ps5_sd_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+int ps5_sd_generate(const char *, const char *, const char *, char *, std::size_t, std::uint64_t *,
                     gpt_runtime_progress_fn);
 int ps5_stable_audio_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
                               gpt_runtime_progress_fn);
@@ -71,7 +71,7 @@ int generate_media(const GenerationRequest &request)
     switch (request.model.modality)
     {
     case Modality::Image:
-        result = ps5_sd_generate(request.model.root.c_str(), prompt, request.output,
+        result = ps5_sd_generate(request.model.root.c_str(), prompt, request.image_path, request.output,
                                  request.output_capacity, &elapsed, request.progress);
         break;
     case Modality::Audio:

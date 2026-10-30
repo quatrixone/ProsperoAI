@@ -18,6 +18,8 @@ class HttpApiTests(unittest.TestCase):
         tmp = Path(cls.scratch.name)
         cls.audio_dir = tmp / "audio"
         cls.audio_dir.mkdir()
+        cls.image_dir = tmp / "image"
+        cls.image_dir.mkdir()
         cls.binary = tmp / "http-test"
         compiler = shutil.which(os.environ.get("HOST_CXX", "clang++")) or shutil.which("g++")
         if not compiler or not (ROOT / ".deps/llama.cpp/vendor/nlohmann/json.hpp").exists():
@@ -27,9 +29,12 @@ class HttpApiTests(unittest.TestCase):
                         '-DPROSPERO_WEB_ASSET_ROOT="'+str(ROOT / 'assets/web')+'/"',
                         '-DPROSPERO_SETTINGS_PATH="'+str(tmp / "runtime.cfg")+'"', "-Wl,--gc-sections", "-I"+str(ROOT / "vulkan"), "-I"+str(ROOT / "include"),
                         '-DPROSPERO_AUDIO_DIR="'+str(cls.audio_dir)+'/"',
+                        '-DPROSPERO_IMAGE_DIR="'+str(cls.image_dir)+'/"',
                         "-I"+str(ROOT / "search-engine/include"), "-I"+str(ROOT / "search-engine/src"),
                         "-I"+str(ROOT / ".deps/llama.cpp/vendor"),
+                        "-I"+str(ROOT / ".deps/stable-diffusion-vulkan/thirdparty"),
                         str(ROOT / "tests/http_api_harness.cpp"), str(ROOT / "src/session_store.cpp"),
+                        str(ROOT / "src/image_codec.cpp"),
                         str(ROOT / "src/audio_workflows.cpp"),
                         str(ROOT / "src/debug_log.cpp"),
                         str(ROOT / "search-engine/src/query.cpp"),
@@ -53,6 +58,10 @@ class HttpApiTests(unittest.TestCase):
     def setUp(self):
         self.audio_calls_file = Path(self.scratch.name) / "audio-calls.txt"
         self.audio_calls_file.unlink(missing_ok=True)
+        self.image_calls_file = Path(self.scratch.name) / "image-calls.txt"
+        self.image_calls_file.unlink(missing_ok=True)
+        for path in self.image_dir.iterdir():
+            path.unlink()
 
     def audio_generate_calls(self):
         if not self.audio_calls_file.exists():
@@ -66,10 +75,26 @@ class HttpApiTests(unittest.TestCase):
     def test_shutdown_joins_async_jobs_and_idle_connections(self):
         subprocess.run([str(self.lifecycle_binary)], check=True, timeout=20)
 
-    def test_music_route_redirects_to_workspace_audio(self):
-        head, _ = self.request_raw("/music", b"", method="GET")
+    def test_audio_routes_use_workspace(self):
+        head, body = self.request_raw("/audio", b"", method="GET")
+        self.assertIn("200 OK", head)
+        self.assertIn('data-mode="audio"', body)
+        self.assertIn('id="workspace-audio"', body)
+        self.assertIn('id="lyrics"', body)
+        self.assertIn('id="cover-go"', body)
+        self.assertIn('id="q-run"', body)
+        self.assertIn('src="/app.js" defer></script>', body)
+        self.assertIn('src="/music.js" defer', body)
+
+        head, controller = self.request_raw("/music.js", b"", method="GET")
+        self.assertIn("200 OK", head)
+        self.assertIn("ProsperoWorkspaceApi", controller)
+
+        head, body = self.request_raw("/music", b"", method="GET")
         self.assertIn("302 Found", head)
-        self.assertIn("Location: /?mode=audio", head)
+        self.assertIn("Location: /audio", head)
+        self.assertIn("Cache-Control: no-store", head)
+        self.assertEqual(body, "")
 
         abc = "X:1\nK:C\nCDEF|\n"
         head, _ = self.request("/api/music/abc", {"name": "workspace.abc", "content": abc})
@@ -148,6 +173,277 @@ class HttpApiTests(unittest.TestCase):
         self.assertIn('409 Conflict', header)
         self.assertIn('disabled', json.loads(body)['error'])
 
+    def test_image_upload_returns_an_opaque_id_for_png_and_jpeg(self):
+        for name in ("one-pixel.png", "one-pixel.jpg"):
+            payload = (ROOT / "tests/fixtures" / name).read_bytes()
+            head, body = self.request_raw(
+                "/api/image/upload", payload, key="secret",
+                headers=["Authorization: Bearer secret"], method="POST",
+            )
+            self.assertIn("200 OK", head)
+            upload_id = json.loads(body)["id"]
+            self.assertRegex(upload_id, r"^[0-9a-f]{32}$")
+            self.assertEqual((self.image_dir / f".qwen-image-{upload_id}.upload").read_bytes(),
+                             payload)
+
+    def test_image_upload_rejects_unauthenticated_requests(self):
+        payload = (ROOT / "tests/fixtures/one-pixel.png").read_bytes()
+        head, _ = self.request_raw("/api/image/upload", payload, key="secret", method="POST")
+        self.assertIn("401 Unauthorized", head)
+        self.assertEqual(list(self.image_dir.iterdir()), [])
+
+    def test_image_upload_rejects_invalid_and_incomplete_bodies_without_files(self):
+        sentinel = self.image_dir / ".qwen-image-unrelated.upload"
+        sentinel.write_bytes(b"preserve unrelated file")
+        valid = (ROOT / "tests/fixtures/one-pixel.png").read_bytes()
+        cases = [
+            (b"", len(b"")),
+            (b"not an image", len(b"not an image")),
+            ((ROOT / "tests/fixtures/bmp-as-png.png").read_bytes(), None),
+            ((ROOT / "tests/fixtures/zero-width.png").read_bytes(), None),
+            ((ROOT / "tests/fixtures/wide-2049.png").read_bytes(), None),
+            (valid[:-1], len(valid) + 20),
+        ]
+        for payload, declared_length in cases:
+            with self.subTest(payload_size=len(payload), content_length=declared_length):
+                head, _ = self.request_raw(
+                    "/api/image/upload", payload, key="secret",
+                    headers=["Authorization: Bearer secret"], method="POST",
+                    content_length=declared_length,
+                )
+                self.assertIn("400 Bad Request", head)
+                self.assertEqual({path.name for path in self.image_dir.iterdir()}, {sentinel.name})
+
+    def test_image_upload_requires_bounded_content_length_before_opening_files(self):
+        sentinel = self.image_dir / ".qwen-image-unrelated.upload"
+        sentinel.write_bytes(b"preserve unrelated file")
+        headers = ["Authorization: Bearer secret"]
+        oversized, _ = self.request_raw(
+            "/api/image/upload", b"", key="secret", headers=headers,
+            method="POST", content_length=16 * 1024 * 1024 + 1,
+        )
+        self.assertIn("413 Payload Too Large", oversized)
+
+        overflow, _ = self.request_raw(
+            "/api/image/upload", b"", key="secret", headers=headers,
+            method="POST", content_length=str(1 << 64),
+        )
+        self.assertIn("413 Payload Too Large", overflow)
+
+        missing, _ = self.request_without_length(
+            "/api/image/upload", (ROOT / "tests/fixtures/one-pixel.png").read_bytes(),
+            key="secret", headers=headers,
+        )
+        self.assertIn("400 Bad Request", missing)
+        self.assertEqual({path.name for path in self.image_dir.iterdir()}, {sentinel.name})
+
+    def test_image_upload_expiry_skips_active_leases(self):
+        result = subprocess.run([str(self.binary), "--test-image-upload-lifecycle"],
+                                check=True, capture_output=True, text=True)
+        self.assertIn("image upload lifecycle: ok", result.stdout)
+
+    def qwen_image_environment(self, **extra):
+        return {
+            "PROSPERO_TEST_QWEN_IMAGE": "1",
+            "PROSPERO_TEST_IMAGE_CALLS_FILE": str(self.image_calls_file),
+            **extra,
+        }
+
+    def upload_image(self):
+        payload = (ROOT / "tests/fixtures/one-pixel.jpg").read_bytes()
+        head, body = self.request_raw(
+            "/api/image/upload", payload, key="secret",
+            headers=["Authorization: Bearer secret"], method="POST",
+        )
+        self.assertIn("200 OK", head)
+        image_id = json.loads(body)["id"]
+        return image_id, self.image_dir / f".qwen-image-{image_id}.upload"
+
+    def save_image_conversation(self, session_id, purpose="text-to-image", image=None):
+        headers = ["Authorization: Bearer secret"]
+        self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                     headers=headers)
+        message = {"role": "user", "content": "edit this"}
+        if image is not None:
+            message["image"] = image
+        return self.request("/api/conversations", {
+            "id": session_id, "title": "Qwen edit", "model": "qwen-image-test",
+            "modelName": "Qwen Image test", "purpose": purpose, "messages": [message],
+        }, key="secret", headers=headers)
+
+    def test_qwen_image_rejects_invalid_requests_before_inference(self):
+        image_id, _ = self.upload_image()
+        expired_id, expired_path = self.upload_image()
+        old = 1
+        os.utime(expired_path, (old, old))
+        self.save_image_conversation("qwen-image-text-session", purpose="text-to-text")
+        env = self.qwen_image_environment()
+        cases = [
+            ({"model": "qwen-image-test", "image_id": "0" * 32,
+              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
+            ({"model": "qwen-image-test", "image_id": image_id + "\0suffix",
+              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
+            ({"model": "qwen-image-test", "image_id": expired_id,
+              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
+            ({"model": "tiny.gguf", "image_id": image_id,
+              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
+            ({"model": "qwen-image-test", "image_id": image_id,
+              "messages": [{"role": "assistant", "content": "not a user prompt"}]}, "400 Bad Request"),
+            ({"model": "qwen-image-test", "image_id": image_id,
+              "conversation_id": "missing-image-session",
+              "messages": [{"role": "user", "content": "edit this"}]}, "404 Not Found"),
+            ({"model": "qwen-image-test", "image_id": image_id,
+              "conversation_id": "qwen-image-text-session",
+              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
+            ({"model": "qwen-image-test", "image_id": image_id,
+              "conversation_id": "qwen-image-text-session\0suffix",
+              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
+        ]
+        try:
+            for body, status in cases:
+                with self.subTest(status=status, conversation=body.get("conversation_id")):
+                    head, _ = self.request(body=body, key="secret",
+                                           headers=["Authorization: Bearer secret"], environment=env)
+                    self.assertIn(status, head)
+                    self.assertFalse(self.image_calls_file.exists())
+        finally:
+            self.request("/api/conversations/qwen-image-text-session", method="DELETE", key="secret",
+                         headers=["Authorization: Bearer secret"])
+
+    def test_qwen_image_generation_failure_keeps_upload_retryable_then_cleans_it(self):
+        image_id, upload_path = self.upload_image()
+        path_file = Path(self.scratch.name) / "image-path.txt"
+        env = self.qwen_image_environment(PROSPERO_TEST_IMAGE_PATH_FILE=str(path_file))
+        failed, body = self.request(body={
+            "model": "qwen-image-test", "image_id": image_id,
+            "messages": [{"role": "user", "content": "fail"}],
+        }, key="secret", headers=["Authorization: Bearer secret"], environment=env)
+        self.assertIn("400 Bad Request", failed)
+        self.assertIn("generation_failed", body)
+        self.assertTrue(upload_path.exists())
+
+        succeeded, body = self.request(body={
+            "model": "qwen-image-test", "image_id": image_id,
+            "messages": [{"role": "user", "content": "edit this"}],
+        }, key="secret", headers=["Authorization: Bearer secret"], environment=env)
+        self.assertIn("200 OK", succeeded)
+        self.assertEqual(path_file.read_text(), str(upload_path))
+        self.assertFalse(upload_path.exists())
+        response = json.loads(body)
+        self.assertNotIn("image", response["choices"][0]["message"])
+        self.assertTrue(Path(response["choices"][0]["message"]["content"]).exists())
+
+    def test_qwen_image_edit_archives_source_and_syncs_conversation(self):
+        session_id = "qwen-image-archive-session"
+        header, _ = self.save_image_conversation(session_id)
+        self.assertIn("201 Created", header)
+        image_id, upload_path = self.upload_image()
+        head, body = self.request(body={
+            "model": "qwen-image-test", "image_id": image_id,
+            "conversation_id": session_id,
+            "messages": [{"role": "user", "content": "edit this"}],
+        }, key="secret", headers=["Authorization: Bearer secret"],
+            environment=self.qwen_image_environment())
+        self.assertIn("200 OK", head)
+        message = json.loads(body)["choices"][0]["message"]
+        archived = Path(message["image"])
+        self.assertEqual(archived.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertFalse(upload_path.exists())
+        detail = json.loads(self.request(
+            "/api/conversations/" + session_id, key="secret",
+            headers=["Authorization: Bearer secret"])[1])
+        self.assertEqual(detail["messages"][0]["image"], str(archived))
+
+        media_wire = self.request_raw_bytes(str(archived), key="secret", method="GET",
+                                            headers=["Authorization: Bearer secret"])
+        media_head, media_body = media_wire.split(b"\r\n\r\n", 1)
+        self.assertIn(b"200 OK", media_head)
+        self.assertIn(b"Content-Type: image/png", media_head)
+        self.assertEqual(media_body, archived.read_bytes())
+        self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                     headers=["Authorization: Bearer secret"])
+
+    def test_qwen_image_archive_failures_keep_output_and_upload_retryable(self):
+        session_id = "qwen-image-archive-retry"
+        headers = ["Authorization: Bearer secret"]
+        self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                     headers=headers)
+        self.save_image_conversation(session_id)
+        image_id, upload_path = self.upload_image()
+        chat = {
+            "model": "qwen-image-test", "image_id": image_id,
+            "conversation_id": session_id,
+            "messages": [{"role": "user", "content": "edit this"}],
+        }
+        env = self.qwen_image_environment()
+        generated = self.image_dir / "qwen-generated.png"
+        archive_dir = Path("/tmp/prosperoai-session-test/work/image") / session_id
+        sidecar_tmp = Path("/tmp/prosperoai-session-test/sessions") / session_id / "message-000.image.tmp"
+        archive_dir.parent.mkdir(parents=True, exist_ok=True)
+        archive_dir.write_text("block archive directory")
+        try:
+            head, body = self.request(body=chat, key="secret", headers=headers, environment=env)
+            self.assertIn("500 Internal Server Error", head)
+            self.assertIn("image_archive_failed", body)
+            self.assertTrue(generated.exists())
+            self.assertTrue(upload_path.exists())
+
+            archive_dir.unlink()
+            sidecar_tmp.mkdir()
+            head, body = self.request(body=chat, key="secret", headers=headers, environment=env)
+            self.assertIn("500 Internal Server Error", head)
+            self.assertIn("image_archive_failed", body)
+            self.assertTrue(generated.exists())
+            self.assertTrue(upload_path.exists())
+            self.assertEqual(list(archive_dir.glob("*.png")), [])
+
+            sidecar_tmp.rmdir()
+            head, body = self.request(body=chat, key="secret", headers=headers, environment=env)
+            self.assertIn("200 OK", head)
+            self.assertTrue(Path(json.loads(body)["choices"][0]["message"]["image"]).exists())
+            self.assertFalse(upload_path.exists())
+        finally:
+            if archive_dir.is_file():
+                archive_dir.unlink()
+            if sidecar_tmp.exists():
+                sidecar_tmp.rmdir()
+            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                         headers=headers)
+
+    def test_conversation_sync_roundtrips_only_owned_png_image_paths(self):
+        session_id = "qwen-image-sync-session"
+        self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                     headers=["Authorization: Bearer secret"])
+        archived = Path("/tmp/prosperoai-session-test/work/image") / session_id / "000-123.png"
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        archived.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
+        try:
+            head, _ = self.save_image_conversation(session_id, image=str(archived))
+            self.assertIn("201 Created", head)
+            detail = json.loads(self.request(
+                "/api/conversations/" + session_id, key="secret",
+                headers=["Authorization: Bearer secret"])[1])
+            self.assertEqual(detail["messages"][0]["image"], str(archived))
+            invalid = {"id": session_id, "title": "Qwen edit", "model": "qwen-image-test",
+                       "modelName": "Qwen Image test", "purpose": "text-to-image",
+                       "messages": [{"role": "user", "content": "edit this",
+                                     "image": "/tmp/unowned-image.png"}]}
+            self.assertIn("400 Bad Request", self.request(
+                "/api/conversations", invalid, key="secret",
+                headers=["Authorization: Bearer secret"])[0])
+            invalid["messages"][0]["image"] = str(archived) + "\0outside"
+            self.assertIn("400 Bad Request", self.request(
+                "/api/conversations", invalid, key="secret",
+                headers=["Authorization: Bearer secret"])[0])
+        finally:
+            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                         headers=["Authorization: Bearer secret"])
+
+    def test_run_generation_forwards_optional_image_path(self):
+        result = subprocess.run([str(self.binary), "--test-image-path-forwarding"],
+                                check=True, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), "/server-owned/reference.png")
+
     def request(self, path="/v1/chat/completions", body=None, key=None, headers=None, method=None,
                 environment=None):
         if body is None and path.endswith("completions"):
@@ -157,13 +453,28 @@ class HttpApiTests(unittest.TestCase):
 
     def request_raw(self, path, payload, key=None, headers=None, method=None, environment=None,
                     content_length=None):
+        wire = self.request_raw_bytes(path, payload, key, headers, method, environment,
+                                      content_length)
+        head, data = wire.split(b"\r\n\r\n", 1)
+        return head.decode(), data.decode()
+
+    def request_raw_bytes(self, path, payload=b"", key=None, headers=None, method=None,
+                          environment=None, content_length=None):
         if content_length is None:
             content_length = len(payload)
         lines = [f"{method or ('POST' if payload else 'GET')} {path} HTTP/1.1", "Host: test",
                  f"content-length: {content_length}"] + (headers or [])
-        wire = subprocess.check_output([str(self.binary)] + ([key] if key else []),
-                                      env={**os.environ, **(environment or {})},
-                                      input="\r\n".join(lines).encode()+b"\r\n\r\n"+payload)
+        return subprocess.check_output([str(self.binary)] + ([key] if key else []),
+                                       env={**os.environ, **(environment or {})},
+                                       input="\r\n".join(lines).encode()+b"\r\n\r\n"+payload)
+
+    def request_without_length(self, path, payload, key=None, headers=None, environment=None):
+        lines = [f"POST {path} HTTP/1.1", "Host: test"] + (headers or [])
+        wire = subprocess.check_output(
+            [str(self.binary)] + ([key] if key else []),
+            env={**os.environ, **(environment or {})},
+            input="\r\n".join(lines).encode() + b"\r\n\r\n" + payload,
+        )
         head, data = wire.split(b"\r\n\r\n", 1)
         return head.decode(), data.decode()
 
@@ -289,11 +600,31 @@ class HttpApiTests(unittest.TestCase):
         expected.update(context='256k',kv='auto',thinking=True,idle_unload_minutes=5,kokoro_voice='af_bella')
         self.assertEqual(json.loads(body), expected)
         self.assertEqual(json.loads(self.request('/api/settings/runtime')[1]), expected)
-        for invalid in ({'context':'2k'}, {'kv':'q8_0'}, {'kv':'q2_0'}, {'thinking':'false'}, {'sd_upscale':1}, {'idle_unload_minutes':3}, {'kokoro_voice':'missing'}, {'audio_duration_sec':301}, {'audio_seed':-1}, {'audio_seed':4294967296}, {'sd_seed':-1}, {'sd_seed':4294967296}, {'unknown':1}, {'context':'16k','kv':'bad'}, []):
+        for invalid in ({'context':'2k'}, {'kv':'q2_0'}, {'thinking':'false'}, {'sd_upscale':1}, {'idle_unload_minutes':3}, {'kokoro_voice':'missing'}, {'audio_duration_sec':301}, {'audio_seed':-1}, {'audio_seed':4294967296}, {'sd_seed':-1}, {'sd_seed':4294967296}, {'unknown':1}, {'context':'16k','kv':'bad'}, []):
             self.assertIn('400 Bad Request', self.request('/api/settings/runtime', body=invalid)[0])
             self.assertEqual(json.loads(self.request('/api/settings/runtime')[1]), expected)
         self.assertIn('401 Unauthorized', self.request('/api/settings/runtime', key='secret')[0])
         self.request('/api/settings/runtime', body={'context':'auto','kv':'auto','thinking':False,'idle_unload_minutes':2})
+
+    def test_runtime_kv_choices_round_trip_and_persist(self):
+        config = Path(self.scratch.name) / 'runtime.cfg'
+        config.write_text('version=2\ntokens=192\n')
+        self.assertEqual(json.loads(self.request('/api/settings/runtime')[1])['kv'], 'auto')
+
+        for index, kv in enumerate(('auto', 'f16', 'q8_0', 'q4_0')):
+            header, body = self.request('/api/settings/runtime', body={'kv': kv})
+            self.assertIn('200 OK', header)
+            self.assertEqual(json.loads(body)['kv'], kv)
+            self.assertIn(f'kv={index}', config.read_text().splitlines())
+            self.assertEqual(json.loads(self.request('/api/settings/runtime')[1])['kv'], kv)
+
+        for invalid in ('q2_0', '', 'Q4_0', 3):
+            self.assertIn('400 Bad Request',
+                          self.request('/api/settings/runtime', body={'kv': invalid})[0])
+            self.assertEqual(json.loads(self.request('/api/settings/runtime')[1])['kv'], 'q4_0')
+
+        config.write_text('version=2\nkv=9\n')
+        self.assertEqual(json.loads(self.request('/api/settings/runtime')[1])['kv'], 'auto')
 
     def test_search_settings_and_route_require_enabled_configuration(self):
         header, body = self.request('/api/settings/runtime')

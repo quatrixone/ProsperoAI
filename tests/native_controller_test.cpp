@@ -7,6 +7,7 @@
 #include "runtime_settings.hpp"
 #include "gfx/font.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -26,6 +27,8 @@ unsigned selected = 0;
 bool fail_generation = false, fail_save = false, fail_after_generation = false;
 bool fail_prepare = false;
 bool fail_audio_generation = false;
+std::atomic<bool> long_response_paused{false};
+std::atomic<bool> allow_long_response_finish{false};
 unsigned generations = 0, select_calls = 0, prepare_calls = 0, audio_generations = 0;
 unsigned fixture_model_count = 500;
 bool audio_only_fixture = false;
@@ -219,8 +222,10 @@ bool gpt_runtime_context_full()
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *output, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const char *image_path)
 {
+    assert(image_path == nullptr);
     off_ui();
     ++generations;
     if (count == 1 && settings.model_id &&
@@ -251,6 +256,12 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         for (unsigned i = 0; i < 20; ++i)
         {
             progress(text.c_str());
+            if (i == 0)
+            {
+                long_response_paused.store(true, std::memory_order_release);
+                while (!allow_long_response_finish.load(std::memory_order_acquire))
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
         std::snprintf(output, capacity, "%s", text.c_str());
@@ -353,7 +364,7 @@ int main(int argc, char **argv)
     std::remove(PROSPERO_SETTINGS_PATH);
     {
         std::ofstream settings(PROSPERO_SETTINGS_PATH);
-        settings << "style=2\ntokens=192\n";
+        settings << "style=2\ntokens=192\nkv=99\n";
     }
     ui_thread = std::this_thread::get_id();
     test_native_vulkan_memory_snapshot();
@@ -459,21 +470,29 @@ int main(int argc, char **argv)
         preferences.reduced_motion = true;
         preferences.accent = 2;
         preferences.context_length = 32768;
-        preferences.kv_cache = 2; // Legacy manual precision is normalized back to Auto.
+        preferences.kv_cache = 3;
         preferences.thinking = true;
         preferences.output_limit = 65536;
         app.set_preferences(preferences);
         settle(app);
         // An API client may have selected another model between UI requests.
         selected = 12;
+        long_response_paused.store(false, std::memory_order_relaxed);
+        allow_long_response_finish.store(false, std::memory_order_relaxed);
         assert(app.send("Long response"));
-        bool saw_long_stream = false;
-        while (app.busy())
+        bool reached_long_stream = false;
+        for (int i = 0; i < 2000 && !reached_long_stream; ++i)
         {
             app.poll();
-            saw_long_stream |= app.state().stream.size() == 24000;
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            reached_long_stream = long_response_paused.load(std::memory_order_acquire);
+            if (!reached_long_stream)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
+        app.poll();
+        const bool saw_long_stream =
+            reached_long_stream && app.busy() && app.state().stream.size() == 24000;
+        allow_long_response_finish.store(true, std::memory_order_release);
+        settle(app);
         assert(saw_long_stream);
         assert(app.state().messages.back().content.size() == 24000);
         assert(app.state().stats.generated_tokens == 65536);
@@ -487,7 +506,7 @@ int main(int argc, char **argv)
         assert(app.state().selected_model == -1 && !app.state().ready);
         assert(app.state().preferences.reduced_motion && app.state().preferences.accent == 2);
         assert(app.state().preferences.context_length == 32768);
-        assert(app.state().preferences.kv_cache == 0 && app.state().preferences.thinking);
+        assert(app.state().preferences.kv_cache == 3 && app.state().preferences.thinking);
         assert(app.state().preferences.output_limit == 65536);
         saved.begin()->second.record.model_id[0] = 'x';
         assert(app.open_session(0));
