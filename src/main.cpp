@@ -21,6 +21,7 @@
 #include "platform/ps5/system.hpp"
 #ifdef PS5_LLAMA_VULKAN
 #include "gpt_runtime.hpp"
+#include "model_manager.hpp"
 #include "inference_config.hpp"
 #include "runtime_settings.hpp"
 #include "http_server.hpp"
@@ -31,6 +32,7 @@ extern "C" int sceKernelUsleep(std::uint32_t microseconds);
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -239,6 +241,12 @@ int main()
 #endif
     // The debug log's switch is read here, before anything else can go wrong.
     prospero::debug::start("/download0/ProsperoAI/logs");
+    constexpr const char *run_marker = "/download0/ProsperoAI/logs/app-running";
+    if (access(run_marker, F_OK) == 0)
+        prospero::debug::event("previous-run-unclean", "", "unclean-exit");
+    if (std::FILE *marker = std::fopen(run_marker, "wb"))
+        std::fclose(marker);
+    prospero::debug::event("app-start", "", "");
 #ifdef PS5_LLAMA_VULKAN
     configure_vulkan_tuning_profile();
 #endif
@@ -294,7 +302,12 @@ int main()
         const auto now = hui::sys::monotonic_us();
 #ifdef PS5_LLAMA_VULKAN
         if (!first_frame)
-            gpt_runtime_check_configured_idle_unload();
+        {
+            std::unique_lock<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex(),
+                                                      std::try_to_lock);
+            if (runtime_lock.owns_lock())
+                gpt_runtime_check_configured_idle_unload();
+        }
 #endif
         const float elapsed = static_cast<float>(now - previous) / 1000000.0f;
         const float dt = std::clamp(elapsed, 0.001f, 0.05f);
@@ -375,8 +388,14 @@ int main()
             first_frame = false;
         }
     }
+#ifdef PS5_LLAMA_VULKAN
+    // Stop admission and join every HTTP worker before native/media teardown.
+    prospero_http_server_stop();
+#endif
     gpt_ime_shutdown();
     app.shutdown();
+    prospero::debug::event("app-stop", "", "");
+    std::remove(run_marker);
     prospero_media_attach(nullptr);
     gpt_input_shutdown();
     audio.stop();

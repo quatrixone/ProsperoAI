@@ -27,6 +27,7 @@ struct Message
     char role[12];
     char timestamp[9];
     std::string content;
+    std::string image;
 };
 
 struct Record
@@ -41,6 +42,8 @@ struct Record
     std::uint64_t updated_us;
     unsigned message_count;
     unsigned context_start;
+    bool pinned;
+    bool archived;
 };
 
 // Stable categories also apply to conversations saved before filtering existed.
@@ -86,6 +89,7 @@ bool create_with_id(Record *record, const char *id, const char *model_id, const 
                     const char *purpose);
 bool save(Record *record, const Message *messages, unsigned message_count);
 bool load(const char *id, Record *record, Message *messages, unsigned message_capacity);
+bool load_message(const char *id, unsigned index, Message *message);
 unsigned scan(Record *records, unsigned capacity);
 bool erase(const char *id);
 struct OutputMetadata
@@ -100,6 +104,12 @@ bool archive_text(const char *id, unsigned message_index, const char *text,
 bool archive_media(const char *id, unsigned message_index, const char *kind, const char *source,
                    char *output, std::size_t output_capacity,
                    const OutputMetadata *metadata = nullptr);
+bool write_optional_image_sidecar(const char *id, unsigned index, const char *path);
+bool read_optional_image_sidecar(const char *id, unsigned index, std::string *output);
+bool remove_optional_image_sidecar(const char *id, unsigned index);
+bool valid_optional_image_path(const char *id, unsigned index, const char *path);
+bool archive_image(const char *conversation_id, unsigned message_index, const char *source,
+                   char *output, std::size_t output_capacity);
 bool valid_id(const char *id);
 
 } // namespace prospero_session

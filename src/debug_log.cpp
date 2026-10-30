@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "debug_log.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
@@ -10,7 +11,9 @@
 #include <cstring>
 #include <ctime>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <string>
+#include <sys/stat.h>
 
 #if __has_include("prospero_build.h")
 #include "prospero_build.h" // written by the build from sce_sys/param.json
@@ -34,6 +37,15 @@ std::string logs_folder;
 std::FILE *file;
 long written;
 bool full;
+std::uint64_t journal_sequence = 0;
+
+std::uint64_t next_operation_id()
+{
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+    return static_cast<std::uint64_t>(micros) * 1024ULL + (++journal_sequence & 1023ULL);
+}
 
 double seconds()
 {
@@ -166,6 +178,147 @@ void system_line(const char *text)
         return;
     const std::lock_guard<std::mutex> lock(mutex);
     write("sys", text);
+}
+
+OperationId begin_operation(const char *operation, const char *model_id)
+{
+    OperationId id = 0;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        id = next_operation_id();
+    }
+    std::string started = operation ? operation : "operation";
+    started += "-started";
+    event(started.c_str(), model_id, "", id);
+    return id;
+}
+
+void event(const char *operation, const char *model_id, const char *error_code,
+           OperationId operation_id)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    if (logs_folder.empty())
+        return;
+    const std::string path = logs_folder + "/events.jsonl";
+    struct stat info
+    {
+    };
+    if (::stat(path.c_str(), &info) == 0 && info.st_size > 60 * 1024)
+    {
+        std::rename(path.c_str(), (logs_folder + "/events.prev.jsonl").c_str());
+    }
+    auto safe = [](const char *value)
+    {
+        std::string result;
+        if (!value)
+            return result;
+        for (const unsigned char c : std::string(value))
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                c == '-' || c == '_' || c == '.' || c == '/')
+                result.push_back(static_cast<char>(c));
+        if (result.size() > 96)
+            result.resize(96);
+        return result;
+    };
+    if (std::FILE *journal = std::fopen(path.c_str(), "ab"))
+    {
+        if (!operation_id)
+            operation_id = next_operation_id();
+        std::fprintf(journal,
+                     "{\"time\":%lld,\"operation_id\":%llu,\"operation\":\"%s\","
+                     "\"model\":\"%s\",\"error\":\"%s\"}\n",
+                     static_cast<long long>(std::time(nullptr)),
+                     static_cast<unsigned long long>(operation_id), safe(operation).c_str(),
+                     safe(model_id).c_str(), safe(error_code).c_str());
+        std::fclose(journal);
+    }
+}
+
+void model_memory_sample(const char *model_id, unsigned context_tokens, unsigned output_limit,
+                         bool thinking, std::uint64_t vulkan_heap_bytes,
+                         std::uint64_t flexible_free_bytes)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    if (logs_folder.empty())
+        return;
+    auto safe = [](const char *value)
+    {
+        std::string result;
+        if (!value)
+            return result;
+        for (const unsigned char c : std::string(value))
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                c == '-' || c == '_' || c == '.' || c == '/')
+                result.push_back(static_cast<char>(c));
+        if (result.size() > 96)
+            result.resize(96);
+        return result;
+    };
+    const std::string path = logs_folder + "/events.jsonl";
+    struct stat info
+    {
+    };
+    if (::stat(path.c_str(), &info) == 0 && info.st_size > 60 * 1024)
+        std::rename(path.c_str(), (logs_folder + "/events.prev.jsonl").c_str());
+    if (std::FILE *journal = std::fopen(path.c_str(), "ab"))
+    {
+        std::fprintf(journal,
+                     "{\"time\":%lld,\"operation_id\":%llu,"
+                     "\"operation\":\"model-memory-sample\","
+                     "\"model\":\"%s\",\"error\":\"\",\"context_tokens\":%u,"
+                     "\"output_limit\":%u,\"thinking\":%s,"
+                     "\"vulkan_heap_bytes\":%llu,\"flexible_free_bytes\":%llu}\n",
+                     static_cast<long long>(std::time(nullptr)),
+                     static_cast<unsigned long long>(next_operation_id()), safe(model_id).c_str(),
+                     context_tokens, output_limit, thinking ? "true" : "false",
+                     static_cast<unsigned long long>(vulkan_heap_bytes),
+                     static_cast<unsigned long long>(flexible_free_bytes));
+        std::fclose(journal);
+    }
+}
+
+MemorySummary model_memory_summary(const char *model_id, unsigned context_tokens,
+                                   unsigned output_limit, bool thinking)
+{
+    MemorySummary summary{};
+    if (!model_id || !*model_id)
+        return summary;
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (logs_folder.empty())
+        return summary;
+    const char *files[] = {"/events.prev.jsonl", "/events.jsonl"};
+    for (const char *suffix : files)
+    {
+        const std::string path = logs_folder + suffix;
+        if (std::FILE *journal = std::fopen(path.c_str(), "rb"))
+        {
+            char line[1024];
+            while (std::fgets(line, sizeof(line), journal))
+            {
+                const auto event = nlohmann::json::parse(line, nullptr, false);
+                if (!event.is_object() ||
+                    event.value("operation", std::string()) != "model-memory-sample" ||
+                    event.value("model", std::string()) != model_id ||
+                    event.value("context_tokens", 0U) != context_tokens ||
+                    event.value("output_limit", 0U) != output_limit ||
+                    event.value("thinking", false) != thinking ||
+                    !event.contains("vulkan_heap_bytes") ||
+                    !event["vulkan_heap_bytes"].is_number_integer() ||
+                    !event.contains("flexible_free_bytes") ||
+                    !event["flexible_free_bytes"].is_number_integer())
+                    continue;
+                const auto heap = event["vulkan_heap_bytes"].get<std::uint64_t>();
+                const auto free = event["flexible_free_bytes"].get<std::uint64_t>();
+                summary.largest_vulkan_heap_bytes =
+                    std::max(summary.largest_vulkan_heap_bytes, heap);
+                summary.least_flexible_free_bytes =
+                    summary.samples ? std::min(summary.least_flexible_free_bytes, free) : free;
+                ++summary.samples;
+            }
+            std::fclose(journal);
+        }
+    }
+    return summary;
 }
 
 const char *folder()

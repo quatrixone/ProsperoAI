@@ -85,7 +85,7 @@ function languageFixture(settings = {}) {
     return { select, scope };
 }
 
-test('the language picker lists what the console reports and keeps the saved choice', () => {
+test('the language picker lists console choices and stages a new selection locally', () => {
     const { select, scope } = languageFixture({
         languages: [{ id: 'en', name: 'English' }, { id: 'de', name: 'German' }, { id: 'ko', name: 'Korean' }],
         saved: 'de' });
@@ -94,8 +94,8 @@ test('the language picker lists what the console reports and keeps the saved cho
     assert.equal(select.value, 'de');
     select.value = 'ko';
     select.onchange();
-    assert.deepEqual(Object.keys(scope.sent), ['chatterbox_language']);
-    assert.equal(scope.sent.chatterbox_language, 'ko');
+    assert.equal(scope.savedChatterboxLanguage, 'ko');
+    assert.equal(scope.sent, undefined, 'changing a Workspace option must not update runtime settings');
 });
 
 test('a saved language the console no longer offers falls back to the first one', () => {

@@ -55,10 +55,13 @@ class NativeController(unittest.TestCase):
             kit = tool("prepare-ui-kit.sh") / "src"
             fonts = tool("bake-fonts.sh")
             binary = directory / "controller-test"
+            logs = directory / "logs"
+            logs.mkdir()
             subprocess.run([os.environ.get("HOST_CXX", "clang++"), "-std=c++20", "-pthread",
                             "-g", "-O1", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                             "-Wall", "-Wextra", "-Werror", "-DPROSPERO_HOST",
                             f'-DPROSPERO_SETTINGS_PATH="{directory / "settings.cfg"}"',
+                            f'-DPROSPERO_AUDIO_DIR="{directory / "audio"}"',
                             "-I" + str(ROOT / "include"),
                             "-I" + str(ROOT / ".deps/llama.cpp/vendor"),
                             "-I" + str(ROOT / "search-engine/include"),
@@ -66,6 +69,7 @@ class NativeController(unittest.TestCase):
                             "-I" + str(kit),
                             str(ROOT / "tests/native_controller_test.cpp"),
                             str(ROOT / "src/native_app.cpp"),
+                            str(ROOT / "src/audio_workflows.cpp"),
                             str(ROOT / "src/debug_log.cpp"),
                             str(ROOT / "src/media_preview.cpp"),
                             # The conversation understands /search and /fetch, so it
@@ -79,4 +83,11 @@ class NativeController(unittest.TestCase):
                             str(kit / "gfx/font.cpp"),
                             "-o", str(binary)], check=True)
             subprocess.run([str(binary), str(fonts / "inter-regular.huifont"),
-                            str(fonts / "noto-sans-east-asian.huifont")], check=True, timeout=30)
+                            str(fonts / "noto-sans-east-asian.huifont"), str(logs)],
+                           check=True, timeout=30)
+
+    def test_workspace_modes_and_audio_actions(self):
+        self.test_worker_state_and_unicode()
+
+    def test_native_vulkan_memory_snapshot(self):
+        self.test_worker_state_and_unicode()

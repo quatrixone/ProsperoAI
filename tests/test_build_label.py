@@ -104,6 +104,13 @@ class BuildLabelTests(unittest.TestCase):
         self.assertIn('"$app/build-label.txt"', native)
         self.assertIn('label=${BUILD_LABEL:-vulkan-runtime}', native)
 
+    def test_incremental_native_build_preserves_embedded_music_studio_assets(self):
+        native = (ROOT / "tools/build-vulkan-native.sh").read_text(encoding="utf-8")
+        self.assertIn('rm -f "$app/assets/web/workspace-audio.js"', native)
+        self.assertIn('cp -a "$root/assets/web/." "$app/assets/web/"', native)
+        for name in ("index.html", "workspace.js", "music.js"):
+            self.assertTrue((ROOT / "assets/web" / name).is_file(), name)
+
     def test_label_rule(self):
         build = (ROOT / "tools/build.sh").read_text(encoding="utf-8")
         check = re.search(r"^if \[\[ -n \$\{BUILD_LABEL:-\} \]\]; then\n.*?^fi\n", build, re.S | re.M)

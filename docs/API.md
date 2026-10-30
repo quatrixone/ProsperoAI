@@ -6,10 +6,12 @@ only on a trusted network.
 
 ## Authentication
 
-By default, requests do not need an API key. To require one, place `api_key.txt` in the
-deployed app folder and restart the title. Then send `Authorization: Bearer <key>` with
-every request. The web UI does not send this header, so enabling a key also prevents that
-browser UI from connecting.
+By default, requests do not need an API key or browser token. To require a key, place
+`api_key.txt` in the deployed app folder and restart the title. External clients send
+`Authorization: Bearer <key>` with every request. The first-party web UI asks for the key,
+exchanges it through `POST /api/auth/session`, then keeps only the returned 30-minute,
+host- and origin-bound session token in tab-scoped `sessionStorage`. The key itself is not
+retained by the page. The listener uses plain HTTP, so use this only on a trusted local network.
 
 ## OpenAI-compatible API
 
@@ -17,6 +19,8 @@ browser UI from connecting.
 | --- | --- | --- |
 | `GET` | `/v1/models` | List installed models and their IDs. |
 | `POST` | `/v1/chat/completions` | Generate text, optionally streaming Server-Sent Events; supports function/tool calls. |
+| `POST` | `/api/auth/session` | Exchange the configured bearer key for a 30-minute same-origin browser session. |
+| `GET` | `/api/settings/security` | Read the API authentication mode, HTTP transport, and listener exposure. This status contains no credential and does not require authentication. |
 
 Use a model ID returned by `/v1/models`. See [OpenCode setup and API limits](OPENCODE.md)
 for request limits, tool-call behavior, and a client configuration example.
@@ -72,18 +76,30 @@ Invalid settings return `400 Bad Request`; a settings-file write failure returns
 | `GET` | `/api/tags` | List installed models in Ollama-style format. |
 | `POST` | `/api/generate` | Generate from a prompt in Ollama-style format. |
 | `POST` | `/api/chat` | Generate from chat messages in Ollama-style format. |
-| `GET` | `/api/models/memory` | Report the currently loaded model. |
+| `GET` | `/api/models/memory` | Report the loaded model and a live snapshot of available CPU/direct and Vulkan memory. A snapshot is not a guarantee that a model will fit. |
+| `POST` | `/api/models/estimate` | Return successful historical memory samples for a model and a best-effort current snapshot. Historical readings are not a fit guarantee; no sample returns `estimate_available:false`. Body: `{"id":"model-id"}`. |
 | `GET`, `POST` | `/api/models/selection` | Read or change the selected model. |
-| `GET`, `POST` | `/api/models/presets` | List curated model presets or start a preset download. |
+| `GET`, `POST` | `/api/models/presets` | List curated model presets with required storage; start a download. The current PS5 build reports free space as unknown and does not claim to preflight it. |
 | `POST` | `/api/models/search` | Search model repositories by query. |
 | `POST` | `/api/models/browse` | Browse downloadable files in a model repository. |
 | `GET`, `POST`, `DELETE` | `/api/models/download` | Check, start, or cancel a model download. |
 | `DELETE` | `/api/models` | Delete an installed model. |
+| `GET`, `DELETE` | `/api/media` | List image/audio files referenced by saved conversations, with source conversation and model metadata; delete an archived conversation-owned copy by sending `{"path":"/download0/ProsperoAI/work/image/<id>/<file>"}` (audio and voice folders are also supported). Shared references and files outside that conversation's output folder are rejected, and the message reference is replaced with `[media deleted]`. |
 | `GET`, `POST` | `/api/conversations` | List or create/update a saved conversation. |
-| `GET`, `DELETE` | `/api/conversations/{id}` | Read or remove one saved conversation. |
+| `GET`, `PATCH`, `DELETE` | `/api/conversations/{id}` | Read, rename (`{"title":"..."}`), pin/archive (`{"pinned":true,"archived":false}`), or remove one saved conversation. |
+| `GET` | `/api/diagnostics/events` | Export the bounded privacy-aware lifecycle and model event journal. |
 | `GET`, `POST` | `/api/voices/chatterbox/custom` | Read or upload the custom Chatterbox voice sample. |
 | `GET`, `POST`, `DELETE` | `/api/voices/chatterbox/recording` | Read or manage a Chatterbox recording session. |
 
-The model library and conversation routes use JSON. Model download operations can return
+Conversation responses include boolean `pinned` and `archived` fields. Existing saved conversations default both to `false`. The model library and conversation routes use JSON. Model download operations can return
 `409 Conflict` when another download is active or the request cannot be started. The web
 workspace calls these routes directly.
+
+Diagnostic journal rows include a unique `operation_id`, UTC timestamp, operation name, model ID
+when available, and a fixed error code. Prompts, generated text, credentials, and runtime error
+strings are not stored.
+
+Repository browse results include each GGUF file's repository size and a rough file-size fit
+badge. That badge is only a heuristic: GGUF size does not include context/KV
+cache or all runtime allocations. `/api/models/estimate` reports the installed file's size,
+when available, separately from historical runtime measurements.

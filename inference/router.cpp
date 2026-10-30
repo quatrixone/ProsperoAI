@@ -94,6 +94,8 @@ bool supported_diffusers_directory(const std::string &path, std::string &family)
         return false;
     if (std::strstr(contents, "Flux2KleinPipeline"))
         family = "FLUX.2 Klein";
+    else if (std::strstr(contents, "QwenImage21Pipeline"))
+        family = "Qwen-Image 2.1";
     else if (std::strstr(contents, "StableDiffusion3Pipeline"))
         family = "SD3";
     else if (std::strstr(contents, "StableDiffusionXLPipeline"))
@@ -101,6 +103,12 @@ bool supported_diffusers_directory(const std::string &path, std::string &family)
     else
         return false;
     return count > 0;
+}
+bool supported_qwen_image_2_1_directory(const std::string &path)
+{
+    return exists(path + "/qwen_image_2.1-Q2_K.gguf") &&
+           exists(path + "/Qwen3VL-8B-Instruct-Q4_K_M.gguf") &&
+           exists(path + "/qwen_image_2.1_vae_bf16.safetensors");
 }
 void scan()
 {
@@ -201,8 +209,11 @@ void scan()
             if (stat(root.c_str(), &info) != 0 || !S_ISDIR(info.st_mode))
                 continue;
             std::string family;
-            if (supported_diffusers_directory(root, family))
+            if (supported_diffusers_directory(root, family) &&
+                (family != "Qwen-Image 2.1" || supported_qwen_image_2_1_directory(root)))
                 models.push_back({id, id + " (" + family + ")", root, Modality::Image, 0});
+            else if (supported_qwen_image_2_1_directory(root))
+                models.push_back({id, id + " (Qwen-Image 2.1)", root, Modality::Image, 0});
         }
         closedir(directory);
     }
@@ -264,6 +275,17 @@ const char *gpt_runtime_model_purpose(unsigned i)
     scan();
     return i < models.size() ? modality_name(models[i].modality) : "unknown";
 }
+bool gpt_runtime_model_is_qwen_image_2_1(const char *model_id)
+{
+    if (!model_id || !*model_id)
+        return false;
+    std::lock_guard<std::mutex> lock(mutex);
+    scan();
+    const auto found = std::find_if(models.begin(), models.end(), [&](const Model &model)
+                                    { return model.id == model_id; });
+    return found != models.end() && found->modality == Modality::Image &&
+           supported_qwen_image_2_1_directory(found->root);
+}
 const char *gpt_runtime_name()
 {
     return gpt_runtime_model_name(gpt_runtime_selected_model());
@@ -295,6 +317,10 @@ bool gpt_runtime_context_full()
 std::uint64_t gpt_runtime_vulkan_heap_bytes()
 {
     return prospero_vulkan::gpt_runtime_vulkan_heap_bytes();
+}
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes)
+{
+    return prospero_vulkan::gpt_runtime_vulkan_memory(free_bytes, total_bytes);
 }
 namespace
 {
@@ -459,7 +485,8 @@ int gpt_runtime_prepare()
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *output, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const char *image_path)
 {
     if (!messages || !count || !output || !capacity)
         return 1;
@@ -500,7 +527,8 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         ~GenerationCounterGuard() { active_generations.fetch_sub(1, std::memory_order_acq_rel); }
     } generation_guard;
     const int result = adapter->generate(
-        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress});
+        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress,
+                          image_path});
     note_inference_activity();
     return result;
 }

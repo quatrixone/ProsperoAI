@@ -68,7 +68,11 @@ bool gpt_runtime_context_full();
 // Reported total Vulkan device memory in bytes, or 0 when the backend is not available
 // (host tests, or called before the Vulkan backend has registered its device).
 std::uint64_t gpt_runtime_vulkan_heap_bytes();
+// Device-wide Vulkan free/total memory snapshot; false means the snapshot is unavailable.
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes);
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned message_count,
                          const gpt_runtime_settings_t &settings, char *output,
                          std::size_t output_capacity, gpt_runtime_stats_t *stats,
-                         gpt_runtime_progress_fn progress);
+                         gpt_runtime_progress_fn progress, const char *image_path = nullptr);
+// True only for a discovered Qwen Image 2.1 model with its core model files installed.
+bool gpt_runtime_model_is_qwen_image_2_1(const char *model_id);

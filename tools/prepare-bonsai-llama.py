@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from prepare_build import write_text_if_changed
 
 
 def extract_block(text: str, marker: str) -> str:
@@ -49,7 +50,7 @@ def insert_once(path: Path, anchor: str, addition: str) -> None:
         return
     if anchor not in text:
         raise SystemExit(f"{path}: missing insertion anchor: {anchor}")
-    path.write_text(text.replace(anchor, addition + anchor, 1))
+    write_text_if_changed(path, text.replace(anchor, addition + anchor, 1))
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -58,7 +59,7 @@ def replace_once(path: Path, old: str, new: str) -> None:
         return
     if text.count(old) != 1:
         raise SystemExit(f"{path}: expected one replacement anchor, got {text.count(old)}: {old[:100]!r}")
-    path.write_text(text.replace(old, new, 1))
+    write_text_if_changed(path, text.replace(old, new, 1))
 
 
 def prepare(llama: Path, prism: Path) -> None:

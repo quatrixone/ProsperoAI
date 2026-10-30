@@ -24,6 +24,8 @@ function fixture() {
     const lookup = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
     lookup('history-kind').value = 'all';
     const context = { $: lookup, document: { createElement: element },
+        matchMedia: () => ({ matches: false }),
+        conversationMeta: {},
         conversations: [
             { id: 'first', title: 'Text title', model: 'text', messages: [{ content: 'a galaxy of stars' }] },
             { id: 'image', title: 'Mountain', model: 'image', messages: [] },
@@ -46,7 +48,7 @@ test('category, content/model search and filtered open/delete keep conversation 
     assert.equal(rows().length, 1); rows()[0].children[0].onclick(); assert.equal(c.current.id, 'first');
     $('history-kind').value = 'text-to-speech'; $('history-search').value = 'SAVED VOICE'; c.renderHistory();
     assert.equal(rows().length, 1); rows()[0].children[0].onclick(); assert.equal(c.current.id, 'voice');
-    rows()[0].children[1].onclick(); assert.equal(c.pendingDelete, 'voice');
+    rows()[0].children[1].children[1].children[4].onclick(); assert.equal(c.pendingDelete, 'voice');
     $('delete-dialog').returnValue = 'delete'; await $('delete-dialog').events.close();
     assert.equal(c.conversations.length, 3); assert.ok(!c.conversations.some(x => x.id === 'voice'));
     assert.equal(c.saved.value.length, 3);
@@ -72,7 +74,7 @@ test('browser history migrates to the console and receives native conversations'
         purpose: 'text-to-text', messages: [{ role: 'user', content: 'Saved in browser' }], updatedAt: 1000 };
     const server = new Map([[native.id, native]]);
     const saved = {};
-    const context = { conversations: [local], conversationSyncReady: false, conversationSyncBusy: false,
+    const context = { conversations: [local], conversationMeta: {}, conversationSyncReady: false, conversationSyncBusy: false,
         controller: null, current: null, document: { visibilityState: 'visible' },
         save(key, value) { saved[key] = value; }, renderHistory() {}, renderMessages() {}, openChat() {},
         $(id) { return { textContent: '' }; },
@@ -93,6 +95,35 @@ test('browser history migrates to the console and receives native conversations'
     assert.equal(context.conversations.find(item => item.id === local.id).messages[0].content, 'Saved in browser');
     assert.equal(context.conversations.find(item => item.id === native.id).messages[0].content, 'Saved on console');
     assert.equal(saved['prospero-sync-initialized'], true);
+});
+
+test('an uncertain image response keeps the saved server version authoritative', async () => {
+    const archivedImage = '/download0/ProsperoAI/sessions/qwen/message-000.png';
+    const server = {id: 'qwen', updated_us: 4000000, messages: [
+        {role: 'user', content: 'edit this', image: archivedImage}
+    ]};
+    const local = {id: 'qwen', updatedAt: Date.now(), _serverUpdatedUs: 3000000,
+        messages: [{role: 'user', content: 'edit this'}]};
+    const context = {conversations: [local], conversationMeta: {}, conversationSyncReady: true,
+        conversationSyncBusy: false, controller: null, current: null,
+        document: {visibilityState: 'visible'}, save() {}, renderHistory() {}, renderMessages() {}, openChat() {},
+        $: () => ({textContent: ''}),
+        async api(path, options = {}) {
+            assert.notEqual(options.method, 'POST', 'uncertain sync must not overwrite the server image');
+            return {json: async () => path === '/api/conversations'
+                ? {data: [{id: server.id, updated_us: server.updated_us}]}
+                : server};
+        }
+    };
+    runInNewContext(syncCode + '\nthis.shouldPersist=shouldPersistConversation;', context);
+
+    assert.equal(context.shouldPersist(local, true), false);
+    assert.equal(local.updatedAt, 3000);
+    await runInNewContext('syncConversations()', context);
+    assert.equal(context.conversations[0].messages[0].image, archivedImage);
+    assert.match(source, /imageResponseUncertain=true/);
+    assert.match(source, /const persistOnServer=shouldPersistConversation\(conversation,imageResponseUncertain\);[\s\S]{0,150}save\('prospero-conversations'/);
+    assert.match(source, /if\(persistOnServer\)void persistConversation\(conversation\)/);
 });
 
 test('generated PNG is preferred while saved conversations use their archived image', () => {

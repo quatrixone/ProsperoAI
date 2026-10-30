@@ -324,9 +324,9 @@ static int get_request(prospero_https *session, const char *url, const char *ran
     curl_easy_setopt(easy, CURLOPT_REDIR_PROTOCOLS_STR, "https");
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 8L);
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, 30L);
-    /* A transfer that moves nothing for a minute has stalled. */
-    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, 60L);
+    /* Fail a stalled range promptly so its saved offset can be retried. */
+    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 32768L);
+    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, 30L);
     curl_easy_setopt(easy, CURLOPT_BUFFERSIZE, 512L * 1024L);
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, on_data);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, session);

@@ -4,12 +4,60 @@
 #define PROSPERO_UI_VULKAN
 #include "../vulkan/http_server.cpp"
 #include <iostream>
+#include <functional>
 #include <iterator>
+#include <cstdlib>
+#include <chrono>
+#include <barrier>
+#include <thread>
+#include <fstream>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <utime.h>
 #include <unistd.h>
+
+extern "C"
+{
+    std::int64_t sceKernelGetDirectMemorySize()
+    {
+        return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") ? 12ll << 30 : 0;
+    }
+    int sceKernelDirectMemoryQuery(std::int64_t, int, void *, std::size_t)
+    {
+        return -1;
+    }
+    int sceKernelAvailableDirectMemorySize(std::int64_t, std::int64_t, std::size_t,
+                                           std::int64_t *start, std::size_t *bytes)
+    {
+        *start = 0;
+        *bytes = 0;
+        return -1;
+    }
+    int sceKernelAvailableFlexibleMemorySize(std::size_t *bytes)
+    {
+        *bytes = 0;
+        return -1;
+    }
+}
+
+std::uint64_t gpt_runtime_vulkan_heap_bytes()
+{
+    std::uint64_t free_bytes = 0, total_bytes = 0;
+    return gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) ? total_bytes : 0;
+}
+
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes)
+{
+    if (!std::getenv("PROSPERO_TEST_VULKAN_MEMORY") ||
+        std::string(std::getenv("PROSPERO_TEST_VULKAN_MEMORY")) != "valid" || !free_bytes ||
+        !total_bytes)
+        return false;
+    *free_bytes = 6ull << 30;
+    *total_bytes = 10ull << 30;
+    return true;
+}
 
 extern "C"
 {
@@ -39,9 +87,13 @@ extern "C"
     }
 }
 
-static std::string input, wire;
-static std::size_t position;
+static thread_local std::string input, wire;
+static thread_local std::size_t position;
+static std::barrier<> *upload_race_barrier = nullptr;
 static unsigned current_model;
+static std::function<void()> generation_hook;
+static std::string last_generation_image_path;
+static bool fail_model_prepare = std::getenv("PROSPERO_TEST_FAIL_PREPARE") != nullptr;
 namespace prospero_model_download
 {
 // A test that needs a download in progress says so in the environment: every request
@@ -126,15 +178,24 @@ static int fake_recv(int, void *data, unsigned long size, int)
     size = std::min<unsigned long>({size, 7, input.size() - position});
     std::memcpy(data, input.data() + position, size);
     position += size;
+    if (upload_race_barrier && position == input.size())
+        upload_race_barrier->arrive_and_wait();
     return size;
 }
 static int fake_close(int)
 {
     return 0;
 }
+static std::string http_body(const std::string &response)
+{
+    const std::size_t start = response.find("\r\n\r\n");
+    return start == std::string::npos ? std::string() : response.substr(start + 4);
+}
 unsigned gpt_runtime_model_count()
 {
-    return 2;
+    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") || std::getenv("PROSPERO_TEST_QWEN_IMAGE")
+               ? 3
+               : 2;
 }
 unsigned gpt_runtime_selected_model()
 {
@@ -148,18 +209,38 @@ void gpt_runtime_set_idle_unload_timeout(unsigned)
 }
 const char *gpt_runtime_model_id(unsigned i)
 {
-    return i == 0 ? "tiny.gguf" : "second.gguf";
+    return i == 0                                    ? "tiny.gguf"
+           : i == 1                                  ? "second.gguf"
+           : std::getenv("PROSPERO_TEST_QWEN_IMAGE") ? "qwen-image-test"
+                                                     : "sheetsage-test";
 }
 const char *gpt_runtime_model_name(unsigned index)
 {
     return gpt_runtime_model_id(index);
 }
-const char *gpt_runtime_model_purpose(unsigned)
+const char *gpt_runtime_model_purpose(unsigned index)
 {
-    return "text-to-text";
+    if (std::getenv("PROSPERO_TEST_QWEN_IMAGE") && index == 2)
+        return "text-to-image";
+    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && index == 2 ? "text-to-audio"
+                                                                    : "text-to-text";
+}
+bool gpt_runtime_model_is_qwen_image_2_1(const char *model_id)
+{
+    return std::getenv("PROSPERO_TEST_QWEN_IMAGE") && model_id &&
+           std::strcmp(model_id, "qwen-image-test") == 0;
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
 {
+    if ((std::getenv("PROSPERO_TEST_MODEL_LOADED") ||
+         (std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && current_model == 2)))
+    {
+        if (id && ic)
+            std::snprintf(id, ic, "%s", "sheetsage-test");
+        if (name && nc)
+            std::snprintf(name, nc, "%s", "SheetSage test fixture");
+        return true;
+    }
     if (id && ic)
         id[0] = 0;
     if (name && nc)
@@ -169,11 +250,11 @@ bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t 
 bool gpt_runtime_select_model(unsigned i)
 {
     current_model = i;
-    return i < 2;
+    return i < gpt_runtime_model_count();
 }
 int gpt_runtime_prepare()
 {
-    return 0;
+    return fail_model_prepare ? -1 : 0;
 }
 bool gpt_runtime_delete_model(const char *id)
 {
@@ -181,11 +262,57 @@ bool gpt_runtime_delete_model(const char *id)
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *out, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const char *image_path)
 {
+    last_generation_image_path = image_path ? image_path : "";
+    if (generation_hook)
+        generation_hook();
     if (settings.model_id)
-        current_model = std::strcmp(settings.model_id, "second.gguf") == 0 ? 1 : 0;
+        current_model = (std::strcmp(settings.model_id, "sheetsage-test") == 0 ||
+                         std::strcmp(settings.model_id, "qwen-image-test") == 0)
+                            ? 2
+                        : std::strcmp(settings.model_id, "second.gguf") == 0 ? 1
+                                                                             : 0;
     std::string last = messages[count - 1].content;
+    if (std::getenv("PROSPERO_TEST_QWEN_IMAGE") && current_model == 2)
+    {
+        if (const char *calls_file = std::getenv("PROSPERO_TEST_IMAGE_CALLS_FILE"))
+        {
+            std::ofstream calls(calls_file, std::ios::app);
+            calls << "call\n";
+        }
+        if (const char *path_file = std::getenv("PROSPERO_TEST_IMAGE_PATH_FILE"))
+            std::ofstream(path_file) << last_generation_image_path;
+        if (last == "fail")
+        {
+            std::snprintf(out, capacity, "Context full");
+            return 1;
+        }
+        const std::string artifact = std::string(PROSPERO_IMAGE_DIR) + "qwen-generated.png";
+        std::ifstream fixture("tests/fixtures/one-pixel.png", std::ios::binary);
+        std::ofstream generated(artifact, std::ios::binary);
+        generated << fixture.rdbuf();
+        if (!fixture || !generated)
+            return 1;
+        std::snprintf(out, capacity, "%s", artifact.c_str());
+        *stats = {};
+        return 0;
+    }
+    if (const char *calls_file = std::getenv("PROSPERO_TEST_AUDIO_CALLS_FILE"))
+    {
+        std::ofstream calls(calls_file, std::ios::app);
+        calls << "call\n";
+    }
+    if (current_model == 2)
+    {
+        const std::string artifact = std::string(PROSPERO_AUDIO_DIR) + "uploaded-cover.abc";
+        std::ofstream(artifact) << "X:1\nK:C\nCDEF|\n";
+        std::snprintf(out, capacity, "Cover transcription complete. Artifacts: %s",
+                      artifact.c_str());
+        *stats = {};
+        return 0;
+    }
     if (last == "fail")
     {
         std::snprintf(out, capacity, "Context full");
@@ -235,13 +362,159 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
 }
 int main(int argc, char **argv)
 {
+    if (argc > 1 && std::strcmp(argv[1], "--test-image-path-forwarding") == 0)
+    {
+        const gpt_runtime_message_t message{"user", "edit"};
+        char output[64]{};
+        gpt_runtime_stats_t stats{};
+        const bool generated = run_generation(&message, 1, output, sizeof(output), 512, &stats,
+                                              "tiny.gguf", 0, 0, 0, "/server-owned/reference.png");
+        if (!generated)
+            return 1;
+        std::cout << last_generation_image_path << '\n';
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--test-image-upload-lifecycle") == 0)
+    {
+        if (!ensure_image_upload_directory())
+            return 2;
+        ImageUploadLease created{};
+        std::FILE *file = nullptr;
+        if (!create_image_upload(&created, &file))
+            return 3;
+        if (std::fwrite("fixture", 1, 7, file) != 7 || std::fclose(file) != 0)
+        {
+            finish_image_upload(&created, true);
+            return 4;
+        }
+        const std::string id = created.id;
+        const std::string path = created.path;
+        finish_image_upload(&created, false);
+
+        ImageUploadLease leased{};
+        if (!acquire_image_upload(id.c_str(), &leased))
+            return 5;
+        const std::time_t cleanup_now = std::time(nullptr) + 1;
+        struct utimbuf old_times
+        {
+        };
+        old_times.actime = cleanup_now - 901;
+        old_times.modtime = cleanup_now - 901;
+        if (::utime(path.c_str(), &old_times) != 0)
+        {
+            finish_image_upload(&leased, true);
+            return 6;
+        }
+
+        const std::string sentinel = image_upload_directory() + ".qwen-image-unrelated.upload";
+        {
+            std::ofstream marker(sentinel, std::ios::binary);
+            marker << "keep";
+            if (!marker)
+            {
+                finish_image_upload(&leased, true);
+                return 7;
+            }
+        }
+        cleanup_expired_image_uploads(cleanup_now);
+        const bool active_file_retained = ::access(path.c_str(), F_OK) == 0;
+        finish_image_upload(&leased, false);
+        cleanup_expired_image_uploads(cleanup_now);
+        const bool released_file_removed = ::access(path.c_str(), F_OK) != 0;
+        const bool unrelated_file_retained = ::access(sentinel.c_str(), F_OK) == 0;
+        ::unlink(sentinel.c_str());
+        if (!active_file_retained || !released_file_removed || !unrelated_file_retained)
+            return 8;
+        std::cout << "image upload lifecycle: ok\n";
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--test-upload-race") == 0)
+    {
+        api_key = "secret";
+        std::barrier barrier(2);
+        upload_race_barrier = &barrier;
+        NetApi api{};
+        api.send = fake_send;
+        api.recv = fake_recv;
+        api.socket_close = fake_close;
+        constexpr std::size_t body_size = 512 * 1024;
+        for (unsigned round = 0; round < 20; ++round)
+        {
+            if (round != 0)
+                std::remove((std::string(PROSPERO_AUDIO_DIR) + "race.wav").c_str());
+            std::string responses[2];
+            std::thread workers[2];
+            for (unsigned i = 0; i < 2; ++i)
+            {
+                workers[i] = std::thread(
+                    [&, i]
+                    {
+                        const std::string body(body_size, i == 0 ? 'a' : 'b');
+                        input =
+                            "POST /api/music/uploadbin HTTP/1.1\r\nHost: test\r\nContent-Length: " +
+                            std::to_string(body_size) +
+                            "\r\nX-Upload-Name: race.wav\r\n"
+                            "Authorization: Bearer secret\r\n\r\n" +
+                            body;
+                        wire.clear();
+                        position = 0;
+                        handle_connection(api, 1);
+                        responses[i] = wire.substr(0, wire.find("\r\n"));
+                    });
+            }
+            for (auto &worker : workers)
+                worker.join();
+            std::cout << responses[0] << '\n' << responses[1] << '\n';
+        }
+        upload_race_barrier = nullptr;
+        return 0;
+    }
+    if (argc > 1 && std::strcmp(argv[1], "--test-audio-job-poll") == 0)
+    {
+        NetApi api{};
+        api.send = fake_send;
+        api.recv = fake_recv;
+        api.socket_close = fake_close;
+        input.assign(std::istreambuf_iterator<char>(std::cin), {});
+        handle_connection(api, 1);
+        const std::string submitted_body = http_body(wire);
+        const auto submitted = nlohmann::json::parse(submitted_body, nullptr, false);
+        std::string poll_body;
+        if (submitted.is_object() && submitted.contains("job_id") &&
+            submitted["job_id"].is_number_unsigned())
+        {
+            const unsigned job_id = submitted["job_id"].get<unsigned>();
+            const std::string poll_request =
+                "GET /api/jobs?id=" + std::to_string(job_id) + " HTTP/1.1\r\nHost: test\r\n\r\n";
+            for (unsigned attempt = 0; attempt < 1000; ++attempt)
+            {
+                input = poll_request;
+                position = 0;
+                wire.clear();
+                handle_connection(api, 1);
+                poll_body = http_body(wire);
+                const auto poll = nlohmann::json::parse(poll_body, nullptr, false);
+                if (poll.is_object() && poll.value("state", "") != "running")
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        std::cout << nlohmann::json{{"submission", submitted_body}, {"poll", poll_body}}.dump();
+        return 0;
+    }
     if (argc > 1)
         api_key = argv[1];
+    const bool runtime_busy = std::getenv("PROSPERO_TEST_RUNTIME_BUSY") != nullptr;
+    if (runtime_busy)
+        prospero::model_manager::runtime_mutex().lock();
     input.assign(std::istreambuf_iterator<char>(std::cin), {});
     NetApi api{};
     api.send = fake_send;
     api.recv = fake_recv;
     api.socket_close = fake_close;
     handle_connection(api, 1);
+    if (runtime_busy)
+        prospero::model_manager::runtime_mutex().unlock();
     std::cout << wire;
+    return 0;
 }

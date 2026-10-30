@@ -11,23 +11,36 @@
 // does. No runtime module lookup or sceKernelDlsym() is involved.
 
 #include "http_server.hpp"
+#include "debug_log.hpp"
 #include "model_paths.hpp"
+#include "image_codec.hpp"
 
 #include "gpt_runtime.hpp"
+#include "direct_memory.hpp"
 #include "runtime_settings.hpp"
+#include "model_manager.hpp"
 #include "chatterbox_languages.hpp"
 #include "generated_voice_catalog.hpp"
 #include "runtime_voice_catalog.hpp"
 #include "voice_recorder.hpp"
 #include "session_store.hpp"
 #include "generation_limits.hpp"
+#include "direct_memory.hpp"
 #include "prospero_search.hpp"
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+#include "audio_workflows.hpp"
 #include "model_downloader_ps5.hpp"
 #endif
 
 #include <cstdint>
 #include <cstdio>
+#include <unistd.h>
+#ifdef __linux__
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/time.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -38,14 +51,28 @@
 #include <atomic>
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <stdexcept>
 #include <memory>
 #include <cmath>
+#include <chrono>
 #include <mutex>
+#include <map>
+#include <set>
+#include <cerrno>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+#ifndef PROSPERO_AUDIO_DIR
+#define PROSPERO_AUDIO_DIR "/download0/ProsperoAI/work/audio/"
+#endif
+#ifndef PROSPERO_IMAGE_DIR
+#define PROSPERO_IMAGE_DIR "/download0/ProsperoAI/work/image/"
+#endif
 
 extern "C"
 {
@@ -105,6 +132,13 @@ constexpr std::size_t kMaxActiveConnections = 8;
 constexpr std::size_t kRequestCapacity = 256 * 1024;
 constexpr std::size_t kResponseTextCapacity = prospero_generation::MaxOutputBytes;
 unsigned short kHttpServerPort = 11434;
+std::atomic<bool> server_stopping{false};
+std::mutex music_upload_publish_mutex;
+std::mutex image_upload_mutex;
+std::set<std::string> active_image_upload_ids;
+void *server_thread = nullptr; // start/stop are owned by the main thread
+constexpr int kSoSendTimeout = 0x1005;
+constexpr int kSoReceiveTimeout = 0x1006;
 
 // FreeBSD sockaddr_in layout: 1-byte length, 1-byte family, big-endian
 // port/address, 8 bytes of padding. Deliberately not reusing a system
@@ -327,9 +361,13 @@ bool run_generation(const gpt_runtime_message_t *messages, unsigned message_coun
                     char *response_text, std::size_t response_capacity, unsigned max_tokens = 512,
                     gpt_runtime_stats_t *reported_stats = nullptr, const char *model_id = nullptr,
                     unsigned context_tokens = 0, unsigned batch_tokens = 0,
-                    unsigned ubatch_tokens = 0)
+                    unsigned ubatch_tokens = 0, const char *image_path = nullptr)
 {
     pthread_mutex_lock(&generation_mutex);
+    struct GenerationUnlock {
+        ~GenerationUnlock() { pthread_mutex_unlock(&generation_mutex); }
+    } generation_unlock;
+    std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
     gpt_runtime_settings_t settings{0, max_tokens};
     const auto runtime = prospero_settings::get();
     settings.context_length = runtime.context;
@@ -341,8 +379,7 @@ bool run_generation(const gpt_runtime_message_t *messages, unsigned message_coun
     settings.ubatch_length = ubatch_tokens;
     gpt_runtime_stats_t stats{};
     const int result = gpt_runtime_generate(messages, message_count, settings, response_text,
-                                            response_capacity, &stats, nullptr);
-    pthread_mutex_unlock(&generation_mutex);
+                                            response_capacity, &stats, nullptr, image_path);
     if (reported_stats)
         *reported_stats = stats;
     return result == 0;
@@ -378,10 +415,20 @@ void send_status(const NetApi &api, int sock, const char *status, const char *co
     const std::size_t body_length = std::strlen(body);
     std::snprintf(header, sizeof(header),
                   "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
-                  "Connection: close\r\n\r\n",
+                  "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
                   status, content_type, body_length);
     send_all(api, sock, header, std::strlen(header));
     send_all(api, sock, body, body_length);
+}
+
+void send_redirect(const NetApi &api, int sock, const char *location)
+{
+    char header[256];
+    std::snprintf(header, sizeof(header),
+                  "HTTP/1.1 302 Found\r\nLocation: %s\r\nContent-Length: 0\r\n"
+                  "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
+                  location);
+    send_all(api, sock, header, std::strlen(header));
 }
 
 void send_json(const NetApi &api, int sock, const char *json)
@@ -396,6 +443,11 @@ void send_json(const NetApi &api, int sock, const char *json)
 // Public presentation assets only; model and generation routes retain bearer authentication.
 bool serve_ui_asset(const NetApi &api, int sock, const char *path)
 {
+    if (std::strcmp(path, "/music") == 0)
+    {
+        send_redirect(api, sock, "/audio");
+        return true;
+    }
     struct Asset
     {
         const char *route;
@@ -404,10 +456,17 @@ bool serve_ui_asset(const NetApi &api, int sock, const char *path)
     };
     static const Asset assets[] = {
         {"/", "index.html", "text/html; charset=utf-8"},
+        {"/audio", "index.html", "text/html; charset=utf-8"},
+        {"/music.js", "music.js", "text/javascript; charset=utf-8"},
         {"/app.css", "app.css", "text/css; charset=utf-8"},
         {"/app.js", "app.js", "text/javascript; charset=utf-8"},
+        {"/workspace.js", "workspace.js", "text/javascript; charset=utf-8"},
+        {"/qwen-image-attachment.js", "qwen-image-attachment.js", "text/javascript; charset=utf-8"},
         {"/voice-catalog.js", "voice-catalog.js", "text/javascript; charset=utf-8"},
         {"/voice-recording.js", "voice-recording.js", "text/javascript; charset=utf-8"},
+        {"/lame.min.js", "lame.min.js", "text/javascript; charset=utf-8"},
+        {"/mp3-worker.js", "mp3-worker.js", "text/javascript; charset=utf-8"},
+        {"/stems-worker.js", "stems-worker.js", "text/javascript; charset=utf-8"},
         {"/fonts/Inter-Regular.ttf", "fonts/Inter-Regular.ttf", "font/ttf"},
         {"/fonts/Inter-SemiBold.ttf", "fonts/Inter-SemiBold.ttf", "font/ttf"},
         {"/fonts/Montserrat-Medium.ttf", "fonts/Montserrat-Medium.ttf", "font/ttf"},
@@ -433,12 +492,15 @@ bool serve_ui_asset(const NetApi &api, int sock, const char *path)
                         "UI asset unavailable");
             return true;
         }
-        char header[512];
+        char header[640];
         std::snprintf(header, sizeof(header),
                       "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n"
                       "X-Content-Type-Options: nosniff\r\nCache-Control: no-cache\r\n"
+                      "Cross-Origin-Opener-Policy: same-origin\r\n"
+                      "Cross-Origin-Embedder-Policy: require-corp\r\n"
                       "Content-Security-Policy: default-src 'self'; style-src 'self'; script-src "
-                      "'self'; connect-src 'self'; font-src 'self'; img-src 'self' data: blob:; "
+                      "'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; connect-src 'self' blob:; "
+                      "font-src 'self'; img-src 'self' data: blob:; "
                       "media-src 'self' blob:; frame-ancestors 'none'\r\nConnection: "
                       "close\r\n\r\n",
                       asset.type, size);
@@ -515,6 +577,7 @@ const char kChatPage[] =
 
 void handle_get_tags(const NetApi &api, int sock)
 {
+    std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
     char body[2048];
     std::snprintf(body, sizeof(body), "{\"models\":[");
     const unsigned count = gpt_runtime_model_count();
@@ -544,17 +607,231 @@ unsigned request_option(const char *body, const char *key, unsigned fallback, un
     return static_cast<unsigned>(std::min<long>(parsed, maximum));
 }
 
-void handle_generate(const NetApi &api, int sock, const char *request_body)
+// The host regression harness compiles this file on Linux where the sce*
+// kernel exports do not exist; the job helpers map to plain pthreads there.
+static int jobs_thread_create(void **thread, void *(*entry)(void *), void *arg,
+                              const char *name, unsigned long stack_size)
 {
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0)
+#ifdef __linux__
+        return pthread_create(reinterpret_cast<pthread_t *>(thread), nullptr, entry, arg);
+#else
+        return scePthreadCreate(thread, nullptr, entry, arg, name);
+#endif
+    const int configured = pthread_attr_setstacksize(&attributes, stack_size);
+#ifdef __linux__
+    (void)name;
+    const int spawned =
+        pthread_create(reinterpret_cast<pthread_t *>(thread), configured == 0 ? &attributes : nullptr,
+                       entry, arg);
+#else
+    const int spawned = configured == 0 ? scePthreadCreate(thread, &attributes, entry, arg, name)
+                                        : scePthreadCreate(thread, nullptr, entry, arg, name);
+#endif
+    pthread_attr_destroy(&attributes);
+    return spawned;
+}
+
+static int jobs_thread_join(void *thread)
+{
+    void *retval = nullptr;
+#ifdef __linux__
+    return pthread_join(reinterpret_cast<pthread_t>(thread), &retval);
+#else
+    return scePthreadJoin(thread, &retval);
+#endif
+}
+
+// ---- Async generate jobs -----------------------------------------------------
+// A synchronous generation holds one HTTP connection open for up to six
+// minutes; phone browsers drop such connections routinely (screen off,
+// network handover) and surface "Failed to fetch" although the console
+// finished the job successfully. With "async":true in the body the
+// generation runs on its own worker thread and the caller polls
+// /api/jobs?id=N instead — no long-held connection anywhere in the flow.
+struct AsyncJob
+{
+    unsigned id = 0;
+    int state = 0;  // 0 = running, 1 = done, 2 = error (result = final JSON)
+    std::string body;    // request body copy (the connection buffer dies)
+    std::string result;  // serialized response once finished
+    unsigned long long started_ms = 0;
+    char model[128] = {};
+    void *thread = nullptr;  // join from the poll path; detach is broken
+};
+
+std::mutex jobs_mutex;
+std::vector<std::unique_ptr<AsyncJob>> jobs;
+unsigned job_seq = 0;
+
+unsigned long long jobs_now_ms()
+{
+    struct timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<unsigned long long>(ts.tv_sec) * 1000ull + ts.tv_nsec / 1000000ull;
+}
+
+// Activity is diagnostic only. Heap pressure must never trigger an external
+// launcher or terminate an in-flight job.
+std::atomic<unsigned long long> http_last_activity_ms{0};
+bool is_background_poll(const char *path)
+{
+    return std::strcmp(path, "/api/jobs") == 0 ||
+           std::strncmp(path, "/api/jobs?id=", 13) == 0 ||
+           std::strcmp(path, "/api/system/memory") == 0 ||
+           std::strcmp(path, "/api/models/selection") == 0;
+}
+
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+struct AudioWorkflowRequest
+{
+    std::string workflow;
+    std::string model;
+    std::string source;
+    prospero::audio_workflows::MusicRequest music;
+};
+
+bool parse_audio_workflow(const nlohmann::json &request, AudioWorkflowRequest &parsed,
+                          std::string &error)
+{
+    if (!request.is_object() || !request.contains("audio_workflow") ||
+        !request["audio_workflow"].is_string())
+    {
+        error = "Unsupported audio workflow.";
+        return false;
+    }
+    parsed.workflow = request["audio_workflow"].get<std::string>();
+    if (parsed.workflow != "create" && parsed.workflow != "cover" && parsed.workflow != "stems")
+    {
+        error = "Unsupported audio workflow.";
+        return false;
+    }
+    if (!request.contains("model") || !request["model"].is_string())
+    {
+        error = "A model ID is required.";
+        return false;
+    }
+    parsed.model = request["model"].get<std::string>();
+    if (parsed.model.empty() || parsed.model.size() >= 128)
+    {
+        error = "A valid model ID is required.";
+        return false;
+    }
+    parsed.music.model_id = parsed.model;
+
+    const auto string_field = [&request, &error](const char *key, std::string &value,
+                                                std::size_t maximum, bool required = false)
+    {
+        if (!request.contains(key))
+        {
+            if (required)
+            {
+                error = std::string("A ") + key + " value is required.";
+                return false;
+            }
+            return true;
+        }
+        if (!request[key].is_string())
+        {
+            error = std::string("The ") + key + " value must be a string.";
+            return false;
+        }
+        value = request[key].get<std::string>();
+        if (value.size() > maximum || (required && value.empty()))
+        {
+            error = std::string("The ") + key + " value is empty or exceeds its size limit.";
+            return false;
+        }
+        return true;
+    };
+    const auto unsigned_field = [&request, &error](const char *key, unsigned &value)
+    {
+        if (!request.contains(key))
+            return true;
+        const auto &field = request[key];
+        std::uint64_t parsed_value = 0;
+        if (field.is_number_unsigned())
+            parsed_value = field.get<std::uint64_t>();
+        else if (field.is_number_integer())
+        {
+            const auto signed_value = field.get<std::int64_t>();
+            if (signed_value < 0)
+            {
+                error = std::string("The ") + key + " value is out of range.";
+                return false;
+            }
+            parsed_value = static_cast<std::uint64_t>(signed_value);
+        }
+        else
+        {
+            error = std::string("The ") + key + " value must be an unsigned integer.";
+            return false;
+        }
+        if (parsed_value > UINT_MAX)
+        {
+            error = std::string("The ") + key + " value is out of range.";
+            return false;
+        }
+        value = static_cast<unsigned>(parsed_value);
+        return true;
+    };
+
+    if (parsed.workflow == "create")
+        return string_field("style", parsed.music.style, 4096, true) &&
+               string_field("lyrics", parsed.music.lyrics,
+                            prospero_settings::kMaxAudioLyricsBytes) &&
+               string_field("abc_name", parsed.music.abc_name, 96) &&
+               string_field("abc_content", parsed.music.abc_content, 256 * 1024) &&
+               string_field("track_name", parsed.music.track_name, 96) &&
+               unsigned_field("seed", parsed.music.seed) &&
+               unsigned_field("duration_seconds", parsed.music.duration_seconds);
+
+    return string_field("source", parsed.source, 96, true);
+}
+
+prospero::audio_workflows::Result run_audio_workflow(const AudioWorkflowRequest &request)
+{
+    if (request.workflow == "cover")
+        return prospero::audio_workflows::cover_to_abc(request.model, request.source, {});
+    if (request.workflow == "stems")
+        return prospero::audio_workflows::separate_stems(request.model, request.source, {});
+    return prospero::audio_workflows::create_music(request.music, {});
+}
+
+std::string audio_workflow_json(const AudioWorkflowRequest &request,
+                                const prospero::audio_workflows::Result &result)
+{
+    nlohmann::json body = {{"model", request.model}, {"response", result.response},
+                           {"done", true}, {"artifacts", result.artifacts}};
+    if (!result.ok)
+        body["error"] = result.response;
+    if (result.retryable)
+        body["retryable"] = true;
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+#endif
+
+// Builds exactly the JSON that the synchronous /api/generate would send.
+std::string generate_response_json(const char *request_body)
+{
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    const auto parsed_request = nlohmann::json::parse(request_body, nullptr, false);
+    if (parsed_request.is_object() && parsed_request.contains("audio_workflow"))
+    {
+        AudioWorkflowRequest audio_request;
+        std::string error;
+        if (!parse_audio_workflow(parsed_request, audio_request, error))
+            return nlohmann::json{{"done", true}, {"error", error}}.dump();
+        const auto result = run_audio_workflow(audio_request);
+        return audio_workflow_json(audio_request, result);
+    }
+#endif
     char model[128] = {};
     char prompt[65536] = {};
     json_find_string(request_body, "model", model, sizeof(model));
     if (!json_find_string(request_body, "prompt", prompt, sizeof(prompt)))
-    {
-        send_status(api, sock, "400 Bad Request", "application/json",
-                    "{\"error\":\"missing prompt\"}");
-        return;
-    }
+        return std::string("{\"error\":\"missing prompt\"}");
     const gpt_runtime_message_t messages[1] = {{"user", prompt}};
     std::vector<char> response_text(kResponseTextCapacity);
     const unsigned max_tokens =
@@ -565,9 +842,12 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
     const unsigned batch_tokens = request_option(request_body, "num_batch", 0, 2048);
     const unsigned ubatch_tokens = request_option(request_body, "num_ubatch", 0, 2048);
     gpt_runtime_stats_t stats{};
+    const auto operation_id = prospero::debug::begin_operation("api-generation", model);
     const bool ok =
         run_generation(messages, 1, response_text.data(), response_text.size(), max_tokens, &stats,
                        model, context_tokens, batch_tokens, ubatch_tokens);
+    prospero::debug::event(ok ? "api-generation-completed" : "api-generation-failed", model,
+                           ok ? "" : "runtime-generation-failed", operation_id);
 
     char created_at[32];
     iso8601_now(created_at, sizeof(created_at));
@@ -585,12 +865,154 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
                            {"prompt_eval_duration",
                             static_cast<unsigned long long>(stats.prefill_microseconds) * 1000}};
     if (!ok)
-        body["error"] = "generation failed";
+    {
+        const char *detail = response_text.data();
+        body["error"] = detail && *detail ? detail : "generation failed";
+    }
+    return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+void *generate_job_worker(void *argument)
+{
+    auto *job = static_cast<AsyncJob *>(argument);
+    std::string result;
+    try
+    {
+        result = generate_response_json(job->body.c_str());
+    }
+    catch (...)
+    {
+        result = "{\"done\":false,\"error\":\"job worker threw\"}";
+    }
+    {
+        std::lock_guard<std::mutex> lock(jobs_mutex);
+        job->result = std::move(result);
+        const auto result_json = nlohmann::json::parse(job->result, nullptr, false);
+        job->state = result_json.is_object() && !result_json.contains("error") ? 1 : 2;
+    }
+    return nullptr;
+}
+
+void handle_jobs_get(const NetApi &api, int sock, unsigned id)
+{
+    std::lock_guard<std::mutex> lock(jobs_mutex);
+    for (auto &up : jobs)
+    {
+        if (up->id != id)
+            continue;
+        // Reap the finished worker exactly like the accept loop reaps
+        // connection workers: join only, never detach.
+        if (up->state != 0 && up->thread != nullptr)
+        {
+            jobs_thread_join(up->thread);
+            up->thread = nullptr;
+        }
+        const unsigned long long elapsed =
+            (jobs_now_ms() - up->started_ms) / 1000ull;
+        const char *state = up->state == 0 ? "running" : (up->state == 1 ? "done" : "error");
+        std::string out = "{\"id\":" + std::to_string(up->id) +
+                          ",\"state\":\"" + state + "\",\"model\":\"" + up->model +
+                          "\",\"elapsed_s\":" + std::to_string(elapsed);
+        if (up->state != 0)
+            out += ",\"result\":" + up->result;
+        out += "}";
+        send_json(api, sock, out.c_str());
+        return;
+    }
+    send_status(api, sock, "404 Not Found", "application/json", "{\"error\":\"no such job\"}");
+}
+
+void handle_jobs_list(const NetApi &api, int sock)
+{
+    std::lock_guard<std::mutex> lock(jobs_mutex);
+    std::string out = "{\"jobs\":[";
+    for (auto &up : jobs)
+    {
+        if (up->state != 0 && up->thread != nullptr)
+        {
+            jobs_thread_join(up->thread);
+            up->thread = nullptr;
+        }
+        const unsigned long long elapsed = (jobs_now_ms() - up->started_ms) / 1000ull;
+        const char *state = up->state == 0 ? "running" : (up->state == 1 ? "done" : "error");
+        if (out.size() > 9)
+            out += ",";
+        out += "{\"id\":" + std::to_string(up->id) + ",\"state\":\"" + state +
+               "\",\"model\":\"" + up->model + "\",\"elapsed_s\":" + std::to_string(elapsed) + "}";
+    }
+    out += "]}";
+    send_json(api, sock, out.c_str());
+}
+
+void handle_generate(const NetApi &api, int sock, const char *request_body)
+{
+    const auto request = nlohmann::json::parse(request_body, nullptr, false);
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    AudioWorkflowRequest audio_request;
+    const bool has_audio_workflow = request.is_object() && request.contains("audio_workflow");
+    if (has_audio_workflow)
+    {
+        std::string error;
+        if (!parse_audio_workflow(request, audio_request, error))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        nlohmann::json{{"error", error}}.dump().c_str());
+            return;
+        }
+    }
+#endif
+    if (request.is_object() && request.value("async", nlohmann::json()) == true)
+    {
+        std::lock_guard<std::mutex> lock(jobs_mutex);
+        const bool busy = std::any_of(jobs.begin(), jobs.end(),
+                                     [](const auto &job) { return job->state == 0; });
+        if (server_stopping.load() || busy) {
+            send_status(api, sock, "409 Conflict", "application/json",
+                        "{\"error\":\"The runtime is busy or shutting down.\"}");
+            return;
+        }
+        // Join before eviction; a completed but unjoined worker still owns
+        // resources. Publish its handle while holding the same registry lock.
+        while (jobs.size() >= 32) {
+            if (jobs.front()->thread) jobs_thread_join(jobs.front()->thread);
+            jobs.erase(jobs.begin());
+        }
+        auto job = std::make_unique<AsyncJob>();
+        job->body = request_body;
+        json_find_string(request_body, "model", job->model, sizeof(job->model));
+        job->id = ++job_seq;
+        job->started_ms = jobs_now_ms();
+        AsyncJob *raw = job.get();
+        jobs.push_back(std::move(job));
+        const int spawned = jobs_thread_create(&raw->thread, generate_job_worker, raw,
+                                               "prosperoai-job", 8u * 1024u * 1024u);
+        if (spawned != 0) {
+            raw->thread = nullptr;
+            raw->state = 2;
+            raw->result = "{\"done\":false,\"error\":\"job thread spawn failed\"}";
+        }
+        char out[64];
+        std::snprintf(out, sizeof(out), "{\"job_id\":%u}", raw->id);
+        send_json(api, sock, out);
+        return;
+    }
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    if (has_audio_workflow)
+    {
+        const auto result = run_audio_workflow(audio_request);
+        const auto response = audio_workflow_json(audio_request, result);
+        send_status(api, sock, result.ok ? "200 OK" : result.retryable ? "409 Conflict"
+                                                                        : "400 Bad Request",
+                    "application/json", response.c_str());
+        return;
+    }
+#endif
     // Model output may end halfway through a multibyte UTF-8 character when
     // num_predict is reached. Replace malformed bytes instead of letting JSON
     // serialization throw out of the HTTP worker and abort the whole title.
-    const auto serialized = body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
-    send_json(api, sock, serialized.c_str());
+    std::string sync_result = generate_response_json(request_body);
+    send_json(api, sock, sync_result.c_str());
+
 }
 
 void handle_chat(const NetApi &api, int sock, const char *request_body)
@@ -623,12 +1045,15 @@ void handle_chat(const NetApi &api, int sock, const char *request_body)
 
     std::vector<char> response_text(kResponseTextCapacity);
     gpt_runtime_stats_t stats{};
+    const auto operation_id = prospero::debug::begin_operation("api-generation", model);
     const bool ok = run_generation(
         messages, message_count, response_text.data(), response_text.size(),
         request_option(request_body, "num_predict", prospero_generation::MaxOutputTokens,
                        prospero_generation::MaxOutputTokens),
         &stats, model,
         request_option(request_body, "num_ctx", 0, prospero_generation::MaxContextTokens));
+    prospero::debug::event(ok ? "api-generation-completed" : "api-generation-failed", model,
+                           ok ? "" : "runtime-generation-failed", operation_id);
 
     char created_at[32];
     iso8601_now(created_at, sizeof(created_at));
@@ -639,10 +1064,50 @@ void handle_chat(const NetApi &api, int sock, const char *request_body)
         {"done", true},
         {"done_reason", stats.output_limit_reached ? "length" : "stop"}};
     if (!ok)
-        body["error"] = "generation failed";
+    {
+        // Adapters write a human-readable failure stage into the response
+        // buffer before returning non-zero; surface it instead of the bare
+        // "generation failed" so remote debugging does not need a rebuild.
+        const char *detail = response_text.data();
+        body["error"] = detail && *detail ? detail : "generation failed";
+    }
     const auto serialized = body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     send_json(api, sock, serialized.c_str());
+    // Optional one-shot release: clients that use the chat model only for a
+    // quick task (e.g. the music studio Enhance button) ask for the model to
+    // leave memory right after the answer instead of waiting for the idle
+    // timer. check_idle_unload(0) releases the selected model when no
+    // generation holds the inference mutex; concurrent work skips it safely.
+#if defined(PS5_LLAMA_VULKAN) && !defined(PROSPERO_HOST)
+    if (const char *flag = json_value_start(request_body, "unload_after");
+        flag != nullptr && (*flag == 't' || *flag == 'T'))
+    {
+        gpt_runtime_check_idle_unload(0);
+        // Memory pressure is reported to the caller; never restart the title here.
+    }
+#endif
 }
+
+struct ImageUploadLease;
+void finish_image_upload(ImageUploadLease *lease, bool remove);
+bool acquire_image_upload(const char *id, ImageUploadLease *lease);
+bool valid_image_upload_id(const char *id);
+
+struct ImageUploadLease
+{
+    std::string id;
+    std::string path;
+    bool active = false;
+
+    ImageUploadLease() = default;
+    ImageUploadLease(const ImageUploadLease &) = delete;
+    ImageUploadLease &operator=(const ImageUploadLease &) = delete;
+    ~ImageUploadLease()
+    {
+        if (active)
+            finish_image_upload(this, false);
+    }
+};
 
 #include "openai_api.inc"
 
@@ -732,6 +1197,10 @@ void handle_model_download_cancel(const NetApi &api, int sock)
 
 void handle_model_presets(const NetApi &api, int sock, const char *body = nullptr)
 {
+    // PS5's statfs call is not safe on this title's network worker. Until a supported
+    // storage-query API is available, report unknown rather than risk terminating the app.
+    constexpr bool storage_known = false;
+    constexpr std::uint64_t available_storage = 0;
     if (body)
     {
         const char *value = json_value_start(body, "index");
@@ -742,6 +1211,16 @@ void handle_model_presets(const NetApi &api, int sock, const char *body = nullpt
         {
             send_status(api, sock, "400 Bad Request", "application/json",
                         "{\"error\":\"a valid preset index is required\"}");
+            return;
+        }
+        const auto required = prospero_model_download::presets[index].size;
+        if (storage_known && required > available_storage)
+        {
+            send_status(api, sock, "507 Insufficient Storage", "application/json",
+                        nlohmann::json{{"error", "Not enough free space for this model."},
+                                       {"required_bytes", required},
+                                       {"available_bytes", available_storage}}
+                            .dump().c_str());
             return;
         }
         if (!prospero_model_download::download_preset(index))
@@ -761,7 +1240,10 @@ void handle_model_presets(const NetApi &api, int sock, const char *body = nullpt
                          {"kind", preset.kind},
                          {"source_filename", preset.kind == 0 ? preset.files[0].source : ""},
                          {"size", preset.size},
-                         {"installed", prospero_model_download::preset_installed(i)}});
+                         {"installed", prospero_model_download::preset_installed(i)},
+                         {"required_bytes", preset.size},
+                         {"available_bytes", storage_known ? available_storage : 0},
+                         {"storage_check_available", storage_known}});
     }
     const auto response = nlohmann::json{{"data", items}}.dump();
     send_json(api, sock, response.c_str());
@@ -824,6 +1306,182 @@ void handle_model_download_action(const NetApi &api, int sock, const char *body,
 }
 #endif
 
+std::string image_upload_directory()
+{
+    std::string directory = PROSPERO_IMAGE_DIR;
+    if (directory.empty() || directory.back() != '/')
+        directory.push_back('/');
+    return directory;
+}
+
+std::string image_upload_path(const std::string &id)
+{
+    return image_upload_directory() + ".qwen-image-" + id + ".upload";
+}
+
+bool valid_image_upload_id(const char *id)
+{
+    if (!id || std::strlen(id) != 32)
+        return false;
+    for (const char *at = id; *at; ++at)
+        if (!((*at >= '0' && *at <= '9') || (*at >= 'a' && *at <= 'f')))
+            return false;
+    return true;
+}
+
+bool ensure_image_upload_directory()
+{
+    std::string directory = image_upload_directory();
+    while (!directory.empty() && directory.back() == '/')
+        directory.pop_back();
+    if (directory.empty())
+        return false;
+    std::size_t component_end = directory.front() == '/' ? 1 : 0;
+    while (component_end <= directory.size())
+    {
+        const std::size_t slash = directory.find('/', component_end);
+        const std::size_t end = slash == std::string::npos ? directory.size() : slash;
+        const std::string component = directory.substr(0, end);
+        if (!component.empty())
+        {
+            if (::mkdir(component.c_str(), 0777) != 0 && errno != EEXIST)
+                return false;
+            struct stat info
+            {
+            };
+            if (::stat(component.c_str(), &info) != 0 || !S_ISDIR(info.st_mode))
+                return false;
+        }
+        if (slash == std::string::npos)
+            break;
+        component_end = slash + 1;
+    }
+    return true;
+}
+
+bool random_image_upload_id(std::string *id)
+{
+    if (!id)
+        return false;
+    unsigned char random[16]{};
+    std::FILE *entropy = std::fopen("/dev/urandom", "rb");
+    if (!entropy)
+        return false;
+    const bool read_ok = std::fread(random, 1, sizeof(random), entropy) == sizeof(random);
+    const bool close_ok = std::fclose(entropy) == 0;
+    if (!read_ok || !close_ok)
+        return false;
+    static constexpr char Hex[] = "0123456789abcdef";
+    id->resize(sizeof(random) * 2);
+    for (std::size_t i = 0; i < sizeof(random); ++i)
+    {
+        (*id)[i * 2] = Hex[random[i] >> 4];
+        (*id)[i * 2 + 1] = Hex[random[i] & 0x0f];
+    }
+    return true;
+}
+
+void cleanup_expired_image_uploads(std::time_t now)
+{
+    const std::string directory = image_upload_directory();
+    std::lock_guard<std::mutex> lock(image_upload_mutex);
+    DIR *entries = ::opendir(directory.c_str());
+    if (!entries)
+        return;
+    constexpr char Prefix[] = ".qwen-image-";
+    constexpr char Suffix[] = ".upload";
+    while (const dirent *entry = ::readdir(entries))
+    {
+        const std::string name = entry->d_name;
+        if (name.size() != sizeof(Prefix) - 1 + 32 + sizeof(Suffix) - 1 ||
+            name.compare(0, sizeof(Prefix) - 1, Prefix) != 0 ||
+            name.compare(name.size() - (sizeof(Suffix) - 1), sizeof(Suffix) - 1, Suffix) != 0)
+            continue;
+        const std::string id = name.substr(sizeof(Prefix) - 1, 32);
+        if (!valid_image_upload_id(id.c_str()) || active_image_upload_ids.count(id))
+            continue;
+        const std::string path = directory + name;
+        struct stat info
+        {
+        };
+        if (::lstat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode) &&
+            std::difftime(now, info.st_mtime) >= 900.0)
+            ::unlink(path.c_str());
+    }
+    ::closedir(entries);
+}
+
+void finish_image_upload(ImageUploadLease *lease, bool remove)
+{
+    if (!lease || !lease->active)
+        return;
+    std::lock_guard<std::mutex> lock(image_upload_mutex);
+    active_image_upload_ids.erase(lease->id);
+    if (remove)
+        ::unlink(lease->path.c_str());
+    lease->active = false;
+}
+
+bool create_image_upload(ImageUploadLease *lease, std::FILE **file)
+{
+    if (!lease || !file || lease->active || !ensure_image_upload_directory())
+        return false;
+    *file = nullptr;
+    lease->id.clear();
+    lease->path.clear();
+    std::lock_guard<std::mutex> lock(image_upload_mutex);
+    for (unsigned attempt = 0; attempt < 64; ++attempt)
+    {
+        std::string id;
+        if (!random_image_upload_id(&id))
+            return false;
+        const std::string path = image_upload_path(id);
+        const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0666);
+        if (descriptor < 0)
+        {
+            if (errno == EEXIST)
+                continue;
+            return false;
+        }
+        std::FILE *stream = ::fdopen(descriptor, "wb");
+        if (!stream)
+        {
+            ::close(descriptor);
+            ::unlink(path.c_str());
+            return false;
+        }
+        active_image_upload_ids.insert(id);
+        lease->id = id;
+        lease->path = path;
+        lease->active = true;
+        *file = stream;
+        return true;
+    }
+    return false;
+}
+
+bool acquire_image_upload(const char *id, ImageUploadLease *lease)
+{
+    if (!lease || lease->active || !valid_image_upload_id(id))
+        return false;
+    const std::time_t now = std::time(nullptr);
+    cleanup_expired_image_uploads(now);
+    const std::string upload_id = id;
+    const std::string path = image_upload_path(upload_id);
+    std::lock_guard<std::mutex> lock(image_upload_mutex);
+    struct stat info
+    {
+    };
+    if (::lstat(path.c_str(), &info) != 0 || !S_ISREG(info.st_mode) ||
+        std::difftime(now, info.st_mtime) >= 900.0 ||
+        !active_image_upload_ids.insert(upload_id).second)
+        return false;
+    lease->id = upload_id;
+    lease->path = path;
+    lease->active = true;
+    return true;
+}
+
 std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t capacity,
                          std::size_t *body_size)
 {
@@ -831,6 +1489,7 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
     const char *header_end = nullptr;
     while (total + 1 < capacity)
     {
+        if (server_stopping.load()) return 0;
         const int received = api.recv(sock, buffer + total, capacity - 1 - total, 0);
         if (received <= 0)
             return 0;
@@ -850,6 +1509,7 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
     }
     std::size_t content_length = 0;
     bool has_length = false;
+    std::string upload_name;
     const char *line = std::strstr(buffer, "\r\n");
     while (line && line < header_end)
     {
@@ -864,6 +1524,12 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
             std::string key = header.substr(0, colon), value = header.substr(colon + 1);
             for (char &c : key)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (key == "x-upload-name")
+            {
+                const auto s = value.find_first_not_of(" \t");
+                const auto f = value.find_last_not_of(" \t");
+                upload_name = s == std::string::npos ? std::string() : value.substr(s, f - s + 1);
+            }
             if (key == "transfer-encoding")
             {
                 openai_error(api, sock, "400 Bad Request", "unsupported_transfer_encoding",
@@ -886,13 +1552,20 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
                                      "Invalid Content-Length.");
                         return 0;
                     }
-                    if (content_length > capacity / 10)
+                    const std::size_t digit = static_cast<std::size_t>(c - '0');
+                    if (content_length > (std::numeric_limits<std::size_t>::max() - digit) / 10)
                     {
                         openai_error(api, sock, "413 Payload Too Large", "request_too_large",
-                                     "Request limit is 256 KiB including headers.");
+                                     "Request limit is 256 KiB (uploads: 64 MiB) including headers.");
                         return 0;
                     }
-                    content_length = content_length * 10 + (c - '0');
+                    content_length = content_length * 10 + digit;
+                    if (content_length > 256u * 1024 * 1024)
+                    {
+                        openai_error(api, sock, "413 Payload Too Large", "request_too_large",
+                                     "Request limit is 256 KiB (uploads: 64 MiB) including headers.");
+                        return 0;
+                    }
                 }
                 has_length = true;
             }
@@ -900,6 +1573,210 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
         line = end;
     }
     const std::size_t body_start = header_end - buffer + 4;
+    if (std::strncmp(buffer, "POST /api/image/upload ", sizeof("POST /api/image/upload ") - 1) == 0)
+    {
+        if (!has_length || content_length == 0)
+        {
+            openai_error(api, sock, "400 Bad Request", "invalid_upload",
+                         "A non-empty image body and Content-Length are required.");
+            return 0;
+        }
+        if (content_length > 16u * 1024 * 1024)
+        {
+            openai_error(api, sock, "413 Payload Too Large", "upload_too_large",
+                         "Image uploads are capped at 16 MiB.");
+            return 0;
+        }
+        if (!api_authorized(buffer))
+        {
+            openai_error(api, sock, "401 Unauthorized", "invalid_api_key",
+                         "A valid bearer API key is required.");
+            return 0;
+        }
+        cleanup_expired_image_uploads(std::time(nullptr));
+        ImageUploadLease lease{};
+        std::FILE *file = nullptr;
+        if (!create_image_upload(&lease, &file))
+        {
+            openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
+                         "Could not create a unique temporary upload file.");
+            return 0;
+        }
+        std::size_t written = std::min<std::size_t>(
+            total > body_start ? total - body_start : 0, content_length);
+        bool ok = written == 0 || std::fwrite(buffer + body_start, 1, written, file) == written;
+        std::vector<char> chunk(65536);
+        while (ok && written < content_length)
+        {
+            if (server_stopping.load())
+            {
+                ok = false;
+                break;
+            }
+            const int received = api.recv(sock, chunk.data(),
+                                          std::min<std::size_t>(chunk.size(), content_length - written),
+                                          0);
+            if (received <= 0)
+            {
+                ok = false;
+                break;
+            }
+            const std::size_t count = static_cast<std::size_t>(received);
+            if (std::fwrite(chunk.data(), 1, count, file) != count)
+            {
+                ok = false;
+                break;
+            }
+            written += count;
+        }
+        if (std::fclose(file) != 0)
+            ok = false;
+        if (!ok || written != content_length)
+        {
+            finish_image_upload(&lease, true);
+            openai_error(api, sock, "400 Bad Request", "incomplete_upload",
+                         "The image upload ended before Content-Length bytes arrived.");
+            return 0;
+        }
+        prospero_image::EncodedFormat format{};
+        unsigned width = 0, height = 0;
+        if (!prospero_image::inspect_file(lease.path.c_str(), &format, &width, &height))
+        {
+            finish_image_upload(&lease, true);
+            openai_error(api, sock, "400 Bad Request", "invalid_image",
+                         "Upload must be a decodable PNG or JPEG no larger than 2048 pixels per edge.");
+            return 0;
+        }
+        finish_image_upload(&lease, false);
+        send_json(api, sock, nlohmann::json{{"id", lease.id}}.dump().c_str());
+        return 0;
+    }
+    // Binary library upload: POST /api/music/uploadbin with X-Upload-Name and
+    // an octet-stream body of any size up to 64 MiB. The body never fits the
+    // 256 KiB request buffer, so it streams straight to disk here and the
+    // response is already written when we return 0 (caller only closes).
+    if (std::strncmp(buffer, "POST /api/music/uploadbin", 25) == 0)
+    {
+        std::string &up_name = upload_name;
+        bool name_ok = up_name.size() >= 5 && up_name.size() <= 96 &&
+                       up_name.find("..") == std::string::npos &&
+                       (up_name.compare(up_name.size() - 4, 4, ".wav") == 0 ||
+                        up_name.compare(up_name.size() - 4, 4, ".mp3") == 0);
+        for (const char c : up_name)
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                  c == '.' || c == '_' || c == '-'))
+                name_ok = false;
+        if (!has_length || !name_ok)
+        {
+            openai_error(api, sock, "400 Bad Request", "invalid_upload",
+                         "Need Content-Length and a plain X-Upload-Name *.wav/*.mp3.");
+            return 0;
+        }
+        if (content_length > 64ull * 1024 * 1024)
+        {
+            openai_error(api, sock, "413 Payload Too Large", "upload_too_large",
+                         "Binary uploads are capped at 64 MiB.");
+            return 0;
+        }
+        if (!api_authorized(buffer))
+        {
+            openai_error(api, sock, "401 Unauthorized", "invalid_api_key",
+                         "A valid bearer API key is required.");
+            return 0;
+        }
+        const std::string path = std::string(PROSPERO_AUDIO_DIR) + up_name;
+        if (::access(path.c_str(), F_OK) == 0)
+        {
+            openai_error(api, sock, "409 Conflict", "upload_exists",
+                         "A track with this name already exists.");
+            return 0;
+        }
+        static std::atomic<unsigned> upload_id{0};
+        std::string temp_path;
+        std::FILE *file = nullptr;
+        for (unsigned attempt = 0; attempt < 64 && !file; ++attempt)
+        {
+            temp_path = std::string(PROSPERO_AUDIO_DIR) + ".music-upload-" +
+                        std::to_string(upload_id.fetch_add(1));
+            const int fd = ::open(temp_path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0666);
+            if (fd < 0)
+            {
+                if (errno == EEXIST)
+                    continue;
+                break;
+            }
+            file = ::fdopen(fd, "wb");
+            if (!file)
+            {
+                ::close(fd);
+                std::remove(temp_path.c_str());
+            }
+        }
+        if (!file)
+        {
+            openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
+                         "Could not create a unique temporary upload file.");
+            return 0;
+        }
+        std::size_t written = total > body_start ? total - body_start : 0;
+        bool ok = true;
+        if (written && std::fwrite(buffer + body_start, 1, written, file) != written)
+            ok = false;
+        std::vector<char> chunk(65536);
+        // Accepted sockets have a finite blocking receive timeout. EOF or a
+        // timeout fails the upload; shutdown never waits through retry loops.
+        while (ok && written < content_length)
+        {
+            if (server_stopping.load()) { ok = false; break; }
+            const int received = api.recv(sock, chunk.data(),
+                std::min<std::size_t>(chunk.size(), content_length - written), 0);
+            if (received <= 0) { ok = false; break; }
+            if (std::fwrite(chunk.data(), 1, static_cast<std::size_t>(received), file) !=
+                static_cast<std::size_t>(received))
+            {
+                ok = false;
+                break;
+            }
+            written += static_cast<std::size_t>(received);
+        }
+        if (std::fclose(file) != 0)
+            ok = false;
+        if (!ok || written != content_length)
+        {
+            std::remove(temp_path.c_str());
+            openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
+                         "Stream interrupted.");
+            return 0;
+        }
+        bool destination_exists = false;
+        bool publish_failed = false;
+        {
+            std::lock_guard<std::mutex> publish_lock(music_upload_publish_mutex);
+            destination_exists = ::access(path.c_str(), F_OK) == 0;
+            if (!destination_exists)
+                publish_failed = std::rename(temp_path.c_str(), path.c_str()) != 0;
+        }
+        if (destination_exists)
+        {
+            std::remove(temp_path.c_str());
+            openai_error(api, sock, "409 Conflict", "upload_exists",
+                         "A track with this name already exists.");
+            return 0;
+        }
+        if (publish_failed)
+        {
+            std::remove(temp_path.c_str());
+            openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
+                         "Could not publish completed upload.");
+            return 0;
+        }
+        send_json(api, sock,
+                  nlohmann::json{{"ok", true}, {"name", up_name},
+                                 {"size", content_length}}
+                      .dump()
+                      .c_str());
+        return 0;
+    }
     if (content_length >= capacity - body_start)
     {
         openai_error(api, sock, "413 Payload Too Large", "request_too_large",
@@ -909,6 +1786,7 @@ std::size_t read_request(const NetApi &api, int sock, char *buffer, std::size_t 
     const std::size_t wanted = body_start + content_length;
     while (total < wanted)
     {
+        if (server_stopping.load()) return 0;
         const int received = api.recv(sock, buffer + total, wanted - total, 0);
         if (received <= 0)
             return 0;
@@ -958,11 +1836,14 @@ void handle_runtime_settings(const NetApi &api, int sock, const char *body = nul
             }
             else if (it.key() == "kv" && it.value().is_string())
             {
-                if (it.value() == "auto")
-                {
-                    p.kv = 0;
-                    valid = true;
-                }
+                constexpr const char *types[] = {"auto", "f16", "q8_0", "q4_0"};
+                for (unsigned i = 0; i < 4; ++i)
+                    if (it.value() == types[i])
+                    {
+                        p.kv = i;
+                        valid = true;
+                        break;
+                    }
             }
             else if (it.key() == "thinking" && it.value().is_boolean())
             {
@@ -1010,6 +1891,56 @@ void handle_runtime_settings(const NetApi &api, int sock, const char *body = nul
             {
                 const auto seed = it.value().get<std::uint64_t>();
                 if (prospero_settings::valid_seed(seed)) { p.audio_seed = static_cast<unsigned>(seed); valid = true; }
+            }
+            else if (it.key() == "audio_lyrics" && it.value().is_string())
+            {
+                const auto lyrics = it.value().get<std::string>();
+                if (prospero_settings::valid_audio_lyrics(lyrics)) { p.audio_lyrics = lyrics; valid = true; }
+            }
+            else if (it.key() == "audio_options" && it.value().is_string())
+            {
+                const auto raw_options = it.value().get<std::string>();
+                // Tolerate stale clients: drop abc_file= pointing at a missing
+                // file instead of failing the whole generation in the engine.
+                // When nothing is missing the raw string passes through untouched.
+                std::string options = raw_options;
+                {
+                    bool any_missing = false;
+                    std::size_t scan = 0;
+                    while (scan < raw_options.size() && !any_missing)
+                    {
+                        const std::size_t eol = raw_options.find('\n', scan);
+                        const std::size_t end = (eol == std::string::npos) ? raw_options.size() : eol;
+                        if (raw_options.compare(scan, 9, "abc_file=") == 0 && end > scan + 9)
+                        {
+                            const std::string file(raw_options, scan + 9, end - scan - 9);
+                            if (::access(file.c_str(), F_OK) != 0) any_missing = true;
+                        }
+                        scan = (eol == std::string::npos) ? raw_options.size() : eol + 1;
+                    }
+                    if (any_missing)
+                    {
+                        options.clear();
+                        std::size_t pos = 0;
+                        while (pos < raw_options.size())
+                        {
+                            const std::size_t eol = raw_options.find('\n', pos);
+                            const std::size_t end = (eol == std::string::npos) ? raw_options.size() : eol;
+                            const std::string line = raw_options.substr(pos, end - pos);
+                            pos = (eol == std::string::npos) ? raw_options.size() : eol + 1;
+                            if (line.rfind("abc_file=", 0) == 0 &&
+                                ::access(line.c_str() + 9, F_OK) != 0)
+                            {
+                                std::fprintf(stderr, "[music] abc_file missing, ignored: %s\n",
+                                             line.c_str() + 9);
+                                continue;
+                            }
+                            options += line;
+                            if (pos < raw_options.size()) options += '\n';
+                        }
+                    }
+                }
+                if (prospero_settings::valid_audio_options(options)) { p.audio_options = options; valid = true; }
             }
             else if (it.key() == "sd_seed" && it.value().is_number_unsigned())
             {
@@ -1071,6 +2002,8 @@ void handle_runtime_settings(const NetApi &api, int sock, const char *body = nul
                        {"idle_unload_minutes", p.idle_unload_minutes},
                        {"audio_duration_sec", p.audio_duration_sec},
                        {"audio_seed", p.audio_seed},
+                       {"audio_lyrics", p.audio_lyrics},
+                       {"audio_options", p.audio_options},
                        {"sd_seed", p.sd_seed},
                        {"sd_width", p.sd_width},
                        {"sd_height", p.sd_height},
@@ -1391,9 +2324,30 @@ void handle_model_selection(const NetApi &api, int sock, const char *method,
 {
     if (std::strcmp(method, "GET") == 0)
     {
-        const unsigned selected = gpt_runtime_selected_model();
-        const char *id = gpt_runtime_model_id(selected);
-        const auto response = nlohmann::json{{"id", id ? id : ""}}.dump();
+        const auto state = prospero::model_manager::snapshot();
+        std::string id = state.model_id;
+        if (id.empty())
+        {
+            std::unique_lock<std::mutex> runtime_lock(
+                prospero::model_manager::runtime_mutex(), std::try_to_lock);
+            if (runtime_lock.owns_lock())
+            {
+                const unsigned selected = gpt_runtime_selected_model();
+                const char *runtime_id = gpt_runtime_model_id(selected);
+                id = runtime_id ? runtime_id : "";
+            }
+        }
+        const char *stage = state.stage == prospero::model_manager::Stage::ready ? "ready"
+                            : state.stage == prospero::model_manager::Stage::preparing
+                                ? "preparing"
+                            : state.stage == prospero::model_manager::Stage::failed ? "failed"
+                            : state.stage == prospero::model_manager::Stage::selected
+                                ? "selected"
+                                : "unknown";
+        const auto response = nlohmann::json{{"id", id}, {"state", stage},
+                                              {"error", state.error},
+                                              {"revision", state.revision}}
+                                  .dump();
         send_json(api, sock, response.c_str());
         return;
     }
@@ -1412,31 +2366,47 @@ void handle_model_selection(const NetApi &api, int sock, const char *method,
     }
     const bool prepare = request.value("prepare", true);
     const std::string id = request["id"].get<std::string>();
-    for (unsigned index = 0; index < gpt_runtime_model_count(); ++index)
+    const auto operation_id = prepare
+                                  ? prospero::debug::begin_operation("api-model-preparation", id.c_str())
+                                  : 0;
+    std::string error;
+    if (!prospero::model_manager::select(id.c_str(), prepare, true, &error))
     {
-        const char *candidate = gpt_runtime_model_id(index);
-        if (candidate && id == candidate)
-        {
-            if (!gpt_runtime_select_model(index))
-            {
-                send_status(
-                    api, sock, "409 Conflict", "application/json",
-                    "{\"error\":\"The model cannot be switched while generation is busy.\"}");
-                return;
-            }
-            if (prepare && gpt_runtime_prepare() != 0)
-            {
-                send_status(api, sock, "500 Internal Server Error", "application/json",
-                            "{\"error\":\"The selected model could not be prepared.\"}");
-                return;
-            }
-            const auto response = nlohmann::json{{"id", candidate}, {"preparation_deferred", !prepare}}.dump();
-            send_json(api, sock, response.c_str());
-            return;
-        }
+        const char *error_code = error.find("busy") != std::string::npos
+                                     ? "runtime-busy"
+                                 : error.find("not installed") != std::string::npos
+                                     ? "model-not-installed"
+                                     : "selection-or-prepare-failed";
+        prospero::debug::event("api-model-selection-failed", id.c_str(),
+                               error_code, operation_id);
+        const auto response = nlohmann::json{{"error", error}}.dump();
+        const char *status = error.find("not installed") != std::string::npos
+                                 ? "404 Not Found"
+                             : error.find("busy") != std::string::npos
+                                 ? "409 Conflict"
+                                 : "500 Internal Server Error";
+        send_status(api, sock, status, "application/json", response.c_str());
+        return;
     }
-    send_status(api, sock, "404 Not Found", "application/json",
-                "{\"error\":\"Model is not installed.\"}");
+    const auto selected = prospero::model_manager::snapshot();
+    prospero::debug::event(prepare ? "api-model-ready" : "api-model-selected", id.c_str(), "",
+                           operation_id);
+    if (prepare)
+    {
+        const auto settings = prospero_settings::get();
+        std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
+        char loaded[384]{};
+        if (gpt_runtime_loaded_model(loaded, sizeof(loaded), nullptr, 0) && id == loaded)
+            prospero::debug::model_memory_sample(id.c_str(), settings.context,
+                settings.output_limit, settings.thinking, gpt_runtime_vulkan_heap_bytes(),
+                prospero_memory::flexible_free());
+    }
+    const char *stage = selected.stage == prospero::model_manager::Stage::ready ? "ready" : "selected";
+    const auto response = nlohmann::json{{"id", id}, {"state", stage},
+                                          {"preparation_deferred", !prepare},
+                                          {"revision", selected.revision}}
+                              .dump();
+    send_json(api, sock, response.c_str());
 }
 
 void handle_model_delete(const NetApi &api, int sock, const char *body)
@@ -1459,6 +2429,100 @@ void handle_model_delete(const NetApi &api, int sock, const char *body)
     send_json(api, sock, nlohmann::json{{"deleted", id}}.dump().c_str());
 }
 
+void handle_model_memory_estimate(const NetApi &api, int sock, const char *body)
+{
+    const auto request = nlohmann::json::parse(body ? body : "", nullptr, false);
+    if (!request.is_object() || !request.contains("id") || !request["id"].is_string())
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"Provide a model ID.\"}");
+        return;
+    }
+    const std::string model_id = request["id"].get<std::string>();
+    if (model_id.empty() || model_id.size() >= prospero_session::ModelIdBytes)
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"Invalid model ID.\"}");
+        return;
+    }
+    if (!request.contains("context_tokens") || !request["context_tokens"].is_number_unsigned() ||
+        !request.contains("output_limit") || !request["output_limit"].is_number_unsigned() ||
+        !request.contains("thinking") || !request["thinking"].is_boolean())
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"Provide context_tokens, output_limit, and thinking settings.\"}");
+        return;
+    }
+    const unsigned context_tokens = request["context_tokens"].get<unsigned>();
+    const unsigned output_limit = request["output_limit"].get<unsigned>();
+    const bool thinking = request["thinking"].get<bool>();
+
+    nlohmann::json gguf_size = nullptr;
+    if (model_id.size() > 5 && model_id.compare(model_id.size() - 5, 5, ".gguf") == 0 &&
+        model_id.front() != '/' && model_id.find("..") == std::string::npos &&
+        model_id.find('\\') == std::string::npos)
+    {
+        char model_path[1024];
+        const int path_size = std::snprintf(model_path, sizeof(model_path), "%s/%s",
+                                             prospero::model_root(), model_id.c_str());
+        struct stat model_info{};
+        if (path_size > 0 && static_cast<std::size_t>(path_size) < sizeof(model_path) &&
+            ::stat(model_path, &model_info) == 0 && S_ISREG(model_info.st_mode) &&
+            model_info.st_size >= 0)
+            gguf_size = static_cast<std::uint64_t>(model_info.st_size);
+    }
+
+    const auto summary = prospero::debug::model_memory_summary(
+        model_id.c_str(), context_tokens, output_limit, thinking);
+    const unsigned samples = summary.samples;
+    const std::uint64_t largest_heap = summary.largest_vulkan_heap_bytes;
+    const std::uint64_t least_flexible_free = summary.least_flexible_free_bytes;
+    nlohmann::json latest_settings = nullptr;
+    const char *files[] = {"/download0/ProsperoAI/logs/events.prev.jsonl",
+                           "/download0/ProsperoAI/logs/events.jsonl"};
+    for (const char *file_path : files)
+    {
+        if (std::FILE *file = std::fopen(file_path, "rb"))
+        {
+            char line[1024];
+            while (std::fgets(line, sizeof(line), file))
+            {
+                const auto event = nlohmann::json::parse(line, nullptr, false);
+                if (!event.is_object() || event.value("operation", std::string()) !=
+                                              "model-memory-sample" ||
+                    event.value("model", std::string()) != model_id ||
+                    event.value("context_tokens", 0U) != context_tokens ||
+                    event.value("output_limit", 0U) != output_limit ||
+                    event.value("thinking", false) != thinking ||
+                    !event.contains("vulkan_heap_bytes") ||
+                    !event["vulkan_heap_bytes"].is_number_integer() ||
+                    !event.contains("flexible_free_bytes") ||
+                    !event["flexible_free_bytes"].is_number_integer())
+                    continue;
+                latest_settings = nlohmann::json{{"context_tokens", event.value("context_tokens", 0U)},
+                    {"output_limit", event.value("output_limit", 0U)},
+                    {"thinking", event.value("thinking", false)}};
+            }
+            std::fclose(file);
+        }
+    }
+
+    nlohmann::json current = nullptr;
+    std::unique_lock<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex(),
+                                               std::try_to_lock);
+    if (runtime_lock.owns_lock())
+        current = nlohmann::json{{"largest_direct_block_bytes", prospero_memory::largest_free_block()},
+            {"flexible_free_bytes", prospero_memory::flexible_free()}};
+    const auto response = nlohmann::json{{"model", model_id}, {"samples", samples},
+        {"gguf_file_size_bytes", gguf_size},
+        {"estimate_available", samples > 0}, {"largest_observed_vulkan_heap_bytes", largest_heap},
+        {"least_observed_flexible_free_bytes", samples ? least_flexible_free : 0},
+        {"latest_sample_settings", latest_settings}, {"current_memory", current},
+        {"confidence", samples ? "historical-observations-not-fit-guarantee" : "unavailable"}}
+                              .dump();
+    send_json(api, sock, response.c_str());
+}
+
 // Same allowlist the native app uses to recognize a generated-media reference inside a
 // message's own text (src/native_app.cpp:media_path/refresh_images): no traversal, and only
 // the fresh-output or archived-media paths the runtime itself writes under /download0.
@@ -1474,10 +2538,66 @@ bool media_path_allowed(const std::string &path)
     for (const char *prefix : prefixes)
         if (path.compare(0, std::strlen(prefix), prefix) == 0)
             return true;
+#if defined(PROSPERO_SESSION_TEST)
+    constexpr const char *test_prefix = "/tmp/prosperoai-session-test/work/image/";
+    if (path.compare(0, std::strlen(test_prefix), test_prefix) == 0)
+        return true;
+#endif
     return false;
 }
 
-void handle_media_file(const NetApi &api, int sock, const char *path)
+bool is_media_file_path(const char *path)
+{
+    if (!path)
+        return false;
+    if (std::strncmp(path, "/download0/", 11) == 0)
+        return true;
+#if defined(PROSPERO_SESSION_TEST)
+    constexpr char test_prefix[] = "/tmp/prosperoai-session-test/work/image/";
+    return std::strncmp(path, test_prefix, sizeof(test_prefix) - 1) == 0;
+#else
+    return false;
+#endif
+}
+
+bool header_name_eq(const char *a, const char *b, std::size_t n)
+{
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        char ca = a[i], cb = b[i];
+        if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca + 32);
+        if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb + 32);
+        if (ca != cb)
+            return false;
+    }
+    return true;
+}
+
+// Case-insensitive header scan within the request block [req, hdr_end).
+// Returns pointer into the request buffer (value start) or nullptr.
+const char *find_header(const char *req, const char *hdr_end, const char *name)
+{
+    const std::size_t nlen = std::strlen(name);
+    for (const char *p = req; p != nullptr && p < hdr_end;)
+    {
+        const char *eol = std::strstr(p, "\r\n");
+        if (eol == nullptr || eol > hdr_end)
+            break;
+        // Header must be exactly `name` (case-insensitive) followed by ':'.
+        if (static_cast<std::size_t>(eol - p) > nlen && p[nlen] == ':' &&
+            header_name_eq(p, name, nlen))
+        {
+            const char *v = p + nlen + 1;
+            while (v < eol && (*v == ' ' || *v == '\t'))
+                ++v;
+            return v;
+        }
+        p = eol + 2;
+    }
+    return nullptr;
+}
+
+void handle_media_file(const NetApi &api, int sock, const char *path, const char *range)
 {
     if (!media_path_allowed(path))
     {
@@ -1498,28 +2618,243 @@ void handle_media_file(const NetApi &api, int sock, const char *path)
     const bool is_png = path_length >= 4 && std::strcmp(path + path_length - 4, ".png") == 0;
     const bool is_json = path_length >= 5 && std::strcmp(path + path_length - 5, ".json") == 0;
     const bool is_text = path_length >= 4 && std::strcmp(path + path_length - 4, ".txt") == 0;
+    const char *ctype = is_wav    ? "audio/wav"
+                        : is_png  ? "image/png"
+                        : is_json ? "application/json"
+                        : is_text ? "text/plain; charset=utf-8"
+                                  : "application/octet-stream";
     if (size < 0 || size > 64 * 1024 * 1024)
     {
         std::fclose(file);
         send_status(api, sock, "500 Internal Server Error", "text/plain", "Media unavailable.");
         return;
     }
+    // Single-range support (iOS Safari refuses to seek media without 206/Accept-Ranges).
+    long start = 0, end = size - 1;
+    bool partial = false;
     char header[256];
-    std::snprintf(header, sizeof(header),
-                  "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n"
-                  "X-Content-Type-Options: nosniff\r\nCache-Control: no-cache\r\nConnection: "
-                  "close\r\n\r\n",
-                  is_wav    ? "audio/wav"
-                  : is_png  ? "image/png"
-                  : is_json ? "application/json"
-                  : is_text ? "text/plain; charset=utf-8"
-                            : "application/octet-stream",
-                  size);
+    if (range != nullptr && std::strncmp(range, "bytes=", 6) == 0)
+    {
+        const char *v = range + 6;
+        const char *dash = std::strchr(v, '-');
+        if (dash != nullptr)
+        {
+            const bool have_start = dash != v;
+            const bool have_end = dash[1] >= '0' && dash[1] <= '9';
+            long s = 0, e = 0;
+            if (have_start)
+                s = std::strtol(v, nullptr, 10);
+            if (have_end)
+                e = std::strtol(dash + 1, nullptr, 10);
+            if (!have_start && have_end)
+            {
+                s = size - e; // suffix range: last N bytes
+                e = size - 1;
+            }
+            else if (have_start && !have_end)
+            {
+                e = size - 1;
+            }
+            if (s >= 0 && e < size && s <= e)
+            {
+                start = s;
+                end = e;
+                partial = true;
+            }
+            else
+            {
+                std::fclose(file);
+                std::snprintf(header, sizeof(header),
+                              "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */%ld\r\n"
+                              "Content-Length: 0\r\nConnection: close\r\n\r\n", size);
+                send_all(api, sock, header, std::strlen(header));
+                return;
+            }
+        }
+    }
+    if (partial)
+    {
+        std::snprintf(header, sizeof(header),
+                      "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\n"
+                      "Content-Range: bytes %ld-%ld/%ld\r\nContent-Length: %ld\r\n"
+                      "Accept-Ranges: bytes\r\nX-Content-Type-Options: nosniff\r\n"
+                      "Cache-Control: no-cache\r\nConnection: close\r\n\r\n",
+                      ctype, start, end, size, end - start + 1);
+        std::fseek(file, start, SEEK_SET);
+    }
+    else
+    {
+        std::snprintf(header, sizeof(header),
+                      "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\n"
+                      "Accept-Ranges: bytes\r\nX-Content-Type-Options: nosniff\r\nCache-Control: "
+                      "no-cache\r\nConnection: close\r\n\r\n",
+                      ctype, size);
+    }
     send_all(api, sock, header, std::strlen(header));
     char buffer[16384];
-    for (std::size_t count; (count = std::fread(buffer, 1, sizeof(buffer), file)) != 0;)
+    long remaining = end - start + 1;
+    for (std::size_t count;
+         remaining > 0 &&
+         (count = std::fread(buffer, 1,
+                             sizeof(buffer) < static_cast<std::size_t>(remaining)
+                                 ? sizeof(buffer)
+                                 : static_cast<std::size_t>(remaining),
+                             file)) != 0;)
+    {
         send_all(api, sock, buffer, count);
+        remaining -= static_cast<long>(count);
+    }
     std::fclose(file);
+}
+
+nlohmann::json list_saved_media()
+{
+    std::map<std::string, nlohmann::json> media;
+    prospero_session::Record records[prospero_session::CatalogCapacity]{};
+    const unsigned count = prospero_session::scan(records, prospero_session::CatalogCapacity);
+    for (unsigned i = 0; i < count; ++i)
+    {
+        const auto &record = records[i];
+        for (unsigned message_index = 0; message_index < record.message_count; ++message_index)
+        {
+            prospero_session::Message message{};
+            if (!prospero_session::load_message(record.id, message_index, &message))
+                continue;
+            const std::string &content = message.content;
+            std::size_t at = 0;
+            while ((at = content.find("/download0/", at)) != std::string::npos)
+            {
+                std::size_t end = at;
+                while (end < content.size() &&
+                       !std::isspace(static_cast<unsigned char>(content[end])) &&
+                       content[end] != '<' && content[end] != '>' && content[end] != '"')
+                    ++end;
+                while (end > at && (content[end - 1] == ')' || content[end - 1] == ',' ||
+                                    content[end - 1] == '.' || content[end - 1] == ';'))
+                    --end;
+                const std::string path = content.substr(at, end - at);
+                const bool image = path.size() >= 4 &&
+                                   (path.compare(path.size() - 4, 4, ".png") == 0 ||
+                                    path.compare(path.size() - 4, 4, ".tga") == 0);
+                const bool audio = path.size() >= 4 &&
+                                   (path.compare(path.size() - 4, 4, ".wav") == 0);
+                if ((image || audio) && media_path_allowed(path))
+                    media.emplace(path, nlohmann::json{{"path", path},
+                        {"kind", image ? "image" : "audio"}, {"conversation_id", record.id},
+                        {"title", record.title}, {"model", record.model_id},
+                        {"modelName", record.model_name}});
+                at = std::max(end, at + 1);
+            }
+        }
+    }
+    nlohmann::json data = nlohmann::json::array();
+    for (auto &item : media)
+        data.push_back(std::move(item.second));
+    return data;
+}
+
+bool delete_archived_media(const std::string &path, std::string &error)
+{
+    if (!media_path_allowed(path))
+    {
+        error = "Media path is outside the allowed storage area.";
+        return false;
+    }
+    const bool supported_media = path.size() >= 4 &&
+        (path.compare(path.size() - 4, 4, ".png") == 0 ||
+         path.compare(path.size() - 4, 4, ".tga") == 0 ||
+         path.compare(path.size() - 4, 4, ".wav") == 0);
+    if (!supported_media)
+    {
+        error = "Only archived image and audio files can be deleted here.";
+        return false;
+    }
+    prospero_session::Record records[prospero_session::CatalogCapacity]{};
+    const unsigned count = prospero_session::scan(records, prospero_session::CatalogCapacity);
+    prospero_session::Record owner{};
+    std::vector<prospero_session::Message> owner_messages;
+    unsigned owner_message = 0;
+    unsigned references = 0;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        for (unsigned j = 0; j < records[i].message_count; ++j)
+        {
+            prospero_session::Message message{};
+            if (!prospero_session::load_message(records[i].id, j, &message))
+                continue;
+            std::size_t at = 0;
+            bool found = false;
+            while ((at = message.content.find(path, at)) != std::string::npos)
+            {
+                found = true;
+                ++references;
+                at += path.size();
+                if (references > 1)
+                {
+                    error = "This media file is referenced more than once.";
+                    return false;
+                }
+            }
+            if (found)
+            {
+                owner = records[i];
+                owner_message = j;
+                owner_messages.resize(owner.message_count);
+                if (!prospero_session::load(owner.id, &owner, owner_messages.data(),
+                                            static_cast<unsigned>(owner_messages.size())))
+                {
+                    error = "The source conversation could not be loaded.";
+                    return false;
+                }
+            }
+        }
+    }
+    if (references != 1)
+    {
+        error = "Only media linked to a saved conversation can be deleted here.";
+        return false;
+    }
+    char owned_prefix[160];
+    bool owned_copy = false;
+    static const char *media_kinds[] = {"image", "audio", "voice"};
+    for (const char *kind : media_kinds)
+    {
+        std::snprintf(owned_prefix, sizeof(owned_prefix),
+                      "/download0/ProsperoAI/work/%s/%s/", kind, owner.id);
+        if (path.compare(0, std::strlen(owned_prefix), owned_prefix) == 0 &&
+            path.find('/', std::strlen(owned_prefix)) == std::string::npos)
+        {
+            owned_copy = true;
+            break;
+        }
+    }
+    if (!owned_copy)
+    {
+        error = "Only an archived output copy stored with its conversation can be deleted.";
+        return false;
+    }
+    auto &content = owner_messages[owner_message].content;
+    const std::string original = content;
+    std::size_t at = content.find(path);
+    if (at == std::string::npos)
+    {
+        error = "The media reference changed; refresh and try again.";
+        return false;
+    }
+    content.replace(at, path.size(), "[media deleted]");
+    if (!prospero_session::save(&owner, owner_messages.data(), owner.message_count))
+    {
+        error = "The conversation could not be updated.";
+        return false;
+    }
+    if (std::remove(path.c_str()) != 0)
+    {
+        owner_messages[owner_message].content = original;
+        (void)prospero_session::save(&owner, owner_messages.data(), owner.message_count);
+        error = "The archived media file could not be removed.";
+        return false;
+    }
+    return true;
 }
 
 bool handle_conversations(const NetApi &api, int sock, const char *method, const char *path,
@@ -1545,6 +2880,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
                             {"model", record.model_id},
                             {"modelName", record.model_name},
                             {"purpose", record.purpose},
+                            {"pinned", record.pinned},
+                            {"archived", record.archived},
                             {"message_count", record.message_count},
                             {"created_us", record.created_us},
                             {"updated_us", record.updated_us}});
@@ -1575,6 +2912,13 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
         const std::string model = string_field("model");
         const std::string model_name = string_field("modelName", model.c_str());
         const std::string purpose = string_field("purpose", "text-to-text");
+        if ((request.contains("pinned") && !request["pinned"].is_boolean()) ||
+            (request.contains("archived") && !request["archived"].is_boolean()))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"Pinned and archived must be boolean values.\"}");
+            return true;
+        }
         if (!prospero_session::valid_id(id.c_str()) || model.empty() || title.empty() ||
             title.size() >= sizeof(prospero_session::Record{}.title) ||
             model.size() >= sizeof(prospero_session::Record{}.model_id) || model_name.empty() ||
@@ -1584,6 +2928,33 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
             send_status(api, sock, "400 Bad Request", "application/json",
                         "{\"error\":\"Invalid conversation identity or metadata.\"}");
             return true;
+        }
+
+        if (request.contains("messages") && request["messages"].is_array())
+        {
+            const auto &items = request["messages"];
+            for (std::size_t index = 0; index < items.size() &&
+                                       index < prospero_session::MessageCapacity; ++index)
+            {
+                const auto &item = items[index];
+                if (!item.is_object() || !item.contains("image"))
+                    continue;
+                if (!item["image"].is_string())
+                {
+                    send_status(api, sock, "400 Bad Request", "application/json",
+                                "{\"error\":\"Message image must be an owned PNG path.\"}");
+                    return true;
+                }
+                const std::string image = item["image"].get<std::string>();
+                if (image.find('\0') != std::string::npos ||
+                    (!image.empty() && !prospero_session::valid_optional_image_path(
+                                           id.c_str(), static_cast<unsigned>(index), image.c_str())))
+                {
+                    send_status(api, sock, "400 Bad Request", "application/json",
+                                "{\"error\":\"Message image must be an owned PNG path.\"}");
+                    return true;
+                }
+            }
         }
 
         prospero_session::Record record{};
@@ -1601,6 +2972,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
         std::snprintf(record.model_id, sizeof(record.model_id), "%s", model.c_str());
         std::snprintf(record.model_name, sizeof(record.model_name), "%s", model_name.c_str());
         std::snprintf(record.purpose, sizeof(record.purpose), "%s", purpose.c_str());
+        if (request.contains("pinned")) record.pinned = request["pinned"].get<bool>();
+        if (request.contains("archived")) record.archived = request["archived"].get<bool>();
         if (request.contains("messages"))
         {
             const auto &items = request["messages"];
@@ -1633,6 +3006,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
                 std::snprintf(message.role, sizeof(message.role), "%s", role.c_str());
                 std::snprintf(message.timestamp, sizeof(message.timestamp), "00:00");
                 message.content = content;
+                if (item.contains("image"))
+                    message.image = item["image"].get<std::string>();
                 messages.push_back(message);
             }
         }
@@ -1649,6 +3024,8 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
             {"model", record.model_id},
             {"modelName", record.model_name},
             {"purpose", record.purpose},
+            {"pinned", record.pinned},
+            {"archived", record.archived},
             {"message_count", record.message_count},
             {"created_us", record.created_us},
             {"updated_us",
@@ -1663,6 +3040,51 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
     {
         send_status(api, sock, "400 Bad Request", "application/json",
                     "{\"error\":\"Invalid conversation ID.\"}");
+        return true;
+    }
+    if (std::strcmp(method, "PATCH") == 0)
+    {
+        const auto request = nlohmann::json::parse(body, nullptr, false);
+        if (!request.is_object() ||
+            (request.contains("title") && !request["title"].is_string()) ||
+            (request.contains("pinned") && !request["pinned"].is_boolean()) ||
+            (request.contains("archived") && !request["archived"].is_boolean()) ||
+            (!request.contains("title") && !request.contains("pinned") &&
+             !request.contains("archived")))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"Provide a title, pinned, or archived field.\"}");
+            return true;
+        }
+        const std::string title = request.value("title", std::string());
+        if (request.contains("title") &&
+            (title.empty() || title.size() >= sizeof(prospero_session::Record{}.title)))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"Title must be 1–71 bytes.\"}");
+            return true;
+        }
+        prospero_session::Record record{};
+        std::vector<prospero_session::Message> messages(prospero_session::MessageCapacity);
+        if (!prospero_session::load(id.c_str(), &record, messages.data(),
+                                    static_cast<unsigned>(messages.size())))
+        {
+            send_status(api, sock, "404 Not Found", "application/json",
+                        "{\"error\":\"Conversation not found.\"}");
+            return true;
+        }
+        if (request.contains("title"))
+            std::snprintf(record.title, sizeof(record.title), "%s", title.c_str());
+        if (request.contains("pinned")) record.pinned = request["pinned"].get<bool>();
+        if (request.contains("archived")) record.archived = request["archived"].get<bool>();
+        if (!prospero_session::save(&record, messages.data(), record.message_count))
+        {
+            send_status(api, sock, "500 Internal Server Error", "application/json",
+                        "{\"error\":\"Could not rename the conversation.\"}");
+            return true;
+        }
+        send_json(api, sock, nlohmann::json{{"id", record.id}, {"title", record.title},
+            {"pinned", record.pinned}, {"archived", record.archived}}.dump().c_str());
         return true;
     }
     if (std::strcmp(method, "DELETE") == 0)
@@ -1689,13 +3111,20 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
         }
         nlohmann::json items = nlohmann::json::array();
         for (unsigned i = 0; i < record.message_count; ++i)
-            items.push_back({{"role", messages[i].role}, {"content", messages[i].content}});
+        {
+            nlohmann::json item = {{"role", messages[i].role}, {"content", messages[i].content}};
+            if (!messages[i].image.empty())
+                item["image"] = messages[i].image;
+            items.push_back(std::move(item));
+        }
         const auto response = nlohmann::json{
             {"id", record.id},
             {"title", record.title},
             {"model", record.model_id},
             {"modelName", record.model_name},
             {"purpose", record.purpose},
+            {"pinned", record.pinned},
+            {"archived", record.archived},
             {"message_count", record.message_count},
             {"created_us", record.created_us},
             {"updated_us", record.updated_us},
@@ -1709,6 +3138,771 @@ bool handle_conversations(const NetApi &api, int sock, const char *method, const
     return true;
 }
 
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+// Workspace Audio: bundle a track's stems into one store-only ZIP (WAV data is
+// incompressible, so no deflate — headers + raw bytes, streamed in 16 KB
+// chunks with a two-pass CRC so nothing large is buffered in heap).
+namespace stems_zip {
+struct CrcTable
+{
+    std::uint32_t t[256];
+    explicit CrcTable()
+    {
+        for (std::uint32_t i = 0; i < 256; ++i)
+        {
+            std::uint32_t c = i;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1u) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            t[i] = c;
+        }
+    }
+};
+
+bool file_crc_size(const char *path, const CrcTable &ct, std::uint32_t &crc, long &size)
+{
+    FILE *f = std::fopen(path, "rb");
+    if (!f)
+        return false;
+    crc = 0xFFFFFFFFu;
+    size = 0;
+    char buf[16384];
+    for (std::size_t n; (n = std::fread(buf, 1, sizeof(buf), f)) != 0;)
+    {
+        for (std::size_t i = 0; i < n; ++i)
+            crc = ct.t[(crc ^ static_cast<std::uint8_t>(buf[i])) & 0xFFu] ^ (crc >> 8);
+        size += static_cast<long>(n);
+    }
+    crc ^= 0xFFFFFFFFu;
+    std::fclose(f);
+    return true;
+}
+
+void put16(std::uint8_t *p, std::uint16_t v)
+{
+    p[0] = static_cast<std::uint8_t>(v);
+    p[1] = static_cast<std::uint8_t>(v >> 8);
+}
+void put32(std::uint8_t *p, std::uint32_t v)
+{
+    for (int i = 0; i < 4; ++i)
+        p[i] = static_cast<std::uint8_t>(v >> (8 * i));
+}
+} // namespace stems_zip
+
+void handle_music_stems_zip(const NetApi &api, int sock, const char *track)
+{
+    using stems_zip::CrcTable;
+    const std::string name(track);
+    if (name.size() < 5 || name.size() > 96 || name.find("..") != std::string::npos ||
+        name.compare(name.size() - 4, 4, ".wav") != 0)
+    {
+        send_status(api, sock, "400 Bad Request", "text/plain", "track must be a plain .wav name.");
+        return;
+    }
+    for (char c : name)
+    {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                        c == '.' || c == '_' || c == '-';
+        if (!ok)
+        {
+            send_status(api, sock, "400 Bad Request", "text/plain", "track name has bad chars.");
+            return;
+        }
+    }
+    static const char *stems[] = {"drums", "bass", "other", "vocals", "instrumental"};
+    const std::string base = name.substr(0, name.size() - 4);
+    const std::string dir = PROSPERO_AUDIO_DIR;
+    struct Entry
+    {
+        std::string path, member;
+        long size;
+        std::uint32_t crc;
+        long offset;
+    };
+    static const CrcTable ct{};
+    std::vector<Entry> entries;
+    for (const char *stem : stems)
+    {
+        Entry e;
+        e.path = dir + base + "-" + stem + ".wav";
+        e.member = base + "-" + stem + ".wav";
+        if (!stems_zip::file_crc_size(e.path.c_str(), ct, e.crc, e.size))
+            continue;
+        entries.push_back(std::move(e));
+    }
+    if (entries.empty())
+    {
+        send_status(api, sock, "404 Not Found", "text/plain", "No stems found for that track.");
+        return;
+    }
+    long total = 0;
+    for (auto &e : entries)
+    {
+        e.offset = total; // local headers pack from 0; the central directory follows them
+        total += 30 + static_cast<long>(e.member.size()) + e.size;
+    }
+    for (auto &e : entries)
+        total += 46 + static_cast<long>(e.member.size());
+    total += 22; // EOCD sits at the tail
+    char header[512];
+    std::snprintf(header, sizeof(header),
+                  "HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n"
+                  "Content-Disposition: attachment; filename=\"%.80s-stems.zip\"\r\n"
+                  "Content-Length: %ld\r\nX-Content-Type-Options: nosniff\r\n"
+                  "Cache-Control: no-cache\r\nConnection: close\r\n\r\n",
+                  base.c_str(), total);
+    send_all(api, sock, header, std::strlen(header));
+    std::uint8_t rec[30];
+    char buf[16384];
+    for (auto &e : entries)
+    {
+        std::memset(rec, 0, sizeof(rec));
+        stems_zip::put32(rec + 0, 0x04034B50u);
+        stems_zip::put16(rec + 4, 20);
+        stems_zip::put32(rec + 14, e.crc);
+        stems_zip::put32(rec + 18, static_cast<std::uint32_t>(e.size));
+        stems_zip::put32(rec + 22, static_cast<std::uint32_t>(e.size));
+        stems_zip::put16(rec + 26, static_cast<std::uint16_t>(e.member.size()));
+        send_all(api, sock, reinterpret_cast<const char *>(rec), sizeof(rec));
+        send_all(api, sock, e.member.data(), e.member.size());
+        FILE *f = std::fopen(e.path.c_str(), "rb");
+        if (!f)
+            break;
+        for (std::size_t n; (n = std::fread(buf, 1, sizeof(buf), f)) != 0;)
+            send_all(api, sock, buf, n);
+        std::fclose(f);
+    }
+    long cd_size = 0;
+    for (auto &e : entries)
+    {
+        std::uint8_t crec[46];
+        std::memset(crec, 0, sizeof(crec));
+        stems_zip::put32(crec + 0, 0x02014B50u);
+        stems_zip::put16(crec + 4, 20);
+        stems_zip::put16(crec + 6, 20);
+        stems_zip::put32(crec + 16, e.crc);
+        stems_zip::put32(crec + 20, static_cast<std::uint32_t>(e.size));
+        stems_zip::put32(crec + 24, static_cast<std::uint32_t>(e.size));
+        stems_zip::put16(crec + 28, static_cast<std::uint16_t>(e.member.size()));
+        stems_zip::put32(crec + 42, static_cast<std::uint32_t>(e.offset));
+        send_all(api, sock, reinterpret_cast<const char *>(crec), sizeof(crec));
+        send_all(api, sock, e.member.data(), e.member.size());
+        cd_size += 46 + static_cast<long>(e.member.size());
+    }
+    std::uint8_t eocd[22];
+    std::memset(eocd, 0, sizeof(eocd));
+    stems_zip::put32(eocd + 0, 0x06054B50u);
+    stems_zip::put16(eocd + 8, static_cast<std::uint16_t>(entries.size()));
+    stems_zip::put16(eocd + 10, static_cast<std::uint16_t>(entries.size()));
+    stems_zip::put32(eocd + 12, static_cast<std::uint32_t>(cd_size));
+    stems_zip::put32(eocd + 16, static_cast<std::uint32_t>(total - cd_size - 22));
+    send_all(api, sock, reinterpret_cast<const char *>(eocd), sizeof(eocd));
+}
+
+// Workspace Audio: list generated audio + ABC files under work/audio, newest first.
+void handle_music_files(const NetApi &api, int sock)
+{
+    const std::string dir = PROSPERO_AUDIO_DIR;
+    nlohmann::json files = nlohmann::json::array();
+    const auto entries = prospero::audio_workflows::list_library(dir);
+    std::vector<nlohmann::json> rows;
+    for (const auto &entry : entries)
+    {
+        nlohmann::json row = {{"name", entry.name}, {"size", entry.size},
+                              {"mtime", entry.modified}};
+        if (entry.name.compare(entry.name.size() - 4, 4, ".abc") != 0)
+        {
+            // embed generation metadata sidecar (written by /api/music/meta)
+            const std::string base = entry.name.substr(0, entry.name.size() - 4);
+            const std::string meta_path = dir + base + ".track.json";
+            if (FILE *mf = std::fopen(meta_path.c_str(), "rb"))
+            {
+                std::fseek(mf, 0, SEEK_END);
+                const long msize = std::ftell(mf);
+                std::fseek(mf, 0, SEEK_SET);
+                std::string mtext(static_cast<std::size_t>(msize > 0 ? msize : 0), '\0');
+                if (msize > 0 && std::fread(mtext.data(), 1, mtext.size(), mf) == mtext.size())
+                {
+                    auto mj = nlohmann::json::parse(mtext, nullptr, false);
+                    if (mj.is_object())
+                        row["meta"] = std::move(mj);
+                }
+                std::fclose(mf);
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+    files = std::move(rows);
+    send_json(api, sock, nlohmann::json{{"files", std::move(files)}}.dump().c_str());
+}
+
+// Workspace Audio: persist an ABC score typed in the web editor.
+void handle_music_abc(const NetApi &api, int sock, const char *body)
+{
+    const auto reject = [&api, sock](const char *reason) {
+        openai_error(api, sock, "400 Bad Request", "invalid_abc", reason);
+    };
+    const auto j = body != nullptr && *body != '\0'
+                       ? nlohmann::json::parse(body, nullptr, false)
+                       : nlohmann::json();
+    if (!j.is_object() || !j.contains("name") || !j["name"].is_string() ||
+        !j.contains("content") || !j["content"].is_string())
+    {
+        reject("Expected {name, content}.");
+        return;
+    }
+    const std::string name = j["name"].get<std::string>();
+    const std::string content = j["content"].get<std::string>();
+    if (name.size() < 5 || name.size() > 96 || content.size() > 256 * 1024 ||
+        name.find("..") != std::string::npos ||
+        name.compare(name.size() - 4, 4, ".abc") != 0)
+    {
+        reject("Name must be a plain *.abc file within bounds.");
+        return;
+    }
+    for (const char c : name)
+    {
+        const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                             (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        if (!allowed)
+        {
+            reject("Name has forbidden characters.");
+            return;
+        }
+    }
+    const std::string path = std::string(PROSPERO_AUDIO_DIR) + name;
+    if (!prospero::audio_workflows::save_abc(PROSPERO_AUDIO_DIR, name, content))
+    {
+        openai_error(api, sock, "500 Internal Server Error", "abc_write_failed", path.c_str());
+        return;
+    }
+    send_json(api, sock, nlohmann::json{{"ok", true}, {"path", path}}.dump().c_str());
+}
+
+// Workspace Audio: persist generation metadata (lyrics/style/seed/abc...) as a
+// sidecar <track>.track.json next to the audio file, so the library menu can
+// offer "Cover" (reload the exact settings) later. Values are flat
+// string/number fields; serialized size is capped at 80 KiB.
+void handle_music_meta(const NetApi &api, int sock, const char *body)
+{
+    const auto reject = [&api, sock](const char *reason) {
+        openai_error(api, sock, "400 Bad Request", "invalid_meta", reason);
+    };
+    const auto j = body != nullptr && *body != '\0'
+                       ? nlohmann::json::parse(body, nullptr, false)
+                       : nlohmann::json();
+    if (!j.is_object() || !j.contains("name") || !j["name"].is_string() ||
+        !j.contains("meta") || !j["meta"].is_object())
+    {
+        reject("Expected {name, meta}.");
+        return;
+    }
+    const std::string name = j["name"].get<std::string>();
+    if (name.size() <= 4 || name.size() > 96 || name.find('/') != std::string::npos ||
+        name.find("..") != std::string::npos)
+    {
+        reject("Name must be a plain file name.");
+        return;
+    }
+    const std::size_t dot = name.rfind('.');
+    if (dot == std::string::npos ||
+        (name.compare(dot, 4, ".wav") != 0 && name.compare(dot, 4, ".mp3") != 0))
+    {
+        reject("Track name must be *.wav or *.mp3.");
+        return;
+    }
+    // keep only flat scalar fields, drop anything exotic
+    nlohmann::json clean = nlohmann::json::object();
+    for (auto &[key, val] : j["meta"].items())
+    {
+        if (val.is_string()) clean[key] = val.get<std::string>();
+        else if (val.is_number_integer()) clean[key] = val.get<long long>();
+    }
+    const std::string dumped = clean.dump();
+    if (dumped.size() > 80 * 1024)
+    {
+        reject("Meta too large (80 KiB cap).");
+        return;
+    }
+    const std::string path =
+        std::string("/download0/ProsperoAI/work/audio/") + name.substr(0, dot) + ".track.json";
+    FILE *file = std::fopen(path.c_str(), "wb");
+    if (!file)
+    {
+        openai_error(api, sock, "500 Internal Server Error", "meta_write_failed", path.c_str());
+        return;
+    }
+    std::fwrite(dumped.data(), 1, dumped.size(), file);
+    std::fclose(file);
+    send_json(api, sock, nlohmann::json{{"ok", true}, {"path", path}}.dump().c_str());
+}
+
+// Workspace Audio Cover: append a base64 chunk to work/audio/<name>.wav. The
+// request buffer is 256 KiB, so the browser uploads the Web-Audio-decoded
+// 16 kHz mono WAV in ~150 KiB base64 parts: {name, part, data}. Part 0
+// truncates, later parts append; 24 MiB cap per file. The SheetSage2 adapter
+// then reads the file via audio_options.input_audio.
+bool base64_decode(const std::string &in, std::string &out)
+{
+    static signed char table[256];
+    static bool ready = false;
+    if (!ready)
+    {
+        for (int i = 0; i < 256; ++i)
+            table[i] = -1;
+        const char *alpha =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for (int i = 0; i < 64; ++i)
+            table[static_cast<unsigned char>(alpha[i])] = static_cast<signed char>(i);
+        ready = true;
+    }
+    out.clear();
+    out.reserve(in.size() / 4 * 3 + 3);
+    unsigned accumulator = 0;
+    int bits = 0;
+    for (const char c : in)
+    {
+        if (c == '=' || c == '\n' || c == '\r')
+            continue;
+        const signed char value = table[static_cast<unsigned char>(c)];
+        if (value < 0)
+            return false;
+        accumulator = (accumulator << 6) | static_cast<unsigned>(value);
+        bits += 6;
+        if (bits >= 8)
+        {
+            bits -= 8;
+            out.push_back(static_cast<char>((accumulator >> bits) & 0xff));
+        }
+    }
+    return true;
+}
+
+void handle_music_upload(const NetApi &api, int sock, const char *body)
+{
+    const auto j = body != nullptr && *body != '\0'
+                       ? nlohmann::json::parse(body, nullptr, false)
+                       : nlohmann::json();
+    if (!j.is_object() || !j.contains("name") || !j["name"].is_string() ||
+        !j.contains("part") || !j["part"].is_number_unsigned() || !j.contains("data") ||
+        !j["data"].is_string())
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_upload",
+                     "Expected {name, part, data}.");
+        return;
+    }
+    const std::string name = j["name"].get<std::string>();
+    const std::string data = j["data"].get<std::string>();
+    const unsigned long long part = j["part"].get<unsigned long long>();
+    if (name.size() < 5 || name.size() > 96 || name.find("..") != std::string::npos ||
+        name.compare(name.size() - 4, 4, ".wav") != 0 || data.size() > 200 * 1024)
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_upload",
+                     "Name must be a plain *.wav within bounds (data <= 200 KiB).");
+        return;
+    }
+    for (const char c : name)
+    {
+        const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                             (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        if (!allowed)
+        {
+            openai_error(api, sock, "400 Bad Request", "invalid_upload",
+                         "Name has forbidden characters.");
+            return;
+        }
+    }
+    std::string bytes;
+    if (!base64_decode(data, bytes) || (bytes.empty() && part != 0 && data.size() >= 4))
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_upload", "Bad base64 payload.");
+        return;
+    }
+    const std::string path = std::string(PROSPERO_AUDIO_DIR) + name;
+    std::FILE *file = std::fopen(path.c_str(), part == 0 ? "wb" : "ab");
+    if (!file)
+    {
+        openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
+                     path.c_str());
+        return;
+    }
+    if (part != 0 && std::fseek(file, 0, SEEK_END) == 0 &&
+        std::ftell(file) + static_cast<long>(bytes.size()) > 24 * 1024 * 1024)
+    {
+        std::fclose(file);
+        openai_error(api, sock, "413 Payload Too Large", "upload_too_large",
+                     "Audio file exceeds 24 MiB.");
+        return;
+    }
+    const bool written = bytes.empty() ||
+                         std::fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size();
+    const bool complete = std::ferror(file) == 0;
+    std::fclose(file);
+    if (!written || !complete)
+    {
+        openai_error(api, sock, "500 Internal Server Error", "upload_write_failed",
+                     path.c_str());
+        return;
+    }
+    send_json(api, sock, nlohmann::json{{"ok", true}, {"part", part}}.dump().c_str());
+}
+
+// Workspace Audio: delete a listed file (wav/mp3/abc) from work/audio by name.
+void handle_music_delete(const NetApi &api, int sock, const char *body)
+{
+    const auto j = body != nullptr && *body != '\0'
+                       ? nlohmann::json::parse(body, nullptr, false)
+                       : nlohmann::json();
+    if (!j.is_object() || !j.contains("name") || !j["name"].is_string())
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_name", "Expected {name}.");
+        return;
+    }
+    const std::string name = j["name"].get<std::string>();
+    if (name.size() < 5 || name.size() > 96 || name.find("..") != std::string::npos ||
+        (name.compare(name.size() - 4, 4, ".abc") != 0 &&
+         name.compare(name.size() - 4, 4, ".wav") != 0 &&
+         name.compare(name.size() - 4, 4, ".mp3") != 0))
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_name",
+                     "Name must be a plain *.wav, *.mp3 or *.abc file.");
+        return;
+    }
+    for (const char c : name)
+    {
+        const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                             (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        if (!allowed)
+        {
+            openai_error(api, sock, "400 Bad Request", "invalid_name", "Name has forbidden characters.");
+            return;
+        }
+    }
+    const std::string path = std::string("/download0/ProsperoAI/work/audio/") + name;
+    if (std::remove(path.c_str()) != 0)
+    {
+        openai_error(api, sock, "404 Not Found", "delete_failed", path.c_str());
+        return;
+    }
+    // best effort: drop the metadata sidecar too
+    const std::string sidecar =
+        std::string("/download0/ProsperoAI/work/audio/") + name.substr(0, name.rfind('.')) + ".track.json";
+    std::remove(sidecar.c_str());
+    send_json(api, sock, nlohmann::json{{"ok", true}, {"deleted", name}}.dump().c_str());
+}
+
+// Workspace Audio: rename a file inside work/audio (e.g. stamp a friendly track name).
+void handle_music_rename(const NetApi &api, int sock, const char *body)
+{
+    const auto j = body != nullptr && *body != '\0'
+                       ? nlohmann::json::parse(body, nullptr, false)
+                       : nlohmann::json();
+    if (!j.is_object() || !j.contains("src") || !j["src"].is_string() ||
+        !j.contains("dst") || !j["dst"].is_string())
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_name", "Expected {src, dst}.");
+        return;
+    }
+    const std::string src = j["src"].get<std::string>();
+    const std::string dst = j["dst"].get<std::string>();
+    const auto bad = [](const std::string &name)
+    {
+        if (name.size() < 5 || name.size() > 96 || name.find("..") != std::string::npos ||
+            (name.compare(name.size() - 4, 4, ".abc") != 0 &&
+             name.compare(name.size() - 4, 4, ".wav") != 0 &&
+             name.compare(name.size() - 4, 4, ".mp3") != 0))
+            return true;
+        for (const char c : name)
+        {
+            const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                 (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+            if (!allowed) return true;
+        }
+        return false;
+    };
+    if (bad(src) || bad(dst))
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_name",
+                     "Names must be plain *.wav, *.mp3 or *.abc file names.");
+        return;
+    }
+    const std::string from = std::string("/download0/ProsperoAI/work/audio/") + src;
+    const std::string to = std::string("/download0/ProsperoAI/work/audio/") + dst;
+    if (::access(from.c_str(), F_OK) != 0)
+    {
+        openai_error(api, sock, "404 Not Found", "rename_failed", from.c_str());
+        return;
+    }
+    if (::access(to.c_str(), F_OK) == 0)
+    {
+        openai_error(api, sock, "409 Conflict", "dst_exists", dst.c_str());
+        return;
+    }
+    if (std::rename(from.c_str(), to.c_str()) != 0)
+    {
+        openai_error(api, sock, "404 Not Found", "rename_failed", from.c_str());
+        return;
+    }
+    // best effort: the metadata sidecar follows the track
+    const std::string side_from = "/download0/ProsperoAI/work/audio/" +
+                                  src.substr(0, src.rfind('.')) + ".track.json";
+    const std::string side_to = "/download0/ProsperoAI/work/audio/" +
+                                dst.substr(0, dst.rfind('.')) + ".track.json";
+    std::rename(side_from.c_str(), side_to.c_str());
+    send_json(api, sock, nlohmann::json{{"ok", true}, {"renamed", dst}}.dump().c_str());
+}
+
+// Server-side mastering (UI v54). The browser DSP was the only flow that
+// died with the page: a phone decoding a 20 MB wav in the tab, renderer
+// crash = master lost, and the download never survives a dropped network.
+// The console does it now: peak-normalize (gain = min(0.89/peak, 12), the
+// exact old WebAudio chain) then a soft-knee limiter approximating the
+// DynamicsCompressor(thr -6 dB, knee 4, ratio 16) the page used. Raw float
+// DSP on PCM is a fraction of a second here, so the call is synchronous.
+// Supports PCM 16/24-bit int + IEEE 32-bit float WAVs; mp3 stays browser-side.
+bool prospero_master_wav(const std::string &in_path, const std::string &out_path,
+                         char *err, std::size_t err_sz)
+{
+    std::snprintf(err, err_sz, "not a supported WAV");
+    std::FILE *f = std::fopen(in_path.c_str(), "rb");
+    if (!f)
+    {
+        std::snprintf(err, err_sz, "input not readable");
+        return false;
+    }
+    std::fseek(f, 0, SEEK_END);
+    const long file_sz = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    char riff[4] = {}, wave[4] = {};
+    if (file_sz < 44 || std::fread(riff, 1, 4, f) != 4 || std::fseek(f, 4, SEEK_CUR) != 0 ||
+        std::fread(wave, 1, 4, f) != 4 ||
+        std::memcmp(riff, "RIFF", 4) != 0 || std::memcmp(wave, "WAVE", 4) != 0)
+    {
+        std::fclose(f);
+        return false;
+    }
+    unsigned fmt = 0, chans = 0, bits = 0, rate = 0;
+    long data_off = -1;
+    unsigned long data_sz = 0;
+    for (;;)
+    {
+        char id[4];
+        unsigned sz = 0;
+        if (std::fread(id, 1, 4, f) != 4 || std::fread(&sz, 1, 4, f) != 4)
+            break;
+        const long body = std::ftell(f);
+        if (std::memcmp(id, "fmt ", 4) == 0)
+        {
+            unsigned char b[40] = {0};
+            const unsigned want = sz < 40u ? sz : 40u;
+            if (std::fread(b, 1, want, f) != want)
+                break;
+            fmt = static_cast<unsigned>(b[0] | (b[1] << 8));
+            chans = static_cast<unsigned>(b[2] | (b[3] << 8));
+            rate = static_cast<unsigned>(b[4] | (b[5] << 8) | (b[6] << 16) |
+                                         (static_cast<unsigned>(b[7]) << 24));
+            bits = static_cast<unsigned>(b[14] | (b[15] << 8));
+            // WAVE_FORMAT_EXTENSIBLE (ffmpeg writes it for 24-bit): the real
+            // codec lives at offset 24 of the fmt chunk.
+            if (fmt == 0xFFFEu && sz >= 26u)
+                fmt = static_cast<unsigned>(b[24] | (b[25] << 8));
+        }
+        else if (std::memcmp(id, "data", 4) == 0)
+        {
+            data_off = body;
+            data_sz = sz;
+        }
+        if (fmt && chans && rate && data_off >= 0)
+            break;
+        // always advance past the whole (even-padded) chunk body
+        if (std::fseek(f, body + static_cast<long>((sz + 1u) & ~1u), SEEK_SET) != 0)
+            break;
+    }
+    if ((fmt != 1 && fmt != 3) || chans < 1 || chans > 2 ||
+        (bits != 16 && bits != 24 && bits != 32) || data_off < 0 || rate == 0)
+    {
+        std::fclose(f);
+        return false;
+    }
+    const unsigned bps = bits / 8u;
+    const unsigned long frame_bytes = bps * chans;
+    if (frame_bytes == 0)
+    {
+        std::fclose(f);
+        return false;
+    }
+    // Some encoders leave data size bogus; clamp to the file.
+    const long avail = file_sz - data_off;
+    if (data_sz == 0 || data_sz > static_cast<unsigned long>(avail))
+        data_sz = static_cast<unsigned long>(avail);
+    const std::size_t n = data_sz / frame_bytes;  // frames
+    if (n == 0)
+    {
+        std::fclose(f);
+        return false;
+    }
+    std::vector<unsigned char> raw(data_sz);
+    std::fseek(f, data_off, SEEK_SET);
+    const std::size_t got = std::fread(raw.data(), 1, raw.size(), f);
+    std::fclose(f);
+    if (got < raw.size())
+    {
+        std::snprintf(err, err_sz, "truncated data chunk");
+        return false;
+    }
+    std::vector<float> s(n * chans);
+    for (std::size_t i = 0; i < n * chans; ++i)
+    {
+        const unsigned char *p = raw.data() + i * bps;
+        if (bits == 16)
+            s[i] = static_cast<float>(static_cast<std::int16_t>(p[0] | (p[1] << 8))) / 32768.0f;
+        else if (bits == 24)
+        {
+            std::int32_t v = static_cast<std::int32_t>(p[0] | (p[1] << 8) | (p[2] << 16));
+            if (v & 0x800000)
+                v |= ~0xFFFFFF;
+            s[i] = static_cast<float>(v) / 8388608.0f;
+        }
+        else
+        {
+            std::uint32_t u = p[0] | (p[1] << 8) | (p[2] << 16) |
+                             (static_cast<std::uint32_t>(p[3]) << 24);
+            float fv;
+            std::memcpy(&fv, &u, 4);
+            s[i] = std::isfinite(fv) ? fv : 0.0f;
+        }
+    }
+    float peak = 0.0f;
+    for (const float v : s)
+    {
+        const float a = v < 0.0f ? -v : v;
+        if (a > peak)
+            peak = a;
+    }
+    if (peak < 0.001f)
+    {
+        std::snprintf(err, err_sz, "audio is silent");
+        return false;
+    }
+    const double gain = (0.89 / peak) < 12.0 ? (0.89 / peak) : 12.0;
+    const double thr = 0.50119;  // -6 dB, where the old compressor kicked in
+    for (float &v : s)
+    {
+        double x = v * gain;
+        if (x > thr || x < -thr)
+        {
+            const double a = x < 0.0 ? -x : x;
+            const double soft = thr + (1.0 - thr) * std::tanh((a - thr) / (1.0 - thr));
+            x = x < 0.0 ? -soft : soft;
+        }
+        // WebAudio's DynamicsCompressor rides ~3.3 dB of makeup gain on top
+        // (measured against the old browser master of the same clip:
+        // RMS 0.147 vs 0.100 without it). Apply it, then tame the new
+        // overshoots with a soft ceiling so peaks stay under 0 dBFS.
+        x *= 1.46;
+        if (x > 0.9 || x < -0.9)
+        {
+            const double a = x < 0.0 ? -x : x;
+            const double soft = 0.9 + 0.1 * std::tanh((a - 0.9) / 0.1);
+            x = x < 0.0 ? -soft : soft;
+        }
+        if (x > 0.999) x = 0.999;
+        if (x < -0.999) x = -0.999;
+        v = static_cast<float>(x);
+    }
+    // Write back as 16-bit PCM.
+    const std::size_t data_bytes = n * chans * 2;
+    std::FILE *o = std::fopen(out_path.c_str(), "wb");  // overwrite by convention
+    if (!o)
+    {
+        std::snprintf(err, err_sz, "cannot open output");
+        return false;
+    }
+    unsigned char hdr[44];
+    auto put32 = [&](int at, unsigned v) {
+        hdr[at] = v & 0xFF; hdr[at+1] = (v >> 8) & 0xFF; hdr[at+2] = (v >> 16) & 0xFF;
+        hdr[at+3] = (v >> 24) & 0xFF;
+    };
+    auto put16 = [&](int at, unsigned v) { hdr[at] = v & 0xFF; hdr[at+1] = (v >> 8) & 0xFF; };
+    std::memcpy(hdr, "RIFF", 4); put32(4, 36u + static_cast<unsigned>(data_bytes));
+    std::memcpy(hdr + 8, "WAVEfmt ", 8); put32(16, 16);
+    put16(20, 1); put16(22, chans); put32(24, rate);
+    put32(28, rate * chans * 2); put16(32, chans * 2); put16(34, 16);
+    std::memcpy(hdr + 36, "data", 4); put32(40, static_cast<unsigned>(data_bytes));
+    std::fwrite(hdr, 1, 44, o);
+    std::vector<std::int16_t> out16(s.size());
+    for (std::size_t i = 0; i < s.size(); ++i)
+        out16[i] = static_cast<std::int16_t>(s[i] * 32767.0f);
+    std::fwrite(out16.data(), 2, out16.size(), o);
+    const bool ok = std::fclose(o) == 0;
+    if (!ok)
+        std::snprintf(err, err_sz, "write failed");
+    return ok;
+}
+
+void handle_music_master(const NetApi &api, int sock, const char *body)
+{
+    const auto j = body != nullptr && *body != '\0'
+                       ? nlohmann::json::parse(body, nullptr, false)
+                       : nlohmann::json();
+    if (!j.is_object() || !j.contains("file") || !j["file"].is_string())
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_name", "Expected {file}.");
+        return;
+    }
+    const std::string name = j["file"].get<std::string>();
+    if (name.size() < 5 || name.size() > 96 || name.find("..") != std::string::npos ||
+        name.compare(name.size() - 4, 4, ".wav") != 0)
+    {
+        openai_error(api, sock, "400 Bad Request", "invalid_name",
+                     "Mastering takes a plain *.wav file name (mp3 masters in the browser).");
+        return;
+    }
+    for (const char c : name)
+    {
+        const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                             (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        if (!allowed)
+        {
+            openai_error(api, sock, "400 Bad Request", "invalid_name", name.c_str());
+            return;
+        }
+    }
+    const std::string dir = PROSPERO_AUDIO_DIR;
+    const std::string in_path = dir + name;
+    const std::string base = name.substr(0, name.rfind('.'));
+    const std::string out_name = base + "-mastered.wav";
+    const std::string out_path = dir + out_name;
+    if (::access(in_path.c_str(), F_OK) != 0)
+    {
+        openai_error(api, sock, "404 Not Found", "not_found", name.c_str());
+        return;
+    }
+    char err[96] = {};
+    if (!prospero_master_wav(in_path, out_path, err, sizeof(err)))
+    {
+        openai_error(api, sock, "422 Unprocessable Entity", "master_failed", err);
+        return;
+    }
+    // best effort: the metadata sidecar follows the track
+    const std::string side_from = dir + base + ".track.json";
+    const std::string side_to = dir + base + "-mastered.track.json";
+    if (std::FILE *sf = std::fopen(side_from.c_str(), "rb"))
+    {
+        if (std::FILE *st = std::fopen(side_to.c_str(), "wb"))
+        {
+            char buf[4096];
+            std::size_t r;
+            while ((r = std::fread(buf, 1, sizeof(buf), sf)) > 0)
+                std::fwrite(buf, 1, r, st);
+            std::fclose(st);
+        }
+        std::fclose(sf);
+    }
+    send_json(api, sock, nlohmann::json{{"ok", true}, {"out", out_name}}.dump().c_str());
+}
+#endif
+
 void handle_connection(const NetApi &api, int sock)
 {
     auto storage = std::make_unique<char[]>(kRequestCapacity);
@@ -1721,11 +3915,22 @@ void handle_connection(const NetApi &api, int sock)
         return;
     }
 
+    if (server_stopping.load())
+    {
+        send_status(api, sock, "503 Service Unavailable", "application/json",
+                    "{\"error\":\"The application is shutting down.\"}");
+        api.socket_close(sock);
+        return;
+    }
     char method[8] = {};
     char path[256] = {};
     std::sscanf(request, "%7s %255s", method, path);
+    if (!is_background_poll(path))
+        http_last_activity_ms.store(jobs_now_ms());
     const char *header_end = std::strstr(request, "\r\n\r\n");
     const char *body = header_end != nullptr ? header_end + 4 : "";
+    const char *range_header =
+        header_end != nullptr ? find_header(request, header_end, "Range") : nullptr;
 
 #ifdef PROSPERO_UI_VULKAN
     if (std::strcmp(method, "GET") == 0 && serve_ui_asset(api, sock, path))
@@ -1734,24 +3939,122 @@ void handle_connection(const NetApi &api, int sock)
         return;
     }
 #endif
+    // This exposes only the security mode, never the configured credential. Keep it
+    // readable without a key so a misconfigured install can explain why API calls fail.
+    if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/settings/security") == 0)
+    {
+        const char *authentication = !api_key_valid ? "misconfigured"
+                                     : !api_key.empty() ? "required"
+                                                        : "disabled";
+        send_json(api, sock,
+                  nlohmann::json{{"authentication", authentication},
+                                 {"transport", "http"},
+                                 {"listener_scope", "all_interfaces"},
+                                 {"encrypted", false}}
+                      .dump()
+                      .c_str());
+        api.socket_close(sock);
+        return;
+    }
     if (!api_authorized(request))
         openai_error(api, sock, "401 Unauthorized", "invalid_api_key",
                      "A valid bearer API key is required.");
 #ifdef PS5_LLAMA_VULKAN
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/auth/session") == 0)
+    {
+        const std::string authorization = api_header(request, "authorization");
+        std::string token;
+        if (api_key.empty() || authorization != "Bearer " + api_key)
+            send_status(api, sock, "401 Unauthorized", "application/json",
+                        "{\"error\":\"A valid API key is required to create a browser session.\"}");
+        else if (!api_issue_browser_session(request, token))
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"A same-origin browser session could not be created.\"}");
+        else
+            send_json(api, sock, nlohmann::json{{"token", token}, {"expires_in", 1800}}.dump().c_str());
+    }
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/models/memory") == 0)
     {
+        std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
         char id[256]{}, name[256]{};
         const bool loaded=gpt_runtime_loaded_model(id,sizeof(id),name,sizeof(name));
-        send_json(api,sock,nlohmann::json{{"loaded",loaded},{"id",id},{"name",name}}.dump().c_str());
+        std::uint64_t free_bytes = 0, total_bytes = 0;
+        const bool memory_available =
+            gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) && free_bytes <= total_bytes;
+        nlohmann::json free_value = nullptr, allocated_value = nullptr;
+        if (memory_available)
+        {
+            free_value = free_bytes;
+            allocated_value = total_bytes - free_bytes;
+        }
+        send_json(api,sock,nlohmann::json{{"loaded",loaded},{"id",id},{"name",name},
+            {"vulkan_heap_bytes",memory_available ? total_bytes : 0},
+            {"vulkan_free_bytes",free_value},
+            {"vulkan_allocated_bytes",allocated_value},
+            {"vulkan_memory_available",memory_available},
+            {"largest_direct_block_bytes",prospero_memory::largest_free_block()},
+            {"flexible_free_bytes",prospero_memory::flexible_free()},
+            {"estimate_confidence","live-memory-snapshot"}}.dump().c_str());
     }
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/models/estimate") == 0)
+        handle_model_memory_estimate(api, sock, body);
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/v1/models") == 0)
         handle_openai_models(api, sock);
     else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/v1/chat/completions") == 0)
         handle_openai_chat(api, sock, body);
 #endif
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
-    else if (std::strcmp(method, "GET") == 0 && std::strncmp(path, "/download0/", 11) == 0)
-        handle_media_file(api, sock, path);
+    else if (std::strcmp(path, "/api/media") == 0 &&
+             (std::strcmp(method, "GET") == 0 || std::strcmp(method, "DELETE") == 0))
+    {
+        if (std::strcmp(method, "GET") == 0)
+            send_json(api, sock, nlohmann::json{{"data", list_saved_media()}}.dump().c_str());
+        else
+        {
+            const auto request = nlohmann::json::parse(body, nullptr, false);
+            if (!request.is_object() || !request.contains("path") ||
+                !request["path"].is_string())
+                send_status(api, sock, "400 Bad Request", "application/json",
+                            "{\"error\":\"Provide a media path.\"}");
+            else
+            {
+                std::string error;
+                const std::string media_path = request["path"].get<std::string>();
+                if (delete_archived_media(media_path, error))
+                    send_json(api, sock, "{\"deleted\":true}");
+                else
+                    send_status(api, sock, "409 Conflict", "application/json",
+                                nlohmann::json{{"error", error}}.dump().c_str());
+            }
+        }
+    }
+    else if (std::strcmp(method, "GET") == 0 &&
+             std::strcmp(path, "/api/diagnostics/events") == 0)
+    {
+        const char *files[] = {"/download0/ProsperoAI/logs/events.jsonl",
+                               "/download0/ProsperoAI/logs/events.prev.jsonl"};
+        nlohmann::json events = nlohmann::json::array();
+        for (const char *file_path : files)
+        {
+            if (std::FILE *file = std::fopen(file_path, "rb"))
+            {
+                char line[512];
+                while (std::fgets(line, sizeof(line), file))
+                {
+                    auto event = nlohmann::json::parse(line, nullptr, false);
+                    if (event.is_object()) events.push_back(std::move(event));
+                }
+                std::fclose(file);
+            }
+        }
+        if (events.size() > 256)
+            events.erase(events.begin(), events.end() - 256);
+        send_json(api, sock, nlohmann::json{{"data", std::move(events)},
+                         {"privacy", "No prompts, responses, API keys, or recordings are stored."}}
+                         .dump().c_str());
+    }
+    else if (std::strcmp(method, "GET") == 0 && is_media_file_path(path))
+        handle_media_file(api, sock, path, range_header);
     else if (std::strncmp(path, "/api/conversations", 18) == 0 &&
              handle_conversations(api, sock, method, path, body))
         ;
@@ -1788,13 +4091,75 @@ void handle_connection(const NetApi &api, int sock)
         handle_model_download_action(api, sock, body, true);
     else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/models/download") == 0)
         handle_model_download_action(api, sock, body, false);
+    else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/music/files") == 0)
+        handle_music_files(api, sock);
+    else if (std::strcmp(method, "GET") == 0 &&
+             std::strncmp(path, "/api/music/stems.zip?track=", 27) == 0)
+        handle_music_stems_zip(api, sock, path + 27);
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/music/abc") == 0)
+        handle_music_abc(api, sock, body);
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/music/meta") == 0)
+        handle_music_meta(api, sock, body);
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/music/upload") == 0)
+        handle_music_upload(api, sock, body);
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/music/rename") == 0)
+        handle_music_rename(api, sock, body);
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/music/master") == 0)
+        handle_music_master(api, sock, body);
+    else if (std::strcmp(method, "DELETE") == 0 && std::strcmp(path, "/api/music/file") == 0)
+        handle_music_delete(api, sock, body);
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/system/restart") == 0) {
+        send_status(api, sock, "409 Conflict", "application/json",
+                    "{\"error\":\"Automatic restart is disabled. Close the app after work finishes and launch it again.\"}");
+    }
 #endif
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/") == 0)
         send_status(api, sock, "200 OK", "text/html; charset=utf-8", kChatPage);
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/tags") == 0)
         handle_get_tags(api, sock);
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/models/refresh") == 0)
+    {
+        {
+            std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
+            gpt_runtime_refresh_models();
+        }
+        handle_get_tags(api, sock);
+    }
     else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/generate") == 0)
         handle_generate(api, sock, body);
+    else if (std::strcmp(method, "GET") == 0 && std::strncmp(path, "/api/jobs?id=", 13) == 0)
+        handle_jobs_get(api, sock, static_cast<unsigned>(std::atoi(path + 13)));
+    else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/jobs") == 0)
+        handle_jobs_list(api, sock);
+#if defined(PS5_LLAMA_VULKAN) && !defined(PROSPERO_HOST)
+    else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/system/memory") == 0)
+    {
+        prospero_memory::BlockInfo blocks[96];
+        std::int64_t pool_mib = 0;
+        const int block_count = prospero_memory::walk_blocks(blocks, 96, &pool_mib);
+        char mem[2600]{};
+        int used = std::snprintf(
+            mem, sizeof(mem),
+            "{\"total_free_mib\":%llu,\"largest_block_mib\":%llu,\"flexible_free_mib\":%llu,"
+            "\"defrag_armed\":%s,\"last_activity_age_s\":%llu,\"pool_mib\":%lld,\"blocks\":[",
+            static_cast<unsigned long long>(prospero_memory::free_total() >> 20),
+            static_cast<unsigned long long>(prospero_memory::largest_free_block() >> 20),
+            static_cast<unsigned long long>(prospero_memory::flexible_free() >> 20),
+            "false",
+            http_last_activity_ms.load() == 0
+                ? 0ull
+                : (jobs_now_ms() - http_last_activity_ms.load()) / 1000ull,
+            static_cast<long long>(pool_mib));
+        for (int i = 0; i < block_count && used > 0 && used < static_cast<int>(sizeof(mem)) - 40;
+             ++i)
+            used += std::snprintf(mem + used, sizeof(mem) - used, "%s[%lld,%lld,%d]", i ? "," : "",
+                                  static_cast<long long>(blocks[i].start_mb),
+                                  static_cast<long long>(blocks[i].size_mb), blocks[i].type);
+        if (used > 0 && used < static_cast<int>(sizeof(mem)) - 2)
+            std::snprintf(mem + used, sizeof(mem) - used, "]}");
+        send_status(api, sock, "200 OK", "application/json", mem);
+    }
+#endif
     else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/chat") == 0)
         handle_chat(api, sock, body);
     else
@@ -1806,7 +4171,13 @@ void handle_connection(const NetApi &api, int sock)
 void *connection_worker(void *argument)
 {
     auto *args = static_cast<ConnectionArgs *>(argument);
-    handle_connection(args->api, args->sock);
+    try {
+        handle_connection(args->api, args->sock);
+    } catch (...) {
+        // Never let a request exception terminate the process. Handler-owned
+        // runtime guards unwind before the worker is marked complete.
+        args->api.socket_close(args->sock);
+    }
     args->done.store(true, std::memory_order_release);
     return nullptr;
 }
@@ -1844,18 +4215,36 @@ void *server_worker(void *)
     address.sin_port = static_cast<std::uint16_t>((kHttpServerPort >> 8) | (kHttpServerPort << 8));
     address.sin_addr = 0; // INADDR_ANY
 
-    log_result("sceNetBind", api.bind(listen_sock, &address, sizeof(address)));
-    log_result("sceNetListen", api.listen(listen_sock, kListenBacklog));
+    // A finite accept timeout lets stop join this thread without closing a
+    // descriptor underneath another thread. Fail closed if it is unsupported.
+    const timeval accept_timeout{1, 0};
+    if (api.setsockopt(listen_sock, kSolSocket, kSoReceiveTimeout,
+                       &accept_timeout, sizeof(accept_timeout)) < 0 ||
+        api.bind(listen_sock, &address, sizeof(address)) < 0 ||
+        api.listen(listen_sock, kListenBacklog) < 0) {
+        log_line("HTTP listener setup failed");
+        api.socket_close(listen_sock);
+        return nullptr;
+    }
     log_line("HTTP server listening");
 
     std::vector<ConnectionArgs *> connections;
-    for (;;)
+    while (!server_stopping.load())
     {
         SceNetSockaddrIn client{};
         unsigned int client_length = sizeof(client);
         const int client_sock = api.accept(listen_sock, &client, &client_length);
         if (client_sock < 0)
             continue;
+        const timeval io_timeout{5, 0};
+        if (server_stopping.load() ||
+            api.setsockopt(client_sock, kSolSocket, kSoReceiveTimeout,
+                           &io_timeout, sizeof(io_timeout)) < 0 ||
+            api.setsockopt(client_sock, kSolSocket, kSoSendTimeout,
+                           &io_timeout, sizeof(io_timeout)) < 0) {
+            api.socket_close(client_sock);
+            continue;
+        }
 
         for (auto it = connections.begin(); it != connections.end();)
         {
@@ -1905,9 +4294,32 @@ void *server_worker(void *)
             delete args;
         }
     }
+    api.socket_close(listen_sock);
+    for (auto *connection : connections) {
+        scePthreadJoin(connection->thread, nullptr);
+        delete connection;
+    }
+    return nullptr;
 }
 
 } // namespace
+
+void prospero_http_server_stop()
+{
+    server_stopping.store(true);
+    if (server_thread) {
+        scePthreadJoin(server_thread, nullptr);
+        server_thread = nullptr;
+    }
+    // No HTTP workers remain to publish/prune jobs. Join without jobs_mutex:
+    // each job acquires it to publish its final result before returning.
+    for (auto &job : jobs) {
+        if (job->thread) {
+            jobs_thread_join(job->thread);
+            job->thread = nullptr;
+        }
+    }
+}
 
 void prospero_http_server_last_status(char *text, std::size_t capacity)
 {
@@ -1936,17 +4348,20 @@ bool prospero_http_server_mobile_url(char *text, std::size_t capacity)
     return true;
 }
 
+int prospero_http_server_auth_status()
+{
+    return !api_key_valid ? -1 : !api_key.empty() ? 1 : 0;
+}
+
 bool prospero_http_server_start(unsigned short port)
 {
+    if (server_thread || server_stopping.load()) return false;
     kHttpServerPort = port;
     load_api_key();
-    void *thread = nullptr;
     const int created =
-        scePthreadCreate(&thread, nullptr, server_worker, nullptr, "prosperoai-http-server");
-    if (created != 0)
-        return false;
-    (void)thread;
-    return true;
+        scePthreadCreate(&server_thread, nullptr, server_worker, nullptr, "prosperoai-http-server");
+    if (created != 0) server_thread = nullptr;
+    return created == 0;
 }
 
 asm(".section .text.prosperoai_layout_probe,\"axR\",@progbits\n"

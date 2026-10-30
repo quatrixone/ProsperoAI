@@ -2,6 +2,7 @@
 // Copyright (C) 2026 BlackBearReloaded
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "native_ui_impl.hpp"
+#include "http_server.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -173,8 +174,14 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
              label(list, "YOUR SPACE", 122, 246, palette_.muted);
              static constexpr const char *titles[] = {"All conversations", "Text", "Image", "Audio",
                                                       "Voice"};
-             text(list, selecting_model_ ? "Choose a model" : titles[session_category_], 122, 292,
-                  31, palette_.ink, true);
+             static constexpr const char *model_filters[] = {
+                 "All models", "Text models", "Image models", "Audio models", "Voice models"};
+             const std::string model_title =
+                 std::string(model_filters[workspace_model_filter_ + 1]) +
+                 (workspace_model_query_.empty() ? "" : " · " + workspace_model_query_) +
+                 " · L1/R1 type";
+             text(list, fit(selecting_model_ ? model_title : titles[session_category_], 31, 310),
+                  122, 292, 31, palette_.ink, true);
              sessions_.draw(canvas);
          });
 
@@ -341,12 +348,19 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
              composer_.draw(canvas);
          });
 
-    if (workspace_generation_open_)
+    if (workspace_generation_open_ || workspace_mode_open_ || workspace_queue_open_)
     {
         list.rounded_rect({0, 0, gfx::kVirtualWidth, gfx::kVirtualHeight}, 0,
                           Color::rgb(0x05070b, 0.78f));
-        label(list, "YOUR SPACE  /  GENERATION", 536, 206, palette_.accent);
-        text(list, "Tune this conversation", 536, 244, 32, palette_.ink, true);
+        const char *title = workspace_mode_open_    ? "YOUR SPACE  /  MODE"
+                            : workspace_queue_open_ ? "AUDIO  /  QUEUE"
+                                                    : "YOUR SPACE  /  GENERATION";
+        label(list, title, 536, 206, palette_.accent);
+        text(list,
+             workspace_mode_open_    ? "Choose a capability"
+             : workspace_queue_open_ ? "Choose how many variants"
+                                     : "Tune this conversation",
+             536, 244, 32, palette_.ink, true);
         form_.draw(canvas);
     }
 }
@@ -742,7 +756,15 @@ void NativeUI::Impl::draw_mobile(ui::Canvas &canvas) const
         text(list, fit(mobile_url_, 22, 540, false), info_x, 562, 22, palette_.muted);
     text(list, "Your phone and PS5 must be on the same local network.", info_x, 650, 21,
          palette_.muted);
-    text(list, "Models and generation stay on your console.", info_x, 684, 21, palette_.muted);
+    const int auth_status = prospero_http_server_auth_status();
+    const char *auth_text = auth_status < 0
+                                ? "API key configuration is invalid; requests are blocked."
+                            : auth_status > 0 ? "API key protection is enabled."
+                                              : "API key protection is off.";
+    text(list, auth_text, info_x, 684, 21, palette_.muted);
+    text(list, "HTTP is not encrypted. Use only a trusted network.", info_x, 718, 21,
+         palette_.warn);
+    text(list, "Models and generation stay on your console.", info_x, 752, 21, palette_.muted);
 }
 
 } // namespace prospero

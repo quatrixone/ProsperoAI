@@ -183,6 +183,90 @@ void openai_error(const NetApi &api, int sock, const char *status, const char *c
 // Optional bearer key, read once at startup; no key means a local unauthenticated API.
 std::string api_key;
 bool api_key_valid = true;
+std::mutex browser_session_mutex;
+struct BrowserSession
+{
+    std::string token, host, origin;
+    std::chrono::steady_clock::time_point expiry{};
+};
+BrowserSession browser_sessions[4]; // Support a few simultaneously open browser tabs.
+
+std::string api_header(const char *request, const char *wanted)
+{
+    const char *line = std::strstr(request, "\r\n");
+    while (line && line[2] && line[2] != '\r') {
+        line += 2;
+        const char *end = std::strstr(line, "\r\n");
+        if (!end) break;
+        const char *colon = static_cast<const char *>(
+            std::memchr(line, ':', static_cast<std::size_t>(end - line)));
+        if (colon) {
+            std::string name(line, colon);
+            for (char &c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (name == wanted) {
+                std::string value(colon + 1, end);
+                const auto first = value.find_first_not_of(" \t");
+                if (first == std::string::npos) return {};
+                value.erase(0, first);
+                while (!value.empty() && (value.back() == ' ' || value.back() == '\t')) value.pop_back();
+                return value;
+            }
+        }
+        line = end;
+    }
+    return {};
+}
+
+bool api_same_origin_request(const char *request, std::string *host_out = nullptr,
+                             std::string *origin_out = nullptr)
+{
+    const std::string host = api_header(request, "host");
+    const std::string origin = api_header(request, "origin");
+    if (host.empty() || origin.empty() || origin.find_first_of("\r\n") != std::string::npos ||
+        origin != "http://" + host)
+        return false;
+    if (host_out) *host_out = host;
+    if (origin_out) *origin_out = origin;
+    return true;
+}
+
+bool api_issue_browser_session(const char *request, std::string &token)
+{
+    std::string host, origin;
+    if (api_key.empty() || !api_same_origin_request(request, &host, &origin))
+        return false;
+    unsigned char random[32];
+    std::FILE *entropy = std::fopen("/dev/urandom", "rb");
+    if (!entropy) return false;
+    const bool read_ok = std::fread(random, 1, sizeof(random), entropy) == sizeof(random);
+    std::fclose(entropy);
+    if (!read_ok) return false;
+    static const char hex[] = "0123456789abcdef";
+    token.resize(sizeof(random) * 2);
+    for (std::size_t i = 0; i < sizeof(random); ++i) {
+        token[i * 2] = hex[random[i] >> 4];
+        token[i * 2 + 1] = hex[random[i] & 15];
+    }
+    std::lock_guard<std::mutex> lock(browser_session_mutex);
+    const auto now = std::chrono::steady_clock::now();
+    BrowserSession *slot = &browser_sessions[0];
+    for (auto &session : browser_sessions)
+    {
+        if (session.token.empty() || now >= session.expiry)
+        {
+            slot = &session;
+            break;
+        }
+        if (session.expiry < slot->expiry)
+            slot = &session;
+    }
+    slot->token = token;
+    slot->host = std::move(host);
+    slot->origin = std::move(origin);
+    slot->expiry = now + std::chrono::minutes(30);
+    return true;
+}
+
 void load_api_key() {
     FILE *file = std::fopen("/app0/api_key.txt", "rb");
     if (!file) return;
@@ -198,29 +282,23 @@ void load_api_key() {
 bool api_authorized(const char *request) {
     if (!api_key_valid) return false;
     if (api_key.empty()) return true;
-    const char *line = std::strstr(request, "\r\n");
-    while (line && line[2] && line[2] != '\r') {
-        line += 2;
-        const char *end = std::strstr(line, "\r\n");
-        if (!end) break;
-        std::string header(line, end);
-        auto colon = header.find(':');
-        if (colon != std::string::npos) {
-            std::string name = header.substr(0, colon);
-            for (char &c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (name == "authorization") {
-                std::string value = header.substr(colon + 1);
-                auto first = value.find_first_not_of(" \t");
-                if (first != std::string::npos) value.erase(0, first);
-                return value == "Bearer " + api_key;
-            }
-        }
-        line = end;
-    }
+    const std::string authorization = api_header(request, "authorization");
+    if (authorization == "Bearer " + api_key) return true;
+    if (authorization.compare(0, 7, "Bearer ") != 0) return false;
+    const std::string host = api_header(request, "host");
+    const std::string origin = api_header(request, "origin");
+    std::lock_guard<std::mutex> lock(browser_session_mutex);
+    const std::string token = authorization.substr(7);
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto &session : browser_sessions)
+        if (!session.token.empty() && token == session.token && host == session.host &&
+            now < session.expiry && (origin.empty() || origin == session.origin))
+            return true;
     return false;
 }
 
 void handle_openai_models(const NetApi &api, int sock) {
+    std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
     gpt_runtime_refresh_models();
     ApiJson data = ApiJson::array();
     for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
@@ -249,6 +327,8 @@ std::string api_content(const ApiJson &message) {
 struct ApiChatRequest {
     std::string model;
     std::string output_session_id;
+    std::string image_id, conversation_id;
+    std::string final_message_role, final_message_content;
     unsigned output_message_index = 0;
     std::vector<std::string> roles, contents;
     ApiJson tools = ApiJson::array();
@@ -264,11 +344,31 @@ ApiChatRequest parse_api_chat(const ApiJson &body) {
     if (!body.is_object()) throw ApiError("400 Bad Request", "invalid_json", "Expected a JSON object.");
     ApiChatRequest result;
     result.model = body.at("model").get<std::string>();
+    if (body.contains("image_id")) {
+        if (!body["image_id"].is_string())
+            throw ApiError("400 Bad Request", "invalid_image_id", "image_id is invalid.");
+        result.image_id = body["image_id"].get<std::string>();
+        if (result.image_id.size() != 32 ||
+            !valid_image_upload_id(result.image_id.c_str()))
+            throw ApiError("400 Bad Request", "invalid_image_id", "image_id is invalid.");
+    }
+    if (body.contains("conversation_id")) {
+        if (!body["conversation_id"].is_string())
+            throw ApiError("400 Bad Request", "invalid_conversation_id",
+                           "conversation_id is invalid.");
+        result.conversation_id = body["conversation_id"].get<std::string>();
+        if (result.conversation_id.find('\0') != std::string::npos ||
+            !prospero_session::valid_id(result.conversation_id.c_str()))
+            throw ApiError("400 Bad Request", "invalid_conversation_id",
+                           "conversation_id is invalid.");
+    }
     if (body.contains("output_session_id")) {
-        if (!body["output_session_id"].is_string() ||
-            !prospero_session::valid_id(body["output_session_id"].get<std::string>().c_str()))
+        if (!body["output_session_id"].is_string())
             throw ApiError("400 Bad Request", "invalid_output_session", "output_session_id is invalid.");
         result.output_session_id = body["output_session_id"].get<std::string>();
+        if (result.output_session_id.find('\0') != std::string::npos ||
+            !prospero_session::valid_id(result.output_session_id.c_str()))
+            throw ApiError("400 Bad Request", "invalid_output_session", "output_session_id is invalid.");
         const auto index = body.value("output_message_index", ApiJson(0));
         if (!index.is_number_integer() || index.get<long long>() < 0 ||
             index.get<long long>() >= prospero_session::MessageCapacity)
@@ -426,6 +526,8 @@ ApiChatRequest parse_api_chat(const ApiJson &body) {
             content += "\nPrevious tool calls: " + message["tool_calls"].dump();
         }
         result.roles.push_back(mapped_role); result.contents.push_back(content);
+        result.final_message_role = role;
+        result.final_message_content = content;
     }
     if (!outstanding_calls.empty())
         throw ApiError("400 Bad Request", "invalid_tool_result", "Every assistant tool call must have a matching tool result.");
@@ -553,16 +655,56 @@ void api_stream_progress(const char *text) {
 void handle_openai_chat(const NetApi &api, int sock, const char *body) {
     ApiStream stream{&api, sock, "", "", static_cast<long long>(std::time(nullptr))};
     bool generated = false;
+    bool generation_completed = false;
+    std::string model_for_event;
+    prospero::debug::OperationId operation_id = 0;
+    ImageUploadLease image_upload{};
+    prospero_session::Record image_record{};
+    std::vector<prospero_session::Message> image_messages;
+    unsigned image_message_index = 0;
     try {
         auto request = parse_api_chat(ApiJson::parse(body));
+        model_for_event = request.model;
         if (pthread_mutex_trylock(&generation_mutex) != 0)
             throw ApiError("503 Service Unavailable", "server_busy", "Another API generation is running.");
         struct Unlock { ~Unlock() { pthread_mutex_unlock(&generation_mutex); } } unlock;
+        std::unique_lock<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex(),
+                                                  std::try_to_lock);
+        if (!runtime_lock.owns_lock())
+            throw ApiError("503 Service Unavailable", "server_busy",
+                           "The console runtime is busy. Try again when the current operation finishes.");
         unsigned selected = gpt_runtime_model_count();
         for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
             if (request.model == gpt_runtime_model_id(i)) { selected = i; break; }
         if (selected == gpt_runtime_model_count())
             throw ApiError("404 Not Found", "model_not_found", "Requested model is not installed.");
+        if (!request.image_id.empty()) {
+            if (!gpt_runtime_model_is_qwen_image_2_1(request.model.c_str()) ||
+                request.final_message_role != "user")
+                throw ApiError("400 Bad Request", "invalid_image_request",
+                               "Image input requires a Qwen Image 2.1 user prompt.");
+            if (!request.conversation_id.empty()) {
+                image_messages.resize(prospero_session::MessageCapacity);
+                if (!prospero_session::load(request.conversation_id.c_str(), &image_record,
+                                            image_messages.data(),
+                                            static_cast<unsigned>(image_messages.size())))
+                    throw ApiError("404 Not Found", "conversation_not_found",
+                                   "The image conversation does not exist.");
+                if (std::strcmp(image_record.purpose, "text-to-image") != 0 ||
+                    request.model != image_record.model_id || !image_record.message_count)
+                    throw ApiError("400 Bad Request", "invalid_image_conversation",
+                                   "Image input requires a matching Qwen image conversation.");
+                image_message_index = image_record.message_count - 1;
+                const auto &last_message = image_messages[image_message_index];
+                if (std::strcmp(last_message.role, "user") != 0 ||
+                    last_message.content != request.final_message_content)
+                    throw ApiError("400 Bad Request", "invalid_image_conversation",
+                                   "The saved conversation must end with this user prompt.");
+            }
+            if (!acquire_image_upload(request.image_id.c_str(), &image_upload))
+                throw ApiError("400 Bad Request", "invalid_image_id",
+                               "The image upload is unknown or expired.");
+        }
         static std::atomic<unsigned long long> sequence{0};
         stream.id = "chatcmpl-" + std::to_string(stream.created) + "-" + std::to_string(++sequence);
         stream.model = request.model;
@@ -583,11 +725,43 @@ void handle_openai_chat(const NetApi &api, int sock, const char *body) {
         settings.grammar = request.structured ? grammar.c_str() : nullptr;
         active_api_stream = request.stream && !request.structured ? &stream : nullptr;
         struct ClearStream { ~ClearStream() { active_api_stream = nullptr; } } clear;
+        operation_id = prospero::debug::begin_operation("openai-generation", request.model.c_str());
         generated = true;
         const int result = gpt_runtime_generate(messages.data(), messages.size(), settings,
-            output.data(), output.size(), &stats, active_api_stream ? api_stream_progress : nullptr);
+            output.data(), output.size(), &stats, active_api_stream ? api_stream_progress : nullptr,
+            image_upload.active ? image_upload.path.c_str() : nullptr);
         if (result != 0) throw ApiError("400 Bad Request", "generation_failed", output[0] ? output.data() : "Model generation failed.");
+        generation_completed = true;
+        prospero::debug::event("api-generation-completed", request.model.c_str(), "", operation_id);
         auto message = api_assistant(request, output.data(), stream.id);
+        if (!request.image_id.empty()) {
+            if (!request.conversation_id.empty()) {
+                char archived_path[384]{};
+                if (!prospero_session::archive_image(request.conversation_id.c_str(),
+                        image_message_index, image_upload.path.c_str(), archived_path,
+                        sizeof(archived_path)))
+                    throw ApiError("500 Internal Server Error", "image_archive_failed",
+                                   "The image was generated, but its source could not be archived.");
+                auto &saved_message = image_messages[image_message_index];
+                const std::string previous_image = saved_message.image;
+                saved_message.image = archived_path;
+                if (!prospero_session::save(&image_record, image_messages.data(),
+                                            image_record.message_count)) {
+                    const bool restored = previous_image.empty()
+                        ? prospero_session::remove_optional_image_sidecar(request.conversation_id.c_str(),
+                                                                          image_message_index)
+                        : prospero_session::write_optional_image_sidecar(request.conversation_id.c_str(),
+                                                                         image_message_index,
+                                                                         previous_image.c_str());
+                    if (restored)
+                        std::remove(archived_path);
+                    throw ApiError("500 Internal Server Error", "image_archive_failed",
+                                   "The image was generated, but its source could not be saved to the conversation.");
+                }
+                message["image"] = archived_path;
+            }
+            finish_image_upload(&image_upload, true);
+        }
         if (!request.output_session_id.empty() && !message.contains("tool_calls") &&
             std::strcmp(gpt_runtime_model_purpose(selected), "text-to-text") == 0) {
             const auto content = message.value("content", std::string());
@@ -631,7 +805,10 @@ void handle_openai_chat(const NetApi &api, int sock, const char *body) {
                 }
             } else if (request.structured) stream.chunk({{"content", message["content"]}});
             else api_stream_progress(output.data());
-            stream.chunk(ApiJson::object(), finish);
+            ApiJson final_delta = ApiJson::object();
+            if (message.contains("image"))
+                final_delta["image"] = message["image"];
+            stream.chunk(final_delta, finish);
             if (request.include_usage)
                 stream.event({{"id", stream.id}, {"object", "chat.completion.chunk"}, {"created", stream.created},
                               {"model", stream.model}, {"choices", ApiJson::array()}, {"usage", usage}});
@@ -647,6 +824,13 @@ void handle_openai_chat(const NetApi &api, int sock, const char *body) {
         const auto *specific = dynamic_cast<const ApiError *>(&error);
         const char *status = specific ? specific->status : generated ? "502 Bad Gateway" : "400 Bad Request";
         const char *code = specific ? specific->code : generated ? "invalid_model_output" : "invalid_request";
+        if (generated && !generation_completed)
+            prospero::debug::event("api-generation-failed", model_for_event.c_str(),
+                                   specific ? specific->code : "runtime-generation-failed",
+                                   operation_id);
+        else if (!generated && specific && std::strcmp(specific->code, "model_not_found") == 0)
+            prospero::debug::event("api-generation-rejected", model_for_event.c_str(),
+                                   "model-not-installed");
         if (stream.started) {
             stream.event({{"error", {{"message", error.what()}, {"type", "server_error"}, {"code", code}}}});
             const char done[] = "data: [DONE]\n\n"; send_all(api, sock, done, sizeof(done)-1);

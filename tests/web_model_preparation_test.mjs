@@ -3,26 +3,27 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {test} from 'node:test';
-const source=readFileSync(new URL('../assets/web/app.js',import.meta.url),'utf8');
-const code=source.slice(source.indexOf("let preparedModel="),source.indexOf("$('search').oninput=renderModels"));
-function fixture(){
- const elements=new Map(),requests=[];
- const c={current:{model:'text',messages:[]},currentModelChosen:true,selectedModel:'',models:[{id:'text',name:'Text'}],conversations:[],Date,
- $:id=>{if(!elements.has(id))elements.set(id,{textContent:'',disabled:false,value:''});return elements.get(id);},
- refreshMemoryModel(){},modelChooser:{value:'text',disabled:false},newConversation(){},openChat(){},renderModels(){},renderHistory(){},persistConversation(){},
- async api(path,options){requests.push(JSON.parse(options.body));return {ok:true};}};
- runInNewContext(code,c);return {c,requests};
+
+const source = readFileSync(new URL('../assets/web/workspace.js', import.meta.url), 'utf8');
+function createMode(calls, prepare) {
+    const scope = {globalThis: {}};
+    runInNewContext(source, scope);
+    return scope.globalThis.ProsperoWorkspace.createWorkspaceMode({
+        models: [{id: 'text', purpose: 'text-to-text'}],
+        selectModel: async id => calls.push(['select', id]),
+        prepareModel: async id => { calls.push(['prepare', id]); await prepare(); },
+    });
 }
-test('selecting defers loading; concurrent preparation requests load only once',async()=>{
- const {c,requests}=fixture();await c.chooseInstalledModel('text');
- assert.equal(requests.length,1);assert.equal(requests[0].prepare,false);
- let release; c.api=async(path,options)=>{requests.push(JSON.parse(options.body));await new Promise(resolve=>{release=resolve;});return {ok:true};};
- const first=c.prepareConversationModel(),second=c.prepareConversationModel();
- assert.equal(requests.length,2);assert.equal(requests[1].prepare,true);
- release();await Promise.all([first,second]);await c.prepareConversationModel();assert.equal(requests.length,2);
-});
-test('failed preparation can be retried and restores model selector',async()=>{
- const {c}=fixture();let calls=0;c.api=async()=>({ok:++calls>1});
- await assert.rejects(c.prepareConversationModel());assert.equal(c.modelChooser.disabled,false);
- await c.prepareConversationModel();assert.equal(calls,2);
+
+test('failed submit-time preparation can be retried without preparing during staging', async () => {
+    const calls = [];
+    let attempts = 0;
+    const workspace = createMode(calls, async () => {
+        if (++attempts === 1) throw new Error('prepare failed');
+    });
+    workspace.stageModel('text');
+    assert.deepEqual(calls, []);
+    await assert.rejects(workspace.submit({}, async () => 'sent'), /prepare failed/);
+    assert.equal(await workspace.submit({}, async () => 'sent'), 'sent');
+    assert.deepEqual(calls.map(call => call[0]), ['select', 'prepare', 'select', 'prepare']);
 });

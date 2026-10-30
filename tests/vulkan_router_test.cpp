@@ -18,6 +18,7 @@
 namespace
 {
 unsigned text_selected = 0, released = 0, stopped = 0, generated = 0, ace_generated = 0;
+std::string generated_image_path;
 std::atomic<bool> block_voice{false}, voice_entered{false}, voice_release{false};
 } // namespace
 namespace prospero_vulkan
@@ -45,6 +46,10 @@ bool gpt_runtime_context_full()
 std::uint64_t gpt_runtime_vulkan_heap_bytes()
 {
     return 0;
+}
+bool gpt_runtime_vulkan_memory(std::uint64_t *, std::uint64_t *)
+{
+    return false;
 }
 bool gpt_runtime_select_model(unsigned i)
 {
@@ -147,10 +152,39 @@ extern "C"
         std::snprintf(out, n, "ace-step.wav");
         return 0;
     }
-    int ps5_sd_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
-                        gpt_runtime_progress_fn)
+    void ps5_yue2_release()
+    {
+    }
+    int ps5_yue2_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                          gpt_runtime_progress_fn)
     {
         return 1;
+    }
+    void ps5_sheetsage_release()
+    {
+    }
+    int ps5_sheetsage_transcribe(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                                 gpt_runtime_progress_fn)
+    {
+        return 1;
+    }
+    void ps5_stems_release()
+    {
+    }
+    int ps5_stems_separate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                           gpt_runtime_progress_fn)
+    {
+        return 1;
+    }
+    int ps5_sd_generate(const char *root, const char *prompt, const char *image_path, char *out,
+                        std::size_t n, std::uint64_t *elapsed, gpt_runtime_progress_fn)
+    {
+        assert(std::string(root) == std::string(prospero::model_root()) + "/qwen-image-2.1");
+        assert(std::strcmp(prompt, "edit this") == 0);
+        generated_image_path = image_path ? image_path : "";
+        *elapsed = 789;
+        std::snprintf(out, n, "edited-image.png");
+        return 0;
     }
     int ps5_stable_audio_generate(const char *, char *, std::size_t, std::uint64_t *,
                                   gpt_runtime_progress_fn)
@@ -219,10 +253,27 @@ int main()
         std::filesystem::create_directories(path.parent_path());
         std::ofstream(path) << "fixture";
     }
+    const auto qwen_root = std::filesystem::path(prospero::model_root()) / "qwen-image-2.1";
+    std::filesystem::create_directories(qwen_root);
+    std::ofstream(qwen_root / "model_index.json") << "{\"_class_name\":\"QwenImage21Pipeline\"}";
+    std::ofstream(qwen_root / "qwen_image_2.1-Q2_K.gguf") << "fixture";
+    std::ofstream(qwen_root / "Qwen3VL-8B-Instruct-Q4_K_M.gguf") << "fixture";
+    std::ofstream(qwen_root / "qwen_image_2.1_vae_bf16.safetensors") << "fixture";
     gpt_runtime_refresh_models();
-    assert(gpt_runtime_model_count() == 3 && gpt_runtime_selected_model() == 1);
+    assert(gpt_runtime_model_count() == 4 && gpt_runtime_selected_model() == 1);
     assert(std::strcmp(gpt_runtime_model_purpose(2), "text-to-speech") == 0);
-    assert(!gpt_runtime_select_model(3));
+    assert(std::strcmp(gpt_runtime_model_id(3), "qwen-image-2.1") == 0);
+    assert(std::strcmp(gpt_runtime_model_purpose(3), "text-to-image") == 0);
+    assert(gpt_runtime_model_is_qwen_image_2_1("qwen-image-2.1"));
+    assert(!gpt_runtime_model_is_qwen_image_2_1("tiny.gguf"));
+    const std::string qwen_id_before = gpt_runtime_model_id(3);
+    const auto projector = qwen_root / "mmproj-Qwen3VL-8B-Instruct-F16.gguf";
+    assert(!std::filesystem::exists(projector));
+    std::ofstream(projector) << "fixture";
+    gpt_runtime_refresh_models();
+    assert(gpt_runtime_model_count() == 4);
+    assert(std::strcmp(gpt_runtime_model_id(3), qwen_id_before.c_str()) == 0);
+    assert(!gpt_runtime_select_model(4));
     assert(gpt_runtime_select_model(2) && released == 1);
     assert(gpt_runtime_prepare() == 0 && !gpt_runtime_context_full());
     const gpt_runtime_message_t messages[] = {{"user", "Hello"}};
@@ -245,7 +296,7 @@ int main()
     assert(voice_entered.load());
     gpt_runtime_check_idle_unload(0);
     assert(released == 1); // an in-flight generation owns the runtime lock
-    assert(gpt_runtime_model_count() == 3);
+    assert(gpt_runtime_model_count() == 4);
     gpt_runtime_refresh_models();
     assert(!gpt_runtime_select_model(0));
     assert(std::strcmp(gpt_runtime_model_purpose(2), "text-to-speech") == 0);
@@ -254,7 +305,7 @@ int main()
     assert(gpt_runtime_select_model(0) && stopped == 1);
     assert(gpt_runtime_generate(messages, 1, {}, out, sizeof(out), &stats, nullptr) == 0);
     assert(std::strcmp(out, "text0") == 0);
-    assert(gpt_runtime_model_count() == 3);
+    assert(gpt_runtime_model_count() == 4);
     // Existing bundle IDs resolve to their equivalent GGUF on Vulkan, preserving
     // saved conversations without linking any AGC runtime or loading the bundle.
     const auto legacy = std::filesystem::path(prospero::model_root()) /
@@ -262,7 +313,7 @@ int main()
     std::filesystem::create_directories(legacy.parent_path());
     std::ofstream(legacy) << "legacy data must remain untouched";
     gpt_runtime_refresh_models();
-    assert(gpt_runtime_model_count() == 4);
+    assert(gpt_runtime_model_count() == 5);
     assert(std::strcmp(gpt_runtime_model_id(2), "Mistral-7B-Instruct-v0.3.Q4_0") == 0);
     assert(std::strcmp(gpt_runtime_model_purpose(3), "text-to-speech") == 0);
     assert(gpt_runtime_select_model(2));
@@ -278,4 +329,11 @@ int main()
     assert(gpt_runtime_select_model(0));
     gpt_runtime_check_idle_unload(0);
     assert(released == 2);
+    gpt_runtime_settings_t image_settings{};
+    image_settings.model_id = "qwen-image-2.1";
+    const gpt_runtime_message_t image_message[] = {{"user", "edit this"}};
+    assert(gpt_runtime_generate(image_message, 1, image_settings, out, sizeof(out), &stats, nullptr,
+                                "/download0/ProsperoAI/work/image/reference.upload") == 0);
+    assert(generated_image_path == "/download0/ProsperoAI/work/image/reference.upload");
+    assert(std::strcmp(out, "edited-image.png") == 0 && stats.elapsed_microseconds == 789);
 }
