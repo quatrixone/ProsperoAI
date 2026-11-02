@@ -52,15 +52,6 @@ body.contrast :is(button,a,summary,[role=tab],select,input,textarea):focus-visib
 @media(max-width:1000px){.workspace-toolbar{align-items:flex-start;flex-direction:column;gap:12px}.audio-layout{grid-template-columns:1fr}.audio-heading{align-items:flex-start;flex-direction:column}}
 @media(max-width:700px){.workspace-toolbar{padding:12px;margin-bottom:20px}.workspace-modes{width:100%;display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.workspace-modes button{min-width:0;padding:8px 6px}.audio-heading h1{font-size:40px}.audio-create,.audio-library-panel{padding:20px}.audio-options{grid-template-columns:1fr}.audio-options label:first-child{grid-column:auto}.audio-queue-controls{align-items:stretch;flex-direction:column}.audio-queue-controls button{width:100%}.audio-queue-controls label{justify-content:space-between}.audio-stem{grid-template-columns:1fr}.audio-library-item button{width:100%}}
 
-.qwen-image-attachment{flex:0 0 100%;min-width:0}
-.qwen-image-attachment>button{min-height:40px;padding:7px 14px}
-.qwen-image-preview{display:flex;align-items:center;gap:12px;width:max-content;max-width:100%;padding:8px;border:1px solid var(--line);border-radius:14px;background:var(--raised)}
-.qwen-image-preview img{width:64px;height:64px;object-fit:cover;border-radius:9px;background:var(--bottom)}
-.qwen-image-preview>div{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
-.qwen-image-preview span{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:13px}
-.qwen-image-preview button{min-height:38px;padding:6px 10px;font-size:13px}
-.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
-@media(max-width:700px){.qwen-image-preview{gap:8px}.qwen-image-preview img{width:52px;height:52px}.qwen-image-preview span{flex-basis:100%;max-width:100%}.qwen-image-preview button{padding:6px 8px}}
 @media(max-width:700px){.workspace-modes{grid-template-columns:repeat(3,1fr)}nav{gap:4px}nav button{font-size:14px;padding:8px 0}}
 @media(max-width:360px){nav{gap:0}nav button{font-size:12px}}
 

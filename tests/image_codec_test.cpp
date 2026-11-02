@@ -19,7 +19,7 @@ int main()
     DecodedImage png{};
     assert(decode_file("tests/fixtures/one-pixel.png", &png));
     assert(png.pixels && png.width == 1 && png.height == 1 && png.channels == 4);
-    const std::string normalized_path = "build/tests/qwen-image-codec-normalized.png";
+    const std::string normalized_path = "build/tests/image-codec-normalized.png";
     std::remove(normalized_path.c_str());
     std::FILE *normalized = std::fopen(normalized_path.c_str(), "wbx");
     assert(normalized && write_png(normalized, png));

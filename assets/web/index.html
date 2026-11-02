@@ -9,7 +9,6 @@
   <script src="/voice-catalog.js" defer></script>
   <script src="/voice-recording.js" defer></script>
   <script src="/workspace.js" defer></script>
-  <script src="/qwen-image-attachment.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/lame.min.js" defer></script>
   <script src="/music.js" defer></script>
@@ -48,10 +47,9 @@
           <p class="muted">Create an image from a text prompt.</p>
         </section>
         <section id="workspace-image-edit" role="tabpanel" aria-labelledby="workspace-image-edit-tab" hidden>
-          <p id="workspace-image-i2i-ready" class="muted" hidden>Choose Qwen Image 2.1, then attach a PNG or JPEG reference image to your prompt.</p>
-          <p id="workspace-image-i2i-loading" class="muted" role="status" hidden>Checking for Qwen Image 2.1…</p>
-          <p id="workspace-image-i2i-empty" class="audio-empty-models" hidden>Image-to-image needs Qwen Image 2.1. Install it from Models to edit a reference image.</p>
-          <p><button id="workspace-image-i2i-install" class="secondary" type="button" data-page="models" hidden>Install Qwen Image 2.1</button></p>
+          <p id="workspace-image-i2i-ready" class="muted" hidden>A model with image-to-image support is available.</p>
+          <p id="workspace-image-i2i-loading" class="muted" role="status" hidden>Checking image-model capabilities…</p>
+          <p id="workspace-image-i2i-empty" class="audio-empty-models" hidden>No installed image model declares image-to-image support.</p>
           <p id="workspace-image-i2i-unavailable" class="muted" role="status" hidden>Could not check installed image models. Reconnect to your PS5 and try again.</p>
         </section>
       </section>
@@ -189,14 +187,6 @@
           <div class="chat-heading"><button id="workspace-back" class="secondary" type="button">← Back to Workspace</button><button id="history-toggle" aria-label="Show conversations" aria-expanded="false">☰</button><div><p class="eyebrow">WORKSPACE</p><h2 id="chat-title">A little room for big ideas.</h2></div><span id="model-chip" class="chip" hidden></span></div>
           <div id="messages" role="log" aria-live="polite" aria-relevant="additions text"></div><p id="feedback" role="status"></p>
           <form id="composer" class="glass">
-            <div id="qwen-image-attachment" class="qwen-image-attachment" hidden>
-              <input id="qwen-image-file" class="visually-hidden" type="file" accept="image/png,image/jpeg" aria-label="Attach a reference image" tabindex="-1">
-              <button id="qwen-image-attach" class="secondary" type="button" aria-label="Attach a reference image">＋ Image</button>
-              <div id="qwen-image-preview" class="qwen-image-preview" hidden>
-                <img id="qwen-image-preview-image" alt="Reference image preview">
-                <div><span id="qwen-image-filename"></span><button id="qwen-image-replace" class="secondary" type="button" aria-label="Replace reference image">Replace</button><button id="qwen-image-remove" class="secondary" type="button" aria-label="Remove reference image">Remove</button></div>
-              </div>
-            </div>
             <textarea id="prompt" rows="1" placeholder="What’s on your mind?" aria-label="Message ProsperoAI" required></textarea><button id="send" class="primary" aria-label="Send message">↑</button>
           </form>
           <small class="composer-note">Entirely on your PS5. A conversation remembers its model.</small>

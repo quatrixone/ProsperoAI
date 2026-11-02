@@ -10,7 +10,6 @@
         music: 'text-to-audio',
         tts: 'text-to-speech',
     };
-    const QWEN_IMAGE_MODEL = 'qwen-image-2.1';
     const AUDIO_DURATION_MODELS = new Set([
         'ace-step-1.5-turbo-q8-0',
         'stable-audio-3-small-sfx-vulkan',
@@ -21,11 +20,16 @@
         return mode === 'audio' ? AUDIO_PURPOSE[section] : MODE_PURPOSE[mode];
     }
 
+    function imageCapabilities(model) {
+        return Array.isArray(model?.details?.capabilities) ? model.details.capabilities : [];
+    }
+
     function filterModels(models, mode, section = 'music') {
         const purpose = purposeFor(mode, section);
         if (!purpose) return [];
         return models.filter(model => model.purpose === purpose &&
-            (mode !== 'image' || section !== 'image-to-image' || model.id === QWEN_IMAGE_MODEL));
+            (mode !== 'image' || section !== 'image-to-image' ||
+                imageCapabilities(model).includes('image_to_image')));
     }
 
     function ttsAvailability(models, status) {
@@ -36,14 +40,6 @@
     function imageToImageAvailability(models, status) {
         if (status !== 'ready') return status;
         return filterModels(models, 'image', 'image-to-image').length ? 'available' : 'empty';
-    }
-
-    function imageReferenceRequired(mode, section) {
-        return mode === 'image' && section === 'image-to-image';
-    }
-
-    function imageReferenceMissing(mode, section, file) {
-        return imageReferenceRequired(mode, section) && !file;
     }
 
     function workspaceModelControlsVisible(mode, section) {
@@ -99,10 +95,9 @@
 
     root.ProsperoWorkspace = {
         filterModels,
+        imageCapabilities,
         ttsAvailability,
         imageToImageAvailability,
-        imageReferenceRequired,
-        imageReferenceMissing,
         workspaceModelControlsVisible,
         audioDurationAvailable,
         withInstalledMusicModel,

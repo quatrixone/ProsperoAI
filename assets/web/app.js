@@ -51,8 +51,6 @@ const kindNames = ['Text','Image','Audio','Voice'];
 const modelKind = model => ['text-to-text','text-to-image','text-to-audio','text-to-speech'].indexOf(model.purpose || 'text-to-text');
 let current = null, models = [], modelsStatus = 'loading', selectedModel = '', selectedModelState = 'unknown', pendingModel = '', controller = null, currentModelChosen = false;
 const modelChooser=$('workspace-model');
-const imageAttachment=window.ProsperoQwenImageAttachment.createAttachmentState();
-let imagePreviewFile=null,imagePreviewUrl='';
 const workspaceUI=window.ProsperoWorkspace;
 let workspaceModeName=location.pathname === '/audio' ? 'audio' : 'text';
 let audioSectionName='music';
@@ -64,12 +62,6 @@ workspaceMode.setAudioSection(audioSectionName);
 const modelMemoryEstimate=document.createElement('p');modelMemoryEstimate.id='model-memory-estimate';modelMemoryEstimate.className='muted';modelMemoryEstimate.setAttribute('role','status');modelMemoryEstimate.textContent='Checking past memory measurements…';$('model-description').after(modelMemoryEstimate);
 function workspaceSection(){return workspaceModeName==='image'?imageSectionName:audioSectionName;}
 function workspaceModelValue(){return [current?.model,stagedWorkspaceModel,selectedModel].find(id=>workspaceUI.filterModels(models,workspaceModeName,workspaceSection()).some(model=>model.id===id))||'';}
-function clearQwenImageAttachment(){imageAttachment.clear();if(imagePreviewUrl)URL.revokeObjectURL(imagePreviewUrl);imagePreviewFile=null;imagePreviewUrl='';$('qwen-image-file').value='';$('qwen-image-preview-image').removeAttribute('src');$('qwen-image-preview').hidden=true;$('qwen-image-attach').hidden=false;$('qwen-image-filename').textContent='';}
-function renderQwenImageAttachment(){const modelId=current?.model||modelChooser.value||stagedWorkspaceModel||selectedModel;const qwenSelected=models.some(model=>model.id===modelId)&&modelId==='qwen-image-2.1';const enabled=qwenSelected&&workspaceUI.imageReferenceRequired(workspaceModeName,imageSectionName);$('qwen-image-attachment').hidden=!enabled;if(!qwenSelected){if(imageAttachment.file)clearQwenImageAttachment();return;}const file=imageAttachment.file;$('qwen-image-attach').hidden=Boolean(file);$('qwen-image-preview').hidden=!file;if(!file)return;if(imagePreviewFile!==file){if(imagePreviewUrl)URL.revokeObjectURL(imagePreviewUrl);imagePreviewFile=file;imagePreviewUrl=URL.createObjectURL(file);}$('qwen-image-preview-image').src=imagePreviewUrl;$('qwen-image-filename').textContent=file.name||'Reference image';}
-function chooseQwenImageFile(){ $('qwen-image-file').click(); }
-$('qwen-image-attach').onclick=chooseQwenImageFile;$('qwen-image-replace').onclick=chooseQwenImageFile;
-$('qwen-image-remove').onclick=()=>{clearQwenImageAttachment();renderQwenImageAttachment();};
-$('qwen-image-file').onchange=event=>{const file=event.target.files?.[0];event.target.value='';if(!file)return;const error=window.ProsperoQwenImageAttachment.validateFile(file);if(error){$('feedback').textContent=error;return;}imageAttachment.select(file);$('feedback').textContent='';renderQwenImageAttachment();};
 let sessionToken = ''; try { sessionToken = sessionStorage.getItem('prospero-session') || ''; sessionStorage.removeItem('prospero-key'); } catch {}
 function page(name) { for (const p of ['workspace','media','models','settings']) $(p).hidden = p !== name; document.querySelectorAll('[data-page]').forEach(b => { b.classList.toggle('selected', b.dataset.page === name); b.setAttribute('aria-current', b.dataset.page === name ? 'page' : 'false'); }); }
 document.querySelectorAll('[data-page]').forEach(b => b.onclick = () => page(b.dataset.page));
@@ -94,7 +86,6 @@ function setWorkspaceMode(mode){
     for(const button of document.querySelectorAll('[data-mode]')){const active=button.dataset.mode===mode;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
     renderWorkspaceModels();
     renderWorkspaceAudio();
-    renderQwenImageAttachment();
     $('welcome').hidden=workspaceChatOpen||mode==='audio';
     $('chat').hidden=!workspaceChatOpen||(mode==='audio'&&audioSectionName!=='tts');
 }
@@ -109,7 +100,7 @@ function setImageSection(section,recordHistory=true){
     if(section!=='text-to-image'&&section!=='image-to-image')throw new Error('Unknown Image section.');
     const changed=imageSectionName!==section;imageSectionName=section;
     for(const button of document.querySelectorAll('[data-image-section]')){const active=button.dataset.imageSection===section;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
-    renderWorkspaceModels();renderQwenImageAttachment();
+    renderWorkspaceModels();
     if(recordHistory&&changed&&workspaceModeName==='image')history.pushState({workspaceMode:workspaceModeName,imageSection:section},'',location.pathname);
 }
 function renderWorkspaceImage(){
@@ -121,7 +112,6 @@ function renderWorkspaceImage(){
     $('workspace-image-i2i-ready').hidden=state!=='available';
     $('workspace-image-i2i-loading').hidden=state!=='loading';
     $('workspace-image-i2i-empty').hidden=state!=='empty';
-    $('workspace-image-i2i-install').hidden=state!=='empty';
     $('workspace-image-i2i-unavailable').hidden=state!=='unavailable';
 }
 function renderWorkspaceAudio(){
@@ -182,7 +172,6 @@ async function refreshModels(){
         renderModels();
         renderHistory();
         updateModelChip();
-        renderQwenImageAttachment();
     }catch(error){if(modelsStatus==='loading')modelsStatus='unavailable';renderWorkspaceModels();$('status').textContent='PS5 · Disconnected';$('feedback').textContent=error.message;}
 }
 const refreshInstalled = document.createElement('button');
@@ -201,7 +190,7 @@ async function refreshMemoryModel(){
  catch{$('memory-model').textContent='Memory: unavailable';}
  finally{memoryRefreshBusy=false;}
 }
-async function refreshSelectedModel(){try{const response=await api('/api/models/selection');const selection=await response.json();selectedModel=models.some(model=>model.id===selection.id)?selection.id:'';selectedModelState=selection.state||'unknown';modelChooser.value=workspaceModelValue();if(selectedModel===current?.model||!currentModelChosen){if(selectedModelState==='preparing')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is loading…`;else if(selectedModelState==='ready')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is ready.`;else if(selectedModelState==='failed')$('model-load-status').textContent=selection.error||'Model preparation failed. Retry from Models.';}renderModels();renderQwenImageAttachment();}catch{}}
+async function refreshSelectedModel(){try{const response=await api('/api/models/selection');const selection=await response.json();selectedModel=models.some(model=>model.id===selection.id)?selection.id:'';selectedModelState=selection.state||'unknown';modelChooser.value=workspaceModelValue();if(selectedModel===current?.model||!currentModelChosen){if(selectedModelState==='preparing')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is loading…`;else if(selectedModelState==='ready')$('model-load-status').textContent=`${models.find(model=>model.id===selectedModel)?.name||selectedModel} is ready.`;else if(selectedModelState==='failed')$('model-load-status').textContent=selection.error||'Model preparation failed. Retry from Models.';}renderModels();}catch{}}
 function renderModels(){
     const list=$('model-list');list.replaceChildren();
     const term=$('search').value.toLowerCase();
@@ -355,11 +344,6 @@ async function persistConversation(conversation){
         save('prospero-conversations',conversations.slice(0,50));
     }catch(error){$('feedback').textContent=`Saved in this browser; console sync failed: ${error.message}`;}
 }
-function shouldPersistConversation(conversation,imageResponseUncertain){
-    if(!imageResponseUncertain)return true;
-    conversation.updatedAt=Number(conversation._serverUpdatedUs||0)/1000;
-    return false;
-}
 async function syncConversations(){
     if(conversationSyncBusy||controller||document.visibilityState==='hidden')return;
     conversationSyncBusy=true;
@@ -407,7 +391,7 @@ $('delete-dialog').addEventListener('close',async()=>{
     renderHistory();
 });
 function updateModelChip(){const chip=$('model-chip'),model=models.find(item=>item.id===current?.model),name=current?.modelName||model?.name||current?.model||'';chip.textContent=name?`Model: ${name}`:'Model not selected';chip.title=name?`This conversation uses ${name}`:'Choose a model in Generation settings';chip.hidden=!name;}
-function openChat(){workspaceChatOpen=true;page('workspace');setWorkspaceMode(workspaceModeName);$('chat-title').textContent=current?.title||'A little room for big ideas.';updateModelChip();modelChooser.value=workspaceModelValue();renderQwenImageAttachment();$('model-load-status').textContent=currentModelChosen?`${current.modelName||current.model} is staged. It loads when you submit.`:current?.model?'Choose this conversation’s model before submitting.':'Choose a model. It loads when you submit.';const model=models.find(item=>item.id===(current?.model||stagedWorkspaceModel)),tts=current?.purpose==='text-to-speech'||model?.purpose==='text-to-speech';syncWorkspaceGenerationSettings();if(tts){populateWorkspaceVoicePicker(model?.id||current?.model||stagedWorkspaceModel);const chatterbox=String(model?.id||current?.model||stagedWorkspaceModel).includes('chatterbox');if($('chatterbox-upload-label'))$('chatterbox-upload-label').hidden=!chatterbox;if(chatterbox)void refreshCustomChatterboxVoice();}}
+function openChat(){workspaceChatOpen=true;page('workspace');setWorkspaceMode(workspaceModeName);$('chat-title').textContent=current?.title||'A little room for big ideas.';updateModelChip();modelChooser.value=workspaceModelValue();$('model-load-status').textContent=currentModelChosen?`${current.modelName||current.model} is staged. It loads when you submit.`:current?.model?'Choose a model before submitting.':'Choose a model. It loads when you submit.';const model=models.find(item=>item.id===(current?.model||stagedWorkspaceModel)),tts=current?.purpose==='text-to-speech'||model?.purpose==='text-to-speech';syncWorkspaceGenerationSettings();if(tts){populateWorkspaceVoicePicker(model?.id||current?.model||stagedWorkspaceModel);const chatterbox=String(model?.id||current?.model||stagedWorkspaceModel).includes('chatterbox');if($('chatterbox-upload-label'))$('chatterbox-upload-label').hidden=!chatterbox;if(chatterbox)void refreshCustomChatterboxVoice();}}
 $('history-kind').onchange=renderHistory;$('history-archive-mode').onchange=renderHistory;
 $('history-search').oninput=renderHistory;
 function newConversation(){
@@ -444,11 +428,6 @@ $('composer').onsubmit=async event=>{
         await chooseInstalledModel(modelChooser.value);
         if(!currentModelChosen)return;
     }
-    if(workspaceUI.imageReferenceMissing(workspaceModeName,imageSectionName,imageAttachment.file)){
-        $('feedback').textContent='Attach a PNG or JPEG reference image before editing.';
-        $('qwen-image-attach').focus();
-        return;
-    }
     if(submitting)return;
     submitting=true;
     const conversation=current;
@@ -463,7 +442,7 @@ $('composer').onsubmit=async event=>{
     conversation.updatedAt=Date.now();
     $('prompt').value='';$('prompt').style.height='auto';
     openChat();renderHistory();
-    const userElement=addMessage(userMessage);
+    addMessage(userMessage);
     const answer={role:'assistant',content:''};
     const el=addMessage(answer);
     controller=new AbortController();
@@ -472,13 +451,11 @@ $('composer').onsubmit=async event=>{
     const start=performance.now();
     const selectedModel=models.find(model=>model.id===conversation.model);
     const isTextModel=!selectedModel?.purpose||modelKind(selectedModel)===0;
-    let usage=null,received=false,requestMessages=conversation.messages,imageId='',imageResponseUncertain=false;
+    let usage=null,received=false,requestMessages=conversation.messages;
     try{
         await persistConversation(conversation);
         requestMessages=await prosperoPrepareSearch(text,requestMessages,isTextModel);
-        if(workspaceUI.imageReferenceRequired(workspaceModeName,imageSectionName))imageId=await window.ProsperoQwenImageAttachment.ensureUploadId(imageAttachment,api);
         const requestBody={model:conversation.model,messages:requestMessages,stream:isTextModel,stream_options:isTextModel?{include_usage:true}:undefined,temperature:preferences.temperature};
-        if(imageId){requestBody.image_id=imageId;requestBody.conversation_id=conversation.id;}
         const response=await api('/v1/chat/completions',{method:'POST',signal:controller.signal,body:JSON.stringify(requestBody)});
         if(!response.headers.get('Content-Type')?.includes('text/event-stream')){
             const result=await response.json(),responseMessage=result.choices?.[0]?.message;
@@ -486,11 +463,6 @@ $('composer').onsubmit=async event=>{
             const media=extractMedia(answer.content);
             if(media){el.textContent=media.before.replace(/[\r\n]+$/,'');appendMedia(el,media,answer.content);}
             else el.textContent=answer.content;
-            if(imageId&&typeof responseMessage?.image==='string'){
-                userMessage.image=responseMessage.image;
-                appendMedia(userElement,{path:userMessage.image,kind:'image'},'','Reference image');
-                clearQwenImageAttachment();renderQwenImageAttachment();
-            }
         }else{
             const reader=response.body.getReader(),decoder=new TextDecoder();let pending='';
             const event=block=>{
@@ -514,19 +486,14 @@ $('composer').onsubmit=async event=>{
         showGenerationStats(el,usage,isTextModel,(performance.now()-start)/1000);
         $('feedback').textContent=`Completed · ${((performance.now()-start)/1000).toFixed(1)}s`;
     }catch(error){
-        if(imageId&&(error.name==='AbortError'||error instanceof TypeError)){
-            imageAttachment.invalidateUploadId();
-            imageResponseUncertain=true;
-        }
         $('feedback').textContent=error.name==='AbortError'?'Response stopped.':error.message;
         if(!received)el.remove();
     }finally{
         if(answer.content)conversation.messages.push(answer);
         conversation.updatedAt=Date.now();
-        const persistOnServer=shouldPersistConversation(conversation,imageResponseUncertain);
         save('prospero-conversations',conversations.slice(0,50));
         controller=null;$('send').textContent='↑';$('send').setAttribute('aria-label','Send message');$('prompt').disabled=false;
-        renderHistory();if(persistOnServer)void persistConversation(conversation);
+        renderHistory();void persistConversation(conversation);
     }
 };
 $('access').onclick=()=>{$('key-error').textContent='';$('key-dialog').showModal();};$('key-dialog').addEventListener('close',async()=>{if($('key-dialog').returnValue==='connect'){const apiKey=$('key').value.trim();$('key').value='';try{const response=await fetch('/api/auth/session',{method:'POST',headers:{'Authorization':`Bearer ${apiKey}`,'Content-Type':'application/json'}});if(!response.ok){let message='Could not create a browser session.';try{const body=await response.json();message=body.error?.message||body.error||message;}catch{}throw new Error(message);}const session=await response.json();sessionToken=session.token;try{sessionStorage.setItem('prospero-session',sessionToken);}catch{}$('key-error').textContent='';refreshModels();}catch(error){$('key-error').textContent=error.message;$('key-dialog').showModal();}}});

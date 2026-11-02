@@ -346,8 +346,6 @@ std::string api_content(const ApiJson &message) {
 struct ApiChatRequest {
     std::string model;
     std::string output_session_id;
-    std::string image_id, conversation_id;
-    std::string final_message_role, final_message_content;
     unsigned output_message_index = 0;
     std::vector<std::string> roles, contents;
     ApiJson tools = ApiJson::array();
@@ -363,24 +361,9 @@ ApiChatRequest parse_api_chat(const ApiJson &body) {
     if (!body.is_object()) throw ApiError("400 Bad Request", "invalid_json", "Expected a JSON object.");
     ApiChatRequest result;
     result.model = body.at("model").get<std::string>();
-    if (body.contains("image_id")) {
-        if (!body["image_id"].is_string())
-            throw ApiError("400 Bad Request", "invalid_image_id", "image_id is invalid.");
-        result.image_id = body["image_id"].get<std::string>();
-        if (result.image_id.size() != 32 ||
-            !valid_image_upload_id(result.image_id.c_str()))
-            throw ApiError("400 Bad Request", "invalid_image_id", "image_id is invalid.");
-    }
-    if (body.contains("conversation_id")) {
-        if (!body["conversation_id"].is_string())
-            throw ApiError("400 Bad Request", "invalid_conversation_id",
-                           "conversation_id is invalid.");
-        result.conversation_id = body["conversation_id"].get<std::string>();
-        if (result.conversation_id.find('\0') != std::string::npos ||
-            !prospero_session::valid_id(result.conversation_id.c_str()))
-            throw ApiError("400 Bad Request", "invalid_conversation_id",
-                           "conversation_id is invalid.");
-    }
+    if (body.contains("image_id"))
+        throw ApiError("400 Bad Request", "invalid_image_request",
+                       "The legacy image_id field is not supported.");
     if (body.contains("output_session_id")) {
         if (!body["output_session_id"].is_string())
             throw ApiError("400 Bad Request", "invalid_output_session", "output_session_id is invalid.");
@@ -545,8 +528,6 @@ ApiChatRequest parse_api_chat(const ApiJson &body) {
             content += "\nPrevious tool calls: " + message["tool_calls"].dump();
         }
         result.roles.push_back(mapped_role); result.contents.push_back(content);
-        result.final_message_role = role;
-        result.final_message_content = content;
     }
     if (!outstanding_calls.empty())
         throw ApiError("400 Bad Request", "invalid_tool_result", "Every assistant tool call must have a matching tool result.");
@@ -677,10 +658,6 @@ void handle_openai_chat(const NetApi &api, int sock, const char *body) {
     bool generation_completed = false;
     std::string model_for_event;
     prospero::debug::OperationId operation_id = 0;
-    ImageUploadLease image_upload{};
-    prospero_session::Record image_record{};
-    std::vector<prospero_session::Message> image_messages;
-    unsigned image_message_index = 0;
     try {
         auto request = parse_api_chat(ApiJson::parse(body));
         model_for_event = request.model;
@@ -697,33 +674,6 @@ void handle_openai_chat(const NetApi &api, int sock, const char *body) {
             if (request.model == gpt_runtime_model_id(i)) { selected = i; break; }
         if (selected == gpt_runtime_model_count())
             throw ApiError("404 Not Found", "model_not_found", "Requested model is not installed.");
-        if (!request.image_id.empty()) {
-            if (!gpt_runtime_model_is_qwen_image_2_1(request.model.c_str()) ||
-                request.final_message_role != "user")
-                throw ApiError("400 Bad Request", "invalid_image_request",
-                               "Image input requires a Qwen Image 2.1 user prompt.");
-            if (!request.conversation_id.empty()) {
-                image_messages.resize(prospero_session::MessageCapacity);
-                if (!prospero_session::load(request.conversation_id.c_str(), &image_record,
-                                            image_messages.data(),
-                                            static_cast<unsigned>(image_messages.size())))
-                    throw ApiError("404 Not Found", "conversation_not_found",
-                                   "The image conversation does not exist.");
-                if (std::strcmp(image_record.purpose, "text-to-image") != 0 ||
-                    request.model != image_record.model_id || !image_record.message_count)
-                    throw ApiError("400 Bad Request", "invalid_image_conversation",
-                                   "Image input requires a matching Qwen image conversation.");
-                image_message_index = image_record.message_count - 1;
-                const auto &last_message = image_messages[image_message_index];
-                if (std::strcmp(last_message.role, "user") != 0 ||
-                    last_message.content != request.final_message_content)
-                    throw ApiError("400 Bad Request", "invalid_image_conversation",
-                                   "The saved conversation must end with this user prompt.");
-            }
-            if (!acquire_image_upload(request.image_id.c_str(), &image_upload))
-                throw ApiError("400 Bad Request", "invalid_image_id",
-                               "The image upload is unknown or expired.");
-        }
         static std::atomic<unsigned long long> sequence{0};
         stream.id = "chatcmpl-" + std::to_string(stream.created) + "-" + std::to_string(++sequence);
         stream.model = request.model;
@@ -747,40 +697,11 @@ void handle_openai_chat(const NetApi &api, int sock, const char *body) {
         operation_id = prospero::debug::begin_operation("openai-generation", request.model.c_str());
         generated = true;
         const int result = gpt_runtime_generate(messages.data(), messages.size(), settings,
-            output.data(), output.size(), &stats, active_api_stream ? api_stream_progress : nullptr,
-            image_upload.active ? image_upload.path.c_str() : nullptr);
+            output.data(), output.size(), &stats, active_api_stream ? api_stream_progress : nullptr);
         if (result != 0) throw ApiError("400 Bad Request", "generation_failed", output[0] ? output.data() : "Model generation failed.");
         generation_completed = true;
         prospero::debug::event("api-generation-completed", request.model.c_str(), "", operation_id);
         auto message = api_assistant(request, output.data(), stream.id);
-        if (!request.image_id.empty()) {
-            if (!request.conversation_id.empty()) {
-                char archived_path[384]{};
-                if (!prospero_session::archive_image(request.conversation_id.c_str(),
-                        image_message_index, image_upload.path.c_str(), archived_path,
-                        sizeof(archived_path)))
-                    throw ApiError("500 Internal Server Error", "image_archive_failed",
-                                   "The image was generated, but its source could not be archived.");
-                auto &saved_message = image_messages[image_message_index];
-                const std::string previous_image = saved_message.image;
-                saved_message.image = archived_path;
-                if (!prospero_session::save(&image_record, image_messages.data(),
-                                            image_record.message_count)) {
-                    const bool restored = previous_image.empty()
-                        ? prospero_session::remove_optional_image_sidecar(request.conversation_id.c_str(),
-                                                                          image_message_index)
-                        : prospero_session::write_optional_image_sidecar(request.conversation_id.c_str(),
-                                                                         image_message_index,
-                                                                         previous_image.c_str());
-                    if (restored)
-                        std::remove(archived_path);
-                    throw ApiError("500 Internal Server Error", "image_archive_failed",
-                                   "The image was generated, but its source could not be saved to the conversation.");
-                }
-                message["image"] = archived_path;
-            }
-            finish_image_upload(&image_upload, true);
-        }
         if (!request.output_session_id.empty() && !message.contains("tool_calls") &&
             std::strcmp(gpt_runtime_model_purpose(selected), "text-to-text") == 0) {
             const auto content = message.value("content", std::string());

@@ -211,10 +211,8 @@ extern "C" int sceKernelDirectMemoryQuery(std::int64_t, int, void *, std::size_t
 
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *output, std::size_t capacity,
-                         gpt_runtime_stats_t *, gpt_runtime_progress_fn runtime_progress,
-                         const char *image_path)
+                         gpt_runtime_stats_t *, gpt_runtime_progress_fn runtime_progress)
 {
-    assert(image_path == nullptr);
     if (verify_generation)
     {
         assert(count == 1 && std::strcmp(messages[0].role, "user") == 0);

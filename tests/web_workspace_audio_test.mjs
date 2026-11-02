@@ -52,29 +52,21 @@ test('audio duration is limited to duration-aware models while retaining YuE2', 
     assert.equal(audioDurationAvailable(null), false);
 });
 
-test('Image subsections separate general image generation from Qwen image editing', () => {
-    const {filterModels, imageToImageAvailability, imageReferenceRequired, imageReferenceMissing} = workspaceApi();
+test('Image modes follow server-declared capabilities, not model identifiers', () => {
+    const {filterModels, imageCapabilities, imageToImageAvailability} = workspaceApi();
     const models = [
-        {id: 'qwen-image-2.1', purpose: 'text-to-image'},
-        {id: 'stable-diffusion', purpose: 'text-to-image'},
-        {id: 'qwen-image-2.1', purpose: 'text-to-text'},
+        {id: 'image-edit', purpose: 'text-to-image', details: {capabilities: ['text_to_image', 'image_to_image']}},
+        {id: 'image-basic', purpose: 'text-to-image', details: {capabilities: ['text_to_image']}},
+        {id: 'text-model', purpose: 'text-to-text', details: {capabilities: ['text_to_image', 'image_to_image']}},
     ];
     assert.deepEqual(Array.from(filterModels(models, 'image', 'text-to-image'), model => model.id), [
-        'qwen-image-2.1', 'stable-diffusion',
+        'image-edit', 'image-basic',
     ]);
-    assert.deepEqual(Array.from(filterModels(models, 'image', 'image-to-image'), model => model.purpose), [
-        'text-to-image',
-    ]);
-    assert.equal(filterModels(models, 'image', 'image-to-image')[0].id, 'qwen-image-2.1');
+    assert.deepEqual(Array.from(filterModels(models, 'image', 'image-to-image'), model => model.id), ['image-edit']);
+    assert.deepEqual(Array.from(imageCapabilities(models[0])), ['text_to_image', 'image_to_image']);
     assert.equal(imageToImageAvailability(models, 'ready'), 'available');
-    assert.equal(imageToImageAvailability(models.filter(model => model.id !== 'qwen-image-2.1'), 'ready'), 'empty');
+    assert.equal(imageToImageAvailability(models.filter(model => model.id !== 'image-edit'), 'ready'), 'empty');
     assert.equal(imageToImageAvailability(models, 'loading'), 'loading');
-    assert.equal(imageReferenceRequired('image', 'image-to-image'), true);
-    assert.equal(imageReferenceRequired('image', 'text-to-image'), false);
-    assert.equal(imageReferenceRequired('text', 'image-to-image'), false);
-    assert.equal(imageReferenceMissing('image', 'image-to-image', null), true);
-    assert.equal(imageReferenceMissing('image', 'image-to-image', {name: 'ref.png'}), false);
-    assert.equal(imageReferenceMissing('image', 'text-to-image', null), false);
 });
 
 test('Music Studio owns its model selectors without the duplicate Workspace picker', () => {
@@ -151,7 +143,7 @@ test('a new Workspace conversation opens settings before focusing model selectio
     assert.deepEqual(calls, ['chat.add:show-history', 'openChat', 'renderMessages', 'renderHistory', 'prompt']);
 });
 
-test('Image Workspace renders the chosen Image section and Qwen install state', () => {
+test('Image Workspace renders image-to-image state only for models declaring that capability', () => {
     const start = appSource.indexOf('function renderWorkspaceImage()');
     const end = appSource.indexOf('\nfunction renderWorkspaceAudio()', start);
     const render = appSource.slice(start, end);
@@ -160,11 +152,11 @@ test('Image Workspace renders the chosen Image section and Qwen install state', 
     const elements = Object.fromEntries([
         'workspace-image', 'workspace-image-text', 'workspace-image-edit',
         'workspace-image-i2i-ready', 'workspace-image-i2i-loading',
-        'workspace-image-i2i-empty', 'workspace-image-i2i-install', 'workspace-image-i2i-unavailable',
+        'workspace-image-i2i-empty', 'workspace-image-i2i-unavailable',
     ].map(id => [id, {hidden: false}]));
     const context = {
         workspaceModeName: 'image', imageSectionName: 'image-to-image',
-        models: [{id: 'qwen-image-2.1', purpose: 'text-to-image'}], modelsStatus: 'ready',
+        models: [{id: 'image-edit', purpose: 'text-to-image', details: {capabilities: ['text_to_image', 'image_to_image']}}], modelsStatus: 'ready',
         workspaceUI: workspaceApi(), $: id => elements[id],
     };
     runInNewContext(`${render}\nrenderWorkspaceImage()`, context);
@@ -173,13 +165,10 @@ test('Image Workspace renders the chosen Image section and Qwen install state', 
     assert.equal(elements['workspace-image-edit'].hidden, false);
     assert.equal(elements['workspace-image-i2i-ready'].hidden, false);
     assert.equal(elements['workspace-image-i2i-empty'].hidden, true);
-    assert.equal(elements['workspace-image-i2i-install'].hidden, true);
-
-    context.models = [{id: 'stable-diffusion', purpose: 'text-to-image'}];
+    context.models = [{id: 'image-basic', purpose: 'text-to-image', details: {capabilities: ['text_to_image']}}];
     runInNewContext(`${render}\nrenderWorkspaceImage()`, context);
     assert.equal(elements['workspace-image-i2i-ready'].hidden, true);
     assert.equal(elements['workspace-image-i2i-empty'].hidden, false);
-    assert.equal(elements['workspace-image-i2i-install'].hidden, false);
 });
 
 test('Audio/TTS reuses the Workspace voice controls and gives a no-model install state', () => {
@@ -237,7 +226,6 @@ test('restored TTS conversations keep voice settings visible before model resele
         setWorkspaceMode() {},
         workspaceModelValue: () => 'kokoro-model',
         updateModelChip() {},
-        renderQwenImageAttachment() {},
         sdSeedLabel: {hidden: true}, sdSeedHint: {hidden: true},
         sdSizeLabel: {hidden: true}, sdSizeHint: {hidden: true},
         sdUpscaleLabel: {hidden: true}, sdUpscaleHint: {hidden: true},
@@ -267,8 +255,8 @@ test('Generation settings show only controls relevant to the selected model purp
     const context = {
         models: [
             {id: 'text-model', purpose: 'text-to-text'},
-            {id: 'qwen-image-2.1', purpose: 'text-to-image'},
-            {id: 'stable-diffusion', purpose: 'text-to-image'},
+            {id: 'image-edit', purpose: 'text-to-image'},
+            {id: 'image-basic', purpose: 'text-to-image'},
             {id: 'kokoro-model', purpose: 'text-to-speech'},
         ],
         current: null,
@@ -287,8 +275,8 @@ test('Generation settings show only controls relevant to the selected model purp
     assert.notEqual(start, -1, 'the model-specific settings visibility should be centralized');
     for (const [model, expected] of [
         ['text-model', {text: false, image: true, voice: true, durationNote: true}],
-        ['qwen-image-2.1', {text: true, image: false, voice: true, durationNote: true}],
-        ['stable-diffusion', {text: true, image: false, voice: true, durationNote: true}],
+        ['image-edit', {text: true, image: false, voice: true, durationNote: true}],
+        ['image-basic', {text: true, image: false, voice: true, durationNote: true}],
         ['kokoro-model', {text: true, image: true, voice: false, durationNote: false}],
     ]) {
         context.modelChooser.value = model;
@@ -551,7 +539,6 @@ test('Audio subsection navigation is recorded and restored by browser history', 
         modelChooser: {value: ''},
         stagedWorkspaceModel: '',
         selectedModel: '',
-        imageAttachment: {file: null},
         controller: {abort() { calls.push(['cancel']); }},
         document: {
             querySelectorAll(selector) {
@@ -562,7 +549,6 @@ test('Audio subsection navigation is recorded and restored by browser history', 
         },
         $: id => elements[id],
         renderWorkspaceModels() {},
-        renderQwenImageAttachment() {},
         syncWorkspaceGenerationSettings() {},
         history,
         location,

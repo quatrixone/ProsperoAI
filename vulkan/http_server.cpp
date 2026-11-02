@@ -361,7 +361,7 @@ bool run_generation(const gpt_runtime_message_t *messages, unsigned message_coun
                     char *response_text, std::size_t response_capacity, unsigned max_tokens = 512,
                     gpt_runtime_stats_t *reported_stats = nullptr, const char *model_id = nullptr,
                     unsigned context_tokens = 0, unsigned batch_tokens = 0,
-                    unsigned ubatch_tokens = 0, const char *image_path = nullptr)
+                    unsigned ubatch_tokens = 0)
 {
     pthread_mutex_lock(&generation_mutex);
     struct GenerationUnlock {
@@ -379,7 +379,7 @@ bool run_generation(const gpt_runtime_message_t *messages, unsigned message_coun
     settings.ubatch_length = ubatch_tokens;
     gpt_runtime_stats_t stats{};
     const int result = gpt_runtime_generate(messages, message_count, settings, response_text,
-                                            response_capacity, &stats, nullptr, image_path);
+                                            response_capacity, &stats, nullptr);
     if (reported_stats)
         *reported_stats = stats;
     return result == 0;
@@ -461,7 +461,6 @@ bool serve_ui_asset(const NetApi &api, int sock, const char *path)
         {"/app.css", "app.css", "text/css; charset=utf-8"},
         {"/app.js", "app.js", "text/javascript; charset=utf-8"},
         {"/workspace.js", "workspace.js", "text/javascript; charset=utf-8"},
-        {"/qwen-image-attachment.js", "qwen-image-attachment.js", "text/javascript; charset=utf-8"},
         {"/voice-catalog.js", "voice-catalog.js", "text/javascript; charset=utf-8"},
         {"/voice-recording.js", "voice-recording.js", "text/javascript; charset=utf-8"},
         {"/lame.min.js", "lame.min.js", "text/javascript; charset=utf-8"},
@@ -1350,7 +1349,7 @@ std::string image_upload_directory()
 
 std::string image_upload_path(const std::string &id)
 {
-    return image_upload_directory() + ".qwen-image-" + id + ".upload";
+    return image_upload_directory() + ".image-upload-" + id + ".upload";
 }
 
 bool valid_image_upload_id(const char *id)
@@ -1422,7 +1421,7 @@ void cleanup_expired_image_uploads(std::time_t now)
     DIR *entries = ::opendir(directory.c_str());
     if (!entries)
         return;
-    constexpr char Prefix[] = ".qwen-image-";
+    constexpr char Prefix[] = ".image-upload-";
     constexpr char Suffix[] = ".upload";
     while (const dirent *entry = ::readdir(entries))
     {

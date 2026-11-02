@@ -183,7 +183,7 @@ class HttpApiTests(unittest.TestCase):
             self.assertIn("200 OK", head)
             upload_id = json.loads(body)["id"]
             self.assertRegex(upload_id, r"^[0-9a-f]{32}$")
-            self.assertEqual((self.image_dir / f".qwen-image-{upload_id}.upload").read_bytes(),
+            self.assertEqual((self.image_dir / f".image-upload-{upload_id}.upload").read_bytes(),
                              payload)
 
     def test_image_upload_rejects_unauthenticated_requests(self):
@@ -193,7 +193,7 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual(list(self.image_dir.iterdir()), [])
 
     def test_image_upload_rejects_invalid_and_incomplete_bodies_without_files(self):
-        sentinel = self.image_dir / ".qwen-image-unrelated.upload"
+        sentinel = self.image_dir / ".image-upload-unrelated.upload"
         sentinel.write_bytes(b"preserve unrelated file")
         valid = (ROOT / "tests/fixtures/one-pixel.png").read_bytes()
         cases = [
@@ -215,7 +215,7 @@ class HttpApiTests(unittest.TestCase):
                 self.assertEqual({path.name for path in self.image_dir.iterdir()}, {sentinel.name})
 
     def test_image_upload_requires_bounded_content_length_before_opening_files(self):
-        sentinel = self.image_dir / ".qwen-image-unrelated.upload"
+        sentinel = self.image_dir / ".image-upload-unrelated.upload"
         sentinel.write_bytes(b"preserve unrelated file")
         headers = ["Authorization: Bearer secret"]
         oversized, _ = self.request_raw(
@@ -242,13 +242,6 @@ class HttpApiTests(unittest.TestCase):
                                 check=True, capture_output=True, text=True)
         self.assertIn("image upload lifecycle: ok", result.stdout)
 
-    def qwen_image_environment(self, **extra):
-        return {
-            "PROSPERO_TEST_QWEN_IMAGE": "1",
-            "PROSPERO_TEST_IMAGE_CALLS_FILE": str(self.image_calls_file),
-            **extra,
-        }
-
     def upload_image(self):
         payload = (ROOT / "tests/fixtures/one-pixel.jpg").read_bytes()
         head, body = self.request_raw(
@@ -257,9 +250,18 @@ class HttpApiTests(unittest.TestCase):
         )
         self.assertIn("200 OK", head)
         image_id = json.loads(body)["id"]
-        return image_id, self.image_dir / f".qwen-image-{image_id}.upload"
+        return image_id, self.image_dir / f".image-upload-{image_id}.upload"
 
-    def save_image_conversation(self, session_id, purpose="text-to-image", image=None):
+    def test_openai_chat_rejects_legacy_image_id_use(self):
+        image_id, _ = self.upload_image()
+        head, body = self.request(body={
+            "model": "tiny.gguf", "image_id": image_id,
+            "messages": [{"role": "user", "content": "hello"}],
+        }, key="secret", headers=["Authorization: Bearer secret"])
+        self.assertIn("400 Bad Request", head)
+        self.assertIn("invalid_image_request", body)
+
+    def save_conversation_with_image(self, session_id, purpose="text-to-image", image=None):
         headers = ["Authorization: Bearer secret"]
         self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
                      headers=headers)
@@ -267,165 +269,26 @@ class HttpApiTests(unittest.TestCase):
         if image is not None:
             message["image"] = image
         return self.request("/api/conversations", {
-            "id": session_id, "title": "Qwen edit", "model": "qwen-image-test",
-            "modelName": "Qwen Image test", "purpose": purpose, "messages": [message],
+            "id": session_id, "title": "Image conversation", "model": "image-model-test",
+            "modelName": "Image model test", "purpose": purpose, "messages": [message],
         }, key="secret", headers=headers)
 
-    def test_qwen_image_rejects_invalid_requests_before_inference(self):
-        image_id, _ = self.upload_image()
-        expired_id, expired_path = self.upload_image()
-        old = 1
-        os.utime(expired_path, (old, old))
-        self.save_image_conversation("qwen-image-text-session", purpose="text-to-text")
-        env = self.qwen_image_environment()
-        cases = [
-            ({"model": "qwen-image-test", "image_id": "0" * 32,
-              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
-            ({"model": "qwen-image-test", "image_id": image_id + "\0suffix",
-              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
-            ({"model": "qwen-image-test", "image_id": expired_id,
-              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
-            ({"model": "tiny.gguf", "image_id": image_id,
-              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
-            ({"model": "qwen-image-test", "image_id": image_id,
-              "messages": [{"role": "assistant", "content": "not a user prompt"}]}, "400 Bad Request"),
-            ({"model": "qwen-image-test", "image_id": image_id,
-              "conversation_id": "missing-image-session",
-              "messages": [{"role": "user", "content": "edit this"}]}, "404 Not Found"),
-            ({"model": "qwen-image-test", "image_id": image_id,
-              "conversation_id": "qwen-image-text-session",
-              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
-            ({"model": "qwen-image-test", "image_id": image_id,
-              "conversation_id": "qwen-image-text-session\0suffix",
-              "messages": [{"role": "user", "content": "edit this"}]}, "400 Bad Request"),
-        ]
-        try:
-            for body, status in cases:
-                with self.subTest(status=status, conversation=body.get("conversation_id")):
-                    head, _ = self.request(body=body, key="secret",
-                                           headers=["Authorization: Bearer secret"], environment=env)
-                    self.assertIn(status, head)
-                    self.assertFalse(self.image_calls_file.exists())
-        finally:
-            self.request("/api/conversations/qwen-image-text-session", method="DELETE", key="secret",
-                         headers=["Authorization: Bearer secret"])
-
-    def test_qwen_image_generation_failure_keeps_upload_retryable_then_cleans_it(self):
-        image_id, upload_path = self.upload_image()
-        path_file = Path(self.scratch.name) / "image-path.txt"
-        env = self.qwen_image_environment(PROSPERO_TEST_IMAGE_PATH_FILE=str(path_file))
-        failed, body = self.request(body={
-            "model": "qwen-image-test", "image_id": image_id,
-            "messages": [{"role": "user", "content": "fail"}],
-        }, key="secret", headers=["Authorization: Bearer secret"], environment=env)
-        self.assertIn("400 Bad Request", failed)
-        self.assertIn("generation_failed", body)
-        self.assertTrue(upload_path.exists())
-
-        succeeded, body = self.request(body={
-            "model": "qwen-image-test", "image_id": image_id,
-            "messages": [{"role": "user", "content": "edit this"}],
-        }, key="secret", headers=["Authorization: Bearer secret"], environment=env)
-        self.assertIn("200 OK", succeeded)
-        self.assertEqual(path_file.read_text(), str(upload_path))
-        self.assertFalse(upload_path.exists())
-        response = json.loads(body)
-        self.assertNotIn("image", response["choices"][0]["message"])
-        self.assertTrue(Path(response["choices"][0]["message"]["content"]).exists())
-
-    def test_qwen_image_edit_archives_source_and_syncs_conversation(self):
-        session_id = "qwen-image-archive-session"
-        header, _ = self.save_image_conversation(session_id)
-        self.assertIn("201 Created", header)
-        image_id, upload_path = self.upload_image()
-        head, body = self.request(body={
-            "model": "qwen-image-test", "image_id": image_id,
-            "conversation_id": session_id,
-            "messages": [{"role": "user", "content": "edit this"}],
-        }, key="secret", headers=["Authorization: Bearer secret"],
-            environment=self.qwen_image_environment())
-        self.assertIn("200 OK", head)
-        message = json.loads(body)["choices"][0]["message"]
-        archived = Path(message["image"])
-        self.assertEqual(archived.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
-        self.assertFalse(upload_path.exists())
-        detail = json.loads(self.request(
-            "/api/conversations/" + session_id, key="secret",
-            headers=["Authorization: Bearer secret"])[1])
-        self.assertEqual(detail["messages"][0]["image"], str(archived))
-
-        media_wire = self.request_raw_bytes(str(archived), key="secret", method="GET",
-                                            headers=["Authorization: Bearer secret"])
-        media_head, media_body = media_wire.split(b"\r\n\r\n", 1)
-        self.assertIn(b"200 OK", media_head)
-        self.assertIn(b"Content-Type: image/png", media_head)
-        self.assertEqual(media_body, archived.read_bytes())
-        self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
-                     headers=["Authorization: Bearer secret"])
-
-    def test_qwen_image_archive_failures_keep_output_and_upload_retryable(self):
-        session_id = "qwen-image-archive-retry"
-        headers = ["Authorization: Bearer secret"]
-        self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
-                     headers=headers)
-        self.save_image_conversation(session_id)
-        image_id, upload_path = self.upload_image()
-        chat = {
-            "model": "qwen-image-test", "image_id": image_id,
-            "conversation_id": session_id,
-            "messages": [{"role": "user", "content": "edit this"}],
-        }
-        env = self.qwen_image_environment()
-        generated = self.image_dir / "qwen-generated.png"
-        archive_dir = Path("/tmp/prosperoai-session-test/work/image") / session_id
-        sidecar_tmp = Path("/tmp/prosperoai-session-test/sessions") / session_id / "message-000.image.tmp"
-        archive_dir.parent.mkdir(parents=True, exist_ok=True)
-        archive_dir.write_text("block archive directory")
-        try:
-            head, body = self.request(body=chat, key="secret", headers=headers, environment=env)
-            self.assertIn("500 Internal Server Error", head)
-            self.assertIn("image_archive_failed", body)
-            self.assertTrue(generated.exists())
-            self.assertTrue(upload_path.exists())
-
-            archive_dir.unlink()
-            sidecar_tmp.mkdir()
-            head, body = self.request(body=chat, key="secret", headers=headers, environment=env)
-            self.assertIn("500 Internal Server Error", head)
-            self.assertIn("image_archive_failed", body)
-            self.assertTrue(generated.exists())
-            self.assertTrue(upload_path.exists())
-            self.assertEqual(list(archive_dir.glob("*.png")), [])
-
-            sidecar_tmp.rmdir()
-            head, body = self.request(body=chat, key="secret", headers=headers, environment=env)
-            self.assertIn("200 OK", head)
-            self.assertTrue(Path(json.loads(body)["choices"][0]["message"]["image"]).exists())
-            self.assertFalse(upload_path.exists())
-        finally:
-            if archive_dir.is_file():
-                archive_dir.unlink()
-            if sidecar_tmp.exists():
-                sidecar_tmp.rmdir()
-            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
-                         headers=headers)
-
     def test_conversation_sync_roundtrips_only_owned_png_image_paths(self):
-        session_id = "qwen-image-sync-session"
+        session_id = "image-sync-session"
         self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
                      headers=["Authorization: Bearer secret"])
         archived = Path("/tmp/prosperoai-session-test/work/image") / session_id / "000-123.png"
         archived.parent.mkdir(parents=True, exist_ok=True)
         archived.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
         try:
-            head, _ = self.save_image_conversation(session_id, image=str(archived))
+            head, _ = self.save_conversation_with_image(session_id, image=str(archived))
             self.assertIn("201 Created", head)
             detail = json.loads(self.request(
                 "/api/conversations/" + session_id, key="secret",
                 headers=["Authorization: Bearer secret"])[1])
             self.assertEqual(detail["messages"][0]["image"], str(archived))
-            invalid = {"id": session_id, "title": "Qwen edit", "model": "qwen-image-test",
-                       "modelName": "Qwen Image test", "purpose": "text-to-image",
+            invalid = {"id": session_id, "title": "Image conversation", "model": "image-model-test",
+                       "modelName": "Image model test", "purpose": "text-to-image",
                        "messages": [{"role": "user", "content": "edit this",
                                      "image": "/tmp/unowned-image.png"}]}
             self.assertIn("400 Bad Request", self.request(
@@ -438,11 +301,6 @@ class HttpApiTests(unittest.TestCase):
         finally:
             self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
                          headers=["Authorization: Bearer secret"])
-
-    def test_run_generation_forwards_optional_image_path(self):
-        result = subprocess.run([str(self.binary), "--test-image-path-forwarding"],
-                                check=True, capture_output=True, text=True)
-        self.assertEqual(result.stdout.strip(), "/server-owned/reference.png")
 
     def request(self, path="/v1/chat/completions", body=None, key=None, headers=None, method=None,
                 environment=None):
