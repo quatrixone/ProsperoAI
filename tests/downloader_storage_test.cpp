@@ -308,4 +308,21 @@ int main()
     std::remove(ppart.c_str());
     answer_206 = false;
     rmdir(folder);
+
+    char legacy_model_root[] = "/tmp/prospero-legacy-qwen-delete-XXXXXX";
+    assert(mkdtemp(legacy_model_root));
+    prospero::model_root_slot() = legacy_model_root;
+    const std::string legacy_qwen = std::string(legacy_model_root) + "/legacy-qwen-image";
+    assert(::mkdir(legacy_qwen.c_str(), 0777) == 0);
+    for (const char *name : {"qwen_image_2.1-Q2_K.gguf", "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                             "qwen_image_2.1_vae_bf16.safetensors"})
+    {
+        const std::string path = legacy_qwen + "/" + name;
+        std::FILE *file = std::fopen(path.c_str(), "wb");
+        assert(file && std::fwrite("legacy", 1, 6, file) == 6 && std::fclose(file) == 0);
+    }
+    assert(access((legacy_qwen + "/model_index.json").c_str(), F_OK) != 0);
+    assert(delete_model_files("legacy-qwen-image"));
+    assert(access(legacy_qwen.c_str(), F_OK) != 0);
+    assert(rmdir(legacy_model_root) == 0);
 }

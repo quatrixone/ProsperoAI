@@ -1026,7 +1026,18 @@ bool delete_model_files(const char *raw_id) {
     if (stat(directory.c_str(), &info) != 0 || !S_ISDIR(info.st_mode)) return false;
     const std::string index_path = directory + "/model_index.json";
     std::FILE *index = std::fopen(index_path.c_str(), "rb");
-    if (!index) return false;
+    if (!index) {
+        if (errno != ENOENT) return false;
+        for (const char *name : {"qwen_image_2.1-Q2_K.gguf", "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                                 "qwen_image_2.1_vae_bf16.safetensors"}) {
+            struct stat asset{};
+            const std::string path = directory + "/" + name;
+            if (stat(path.c_str(), &asset) != 0 || !S_ISREG(asset.st_mode) || asset.st_size <= 0)
+                return false;
+        }
+        remove_tree(directory);
+        return access(directory.c_str(), F_OK) != 0;
+    }
     char contents[8192]{};
     const std::size_t count = std::fread(contents, 1, sizeof(contents) - 1, index);
     const bool failed = std::ferror(index) != 0;
