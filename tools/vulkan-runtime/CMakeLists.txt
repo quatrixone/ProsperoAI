@@ -41,7 +41,7 @@ target_compile_options(stable-diffusion PRIVATE
 set_property(SOURCE "${PROS_ROOT}/.deps/stable-diffusion-vulkan/src/version.cpp"
     DIRECTORY "${PROS_ROOT}/.deps/stable-diffusion-vulkan"
     PROPERTY COMPILE_DEFINITIONS
-    SDCPP_BUILD_COMMIT=f89d9b13d730eabeede7314ce49dacd18d3c90c2 SDCPP_BUILD_VERSION=prospero-pinned)
+    SDCPP_BUILD_COMMIT=b13a48219d5cdf408edcb93da6cd69b612ed03d3 SDCPP_BUILD_VERSION=prospero-pinned)
 # Speech on the same ggml/Vulkan backend. kokoro.cpp reuses the ggml target added above
 # instead of its bundled submodule, and espeak-ng comes from the pinned headers plus the
 # prebuilt PS5 archive, because the cross environment has no system copy.

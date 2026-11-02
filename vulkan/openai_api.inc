@@ -301,10 +301,29 @@ void handle_openai_models(const NetApi &api, int sock) {
     std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
     gpt_runtime_refresh_models();
     ApiJson data = ApiJson::array();
-    for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
-        data.push_back({{"id", gpt_runtime_model_id(i)}, {"object", "model"},
-                        {"created", 0}, {"owned_by", "prosperoai"},
-                        {"name", gpt_runtime_model_name(i)}, {"purpose", gpt_runtime_model_purpose(i)}});
+    for (unsigned i = 0; i < gpt_runtime_model_count(); ++i) {
+        ApiJson model{{"id", gpt_runtime_model_id(i)}, {"object", "model"},
+                      {"created", 0}, {"owned_by", "prosperoai"},
+                      {"name", gpt_runtime_model_name(i)}, {"purpose", gpt_runtime_model_purpose(i)}};
+        std::uint32_t capabilities = 0;
+        gpt_runtime_image_defaults_t defaults{};
+        const char *edit_strategy = nullptr;
+        if (gpt_runtime_model_image_metadata(i, &capabilities, &defaults, &edit_strategy)) {
+            ApiJson supported = ApiJson::array();
+            if (capabilities & GPT_IMAGE_CAP_TEXT_TO_IMAGE) supported.push_back("text_to_image");
+            if (capabilities & GPT_IMAGE_CAP_IMAGE_TO_IMAGE) supported.push_back("image_to_image");
+            if (capabilities & GPT_IMAGE_CAP_INPAINTING) supported.push_back("inpainting");
+            if (capabilities & GPT_IMAGE_CAP_CONTROLNET) supported.push_back("controlnet");
+            ApiJson details{{"capabilities", std::move(supported)},
+                            {"image_defaults", {{"width", defaults.width}, {"height", defaults.height},
+                                                 {"steps", defaults.steps}, {"cfg_scale", defaults.cfg_scale},
+                                                 {"sampler", defaults.sampler ? defaults.sampler : ""},
+                                                 {"scheduler", defaults.scheduler ? defaults.scheduler : ""}}},
+                            {"image_edit_strategy", edit_strategy ? ApiJson(edit_strategy) : ApiJson(nullptr)}};
+            model["details"] = std::move(details);
+        }
+        data.push_back(std::move(model));
+    }
     auto body = ApiJson{{"object", "list"}, {"data", data}}.dump();
     send_json(api, sock, body.c_str());
 }

@@ -275,6 +275,48 @@ const char *gpt_runtime_model_purpose(unsigned i)
     scan();
     return i < models.size() ? modality_name(models[i].modality) : "unknown";
 }
+bool gpt_runtime_model_image_metadata(unsigned i, std::uint32_t *capabilities,
+                                      gpt_runtime_image_defaults_t *defaults,
+                                      const char **edit_strategy)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    scan();
+    if (i >= models.size() || models[i].modality != Modality::Image)
+        return false;
+
+    std::uint32_t image_capabilities = GPT_IMAGE_CAP_TEXT_TO_IMAGE;
+    gpt_runtime_image_defaults_t image_defaults{512, 512, 1, 1.0f, "euler_a", ""};
+    const char *strategy = nullptr;
+    const auto preset = std::find_if(std::begin(prospero_model_download::presets),
+                                     std::end(prospero_model_download::presets),
+                                     [&](const auto &entry) { return models[i].id == entry.id; });
+    if (preset != std::end(prospero_model_download::presets) && preset->kind == 1)
+    {
+        image_capabilities = preset->image_capabilities;
+        image_defaults = {preset->image_defaults.width, preset->image_defaults.height,
+                          preset->image_defaults.steps, preset->image_defaults.cfg_scale,
+                          preset->image_defaults.sampler, preset->image_defaults.scheduler};
+        strategy = preset->image_edit_strategy;
+    }
+    else
+    {
+        std::string family;
+        if (supported_diffusers_directory(models[i].root, family))
+        {
+            if (family == "SDXL")
+                image_defaults = {512, 512, 10, 5.0f, "euler", ""};
+            else if (family == "SD3")
+                image_defaults = {768, 768, 28, 4.5f, "euler", ""};
+        }
+    }
+    if (capabilities)
+        *capabilities = image_capabilities;
+    if (defaults)
+        *defaults = image_defaults;
+    if (edit_strategy)
+        *edit_strategy = strategy;
+    return true;
+}
 bool gpt_runtime_model_is_qwen_image_2_1(const char *model_id)
 {
     if (!model_id || !*model_id)

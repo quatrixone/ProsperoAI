@@ -1234,16 +1234,50 @@ void handle_model_presets(const NetApi &api, int sock, const char *body = nullpt
     for (std::size_t i = 0; i < prospero_model_download::preset_count; ++i)
     {
         const auto &preset = prospero_model_download::presets[i];
-        items.push_back({{"index", i},
-                         {"id", preset.id},
-                         {"name", preset.name},
-                         {"kind", preset.kind},
-                         {"source_filename", preset.kind == 0 ? preset.files[0].source : ""},
-                         {"size", preset.size},
-                         {"installed", prospero_model_download::preset_installed(i)},
-                         {"required_bytes", preset.size},
-                         {"available_bytes", storage_known ? available_storage : 0},
-                         {"storage_check_available", storage_known}});
+        nlohmann::json item{{"index", i},
+                            {"id", preset.id},
+                            {"name", preset.name},
+                            {"kind", preset.kind},
+                            {"source_filename", preset.kind == 0 ? preset.files[0].source : ""},
+                            {"size", preset.size},
+                            {"installed", prospero_model_download::preset_installed(i)},
+                            {"required_bytes", preset.size},
+                            {"available_bytes", storage_known ? available_storage : 0},
+                            {"storage_check_available", storage_known}};
+        if (preset.kind == 1)
+        {
+            nlohmann::json capabilities = nlohmann::json::array();
+            if (preset.image_capabilities & prospero_model_download::IMAGE_CAP_TEXT_TO_IMAGE)
+                capabilities.push_back("text_to_image");
+            if (preset.image_capabilities & prospero_model_download::IMAGE_CAP_IMAGE_TO_IMAGE)
+                capabilities.push_back("image_to_image");
+            if (preset.image_capabilities & prospero_model_download::IMAGE_CAP_INPAINTING)
+                capabilities.push_back("inpainting");
+            if (preset.image_capabilities & prospero_model_download::IMAGE_CAP_CONTROLNET)
+                capabilities.push_back("controlnet");
+            item["image_capabilities"] = std::move(capabilities);
+            item["image_defaults"] = {{"width", preset.image_defaults.width},
+                                      {"height", preset.image_defaults.height},
+                                      {"steps", preset.image_defaults.steps},
+                                      {"cfg_scale", preset.image_defaults.cfg_scale},
+                                      {"sampler", preset.image_defaults.sampler},
+                                      {"scheduler", preset.image_defaults.scheduler}};
+            item["image_edit_strategy"] = preset.image_edit_strategy
+                ? nlohmann::json(preset.image_edit_strategy) : nlohmann::json(nullptr);
+            if (*preset.license)
+                item["license"] = preset.license;
+            if (preset.upstream_url)
+                item["upstream_url"] = preset.upstream_url;
+            if (preset.verified_by)
+                item["verified_by"] = preset.verified_by;
+            if (preset.evidence_revision)
+                item["evidence_revision"] = preset.evidence_revision;
+            if (preset.evidence)
+                item["evidence"] = preset.evidence;
+            if (preset.runtime_status)
+                item["runtime_status"] = preset.runtime_status;
+        }
+        items.push_back(std::move(item));
     }
     const auto response = nlohmann::json{{"data", items}}.dump();
     send_json(api, sock, response.c_str());

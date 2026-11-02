@@ -3,6 +3,8 @@
   "id": "sd-turbo-fp16",
   "name": "SD-Turbo FP16",
   "kind": 1,
+  "image_capabilities": ["text_to_image"],
+  "image_defaults": {"width": 512, "height": 512, "steps": 1, "cfg_scale": 1, "sampler": "euler_a", "scheduler": ""},
   "repository": "blackbearreloaded/ProsperoAI-SD-Turbo-FP16-PS5",
   "revision": "77d748daee145ea432a0cc20744ba18b5ef4c137",
   "files": [
@@ -60,6 +62,8 @@
   "id": "realistic-vision-v51-fp16",
   "name": "Realistic Vision v5.1 FP16",
   "kind": 1,
+  "image_capabilities": ["text_to_image"],
+  "image_defaults": {"width": 512, "height": 512, "steps": 20, "cfg_scale": 7, "sampler": "euler", "scheduler": ""},
   "repository": "SG161222/Realistic_Vision_V5.1_noVAE",
   "revision": "305469dfd7d7410cff6299d34727e237374b5f36",
   "files": [
@@ -75,6 +79,223 @@
     "size": 334643276,
     "sha256": "68a430f8a51413e80ecec6c13fff4b6b63e57600a2ec661a016a14fd1037fa4b"
    }
+  ]
+ },
+ {
+  "id": "sdxs-512-q8-0",
+  "name": "SDXS-512 (Q8_0)",
+  "kind": 1,
+  "repository": "concedo/sdxs-512-tinySDdistilled-GGUF",
+  "revision": "3144d898d61492f8382ffcabec055733fc5b2a0e",
+  "quantization": "Q8_0",
+  "license": "OpenRAIL++",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image"],
+  "image_defaults": {"width": 512, "height": 512, "steps": 1, "cfg_scale": 1, "sampler": "euler_a", "scheduler": ""},
+  "files": [
+   {"source": "sdxs-512-tinySDdistilled_Q8_0.gguf", "path": "sdxs-512-tinySDdistilled_Q8_0.gguf", "size": 682847200, "sha256": "409ab23582ee074c6b9d5395784fc0741b0599fb9d138686c69087c71678eb6a"}
+  ]
+ },
+ {
+  "id": "sdxl-base-q8-0",
+  "name": "SDXL Base 1.0 (Q8_0)",
+  "kind": 1,
+  "repository": "gpustack/stable-diffusion-xl-base-1.0-GGUF",
+  "revision": "f00927e80a399ecb0bcacca868131d5e9d4e77aa",
+  "quantization": "Q8_0",
+  "license": "OpenRAIL++ (model); MIT (SDXL VAE)",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image"],
+  "image_edit_strategy": "init_image_strength",
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 10, "cfg_scale": 6, "sampler": "dpm++2m", "scheduler": "ays"},
+  "files": [
+   {"source": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "path": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "size": 5040957760, "sha256": "2ef973152d2fbe27e37e4fd5ec3569dec1f828ee279975e60acc12bc78c9f981"},
+   {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
+  ]
+ },
+ {
+  "id": "raehoshi-illustxl-1-1-q8-0",
+  "name": "Raehoshi IllustXL 1.1 (Q8_0)",
+  "kind": 1,
+  "repository": "Raelina/Raehoshi-illust-XL-11",
+  "revision": "1dc97091d5130ef87cd7a2df92551692c771b5da",
+  "quantization": "Q8_0",
+  "license": "CreativeML Open RAIL++-M (SDXL model license); MIT (SDXL VAE)",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image"],
+  "image_edit_strategy": "init_image_strength",
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 28, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
+  "files": [
+   {"source": "raehoshi-illust-xl-11.safetensors", "path": "raehoshiIllustXL_v110.safetensors", "size": 6938063182, "sha256": "0753c9ddcb82f4d47d98ca2f65b0e5944a8e4528b848d0741654be0740973e64"},
+   {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
+  ]
+ },
+ {
+  "id": "ilustmix-v11-1-q8-0",
+  "name": "iLustMix v11.1 (Q8_0)",
+  "kind": 1,
+  "repository": "TripleDug/my-awesome-models",
+  "revision": "e46210d2d9992c1e094fba7f8fa97e45a97eeb7b",
+  "quantization": "Q8_0",
+  "license": "Illustrious License (Civitai model 1110783, version 2807896); MIT (SDXL VAE)",
+  "upstream_url": "https://civitai.com/models/1110783?modelVersionId=2807896",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image"],
+  "image_edit_strategy": "init_image_strength",
+  "image_defaults": {"width": 832, "height": 1216, "steps": 10, "cfg_scale": 6, "sampler": "dpm++2m", "scheduler": "ays"},
+  "files": [
+   {"source": "ilustmix_v111.safetensors", "path": "ilustmix_v111.safetensors", "size": 7105357284, "sha256": "038dad76321eb847a115eab813ed6ff68c603d4bc0e9eb7c3e1be756dabf3dc2"},
+   {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
+  ]
+ },
+ {
+  "id": "sdxl-inpainting-q8-0",
+  "name": "SDXL Inpainting 0.1 (Q8_0)",
+  "kind": 1,
+  "repository": "gpustack/stable-diffusion-xl-inpainting-1.0-GGUF",
+  "revision": "f01275b603d7ba5cc6774b0faf70905b5d19dc47",
+  "quantization": "Q8_0",
+  "license": "OpenRAIL++ (model); MIT (SDXL VAE)",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image", "inpainting"],
+  "image_edit_strategy": "init_image_strength",
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 25, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
+  "files": [
+   {"source": "stable-diffusion-xl-inpainting-1.0-Q8_0.gguf", "path": "stable-diffusion-xl-inpainting-1.0-Q8_0.gguf", "size": 4873718560, "sha256": "4a08b13f91933e06625a7026c787408100e2116326aeda961c9a428e61c2d9c0"},
+   {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
+  ]
+ },
+ {
+  "id": "sd15-inpainting-q8-0",
+  "name": "SD 1.5 Inpainting (Q8_0)",
+  "kind": 1,
+  "repository": "gpustack/stable-diffusion-v1-5-inpainting-GGUF",
+  "revision": "21491e4f6af4723f2677172327ea34656da4ef3e",
+  "quantization": "Q8_0",
+  "license": "CreativeML Open RAIL-M",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image", "inpainting"],
+  "image_edit_strategy": "init_image_strength",
+  "image_defaults": {"width": 512, "height": 512, "steps": 25, "cfg_scale": 7, "sampler": "euler_a", "scheduler": ""},
+  "files": [
+   {"source": "stable-diffusion-v1-5-inpainting-Q8_0.gguf", "path": "stable-diffusion-v1-5-inpainting-Q8_0.gguf", "size": 1881270304, "sha256": "2301f1a0712de3dc2ff16181e1023865aa837922216e439491b98b00d12eb5fc"}
+  ]
+ },
+ {
+  "id": "sdxl-canny-q8-0",
+  "name": "SDXL Base 1.0 (Q8_0) + Canny ControlNet",
+  "kind": 1,
+  "repository": "gpustack/stable-diffusion-xl-base-1.0-GGUF",
+  "revision": "f00927e80a399ecb0bcacca868131d5e9d4e77aa",
+  "quantization": "Q8_0",
+  "license": "OpenRAIL++ (model); MIT (SDXL VAE); Apache-2.0 (xinsir Canny ControlNet)",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image", "controlnet"],
+  "image_edit_strategy": "init_image_strength",
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 25, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
+  "files": [
+   {"source": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "path": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "size": 5040957760, "sha256": "2ef973152d2fbe27e37e4fd5ec3569dec1f828ee279975e60acc12bc78c9f981"},
+   {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"},
+   {"source": "diffusion_pytorch_model_V2.safetensors", "path": "controlnet/xinsir-canny-sdxl-v2.safetensors", "size": 2502139104, "sha256": "b3e4ac47bc814019d50dc842f579301440deb6d8f09ee1b91a30f527ace1b852", "repository": "xinsir/controlnet-canny-sdxl-1.0", "revision": "1271357eda52d54b857c650cacb5b51144643ccb"}
+  ]
+ },
+ {
+  "id": "flux2-klein-4b-q8-0",
+  "name": "FLUX.2 Klein 4B (Q8_0)",
+  "kind": 1,
+  "repository": "leejet/FLUX.2-klein-4B-GGUF",
+  "revision": "3b1f5a9dc3abb32238b053aeb3d823c30afdacbd",
+  "quantization": "Q8_0",
+  "license": "Apache-2.0 (model); FLUX.2-dev non-commercial license (shared VAE)",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image"],
+  "image_edit_strategy": "reference_image",
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 4, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
+  "files": [
+   {"source": "flux-2-klein-4b-Q8_0.gguf", "path": "diffusion_models/flux-2-klein-4b-Q8_0.gguf", "size": 4300629440, "sha256": "0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28"},
+   {"source": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "path": "text_encoders/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "size": 2497281120, "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597", "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF", "revision": "a06e946bb6b655725eafa393f4a9745d460374c9"},
+   {"source": "split_files/vae/flux2-vae.safetensors", "path": "vae/flux2-vae.safetensors", "size": 336213556, "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", "repository": "Comfy-Org/flux2-dev", "revision": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"}
+  ]
+ },
+ {
+  "id": "flux2-klein-9b-q4-0",
+  "name": "FLUX.2 Klein 9B (Q4_0)",
+  "kind": 1,
+  "repository": "leejet/FLUX.2-klein-9B-GGUF",
+  "revision": "cc588497a95ffc2937ebbd6b9b3916a11ada6e5b",
+  "quantization": "Q4_0",
+  "license": "FLUX Non-Commercial License (model); FLUX.2-dev non-commercial license (shared VAE)",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image", "image_to_image"],
+  "image_edit_strategy": "reference_image",
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 8, "cfg_scale": 1, "sampler": "dpm2", "scheduler": ""},
+  "files": [
+   {"source": "flux-2-klein-9b-Q4_0.gguf", "path": "diffusion_models/flux-2-klein-9b-Q4_0.gguf", "size": 5616208032, "sha256": "a7e77afa96871d16679ff7b949bd25f20c8179f219c4b662cac91e81ed99b944"},
+   {"source": "Qwen3-8B-Q4_K_M.gguf", "path": "text_encoders/Qwen3-8B-Q4_K_M.gguf", "size": 5027784512, "sha256": "120307ba529eb2439d6c430d94104dabd578497bc7bfe7e322b5d9933b449bd4", "repository": "unsloth/Qwen3-8B-GGUF", "revision": "a6adef130ffb23ddaf1a62fec9dced968c9bc482"},
+   {"source": "split_files/vae/flux2-vae.safetensors", "path": "vae/flux2-vae.safetensors", "size": 336213556, "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", "repository": "Comfy-Org/flux2-dev", "revision": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"}
+  ]
+ },
+ {
+  "id": "flux3-image-klein-q4-k",
+  "name": "FLUX.3 Image Klein (Q4_K)",
+  "kind": 1,
+  "repository": "leejet/flux-3-image-klein-GGUF",
+  "revision": "1c2ad2f9b9247ccca6506a23bdb033fdb0873321",
+  "quantization": "Q4_K",
+  "license": "FLUX Kommunity License v.1.0; FLUX.2-dev non-commercial license (shared VAE); Qwen3-VL text encoder: Apache-2.0",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image"],
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 16, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
+  "files": [
+   {"source": "flux3-image-klein-Q4_K.gguf", "path": "diffusion_models/flux3-image-klein-Q4_K.gguf", "size": 3514023104, "sha256": "19ddbfbed61da4bb16ebf169aaf48e9e5db43aba557be1ee537e9f00f586092e"},
+   {"source": "Qwen3VL-4B-Instruct-Q4_K_M.gguf", "path": "text_encoders/Qwen3VL-4B-Instruct-Q4_K_M.gguf", "size": 2497281664, "sha256": "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a", "repository": "Qwen/Qwen3-VL-4B-Instruct-GGUF", "revision": "1cd86afb9a95c410a6038ab3b40d8b578c892266"},
+   {"source": "split_files/vae/flux2-vae.safetensors", "path": "vae/flux2-vae.safetensors", "size": 336213556, "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", "repository": "Comfy-Org/flux2-dev", "revision": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"}
+  ]
+ },
+ {
+  "id": "flux3-image-klein-q6-k",
+  "name": "FLUX.3 Image Klein (Q6_K)",
+  "kind": 1,
+  "repository": "leejet/flux-3-image-klein-GGUF",
+  "revision": "1c2ad2f9b9247ccca6506a23bdb033fdb0873321",
+  "quantization": "Q6_K",
+  "license": "FLUX Kommunity License v.1.0; FLUX.2-dev non-commercial license (shared VAE); Qwen3-VL text encoder: Apache-2.0",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image"],
+  "image_defaults": {"width": 896, "height": 896, "steps": 16, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
+  "files": [
+   {"source": "flux3-image-klein-Q6_K.gguf", "path": "diffusion_models/flux3-image-klein-Q6_K.gguf", "size": 4874083520, "sha256": "a1ba881f2940a58a3f6090d357516ee611bcc29215256bbf46731c0350b9e6d4"},
+   {"source": "Qwen3VL-4B-Instruct-Q4_K_M.gguf", "path": "text_encoders/Qwen3VL-4B-Instruct-Q4_K_M.gguf", "size": 2497281664, "sha256": "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a", "repository": "Qwen/Qwen3-VL-4B-Instruct-GGUF", "revision": "1cd86afb9a95c410a6038ab3b40d8b578c892266"},
+   {"source": "split_files/vae/flux2-vae.safetensors", "path": "vae/flux2-vae.safetensors", "size": 336213556, "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", "repository": "Comfy-Org/flux2-dev", "revision": "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"}
+  ]
+ },
+ {
+  "id": "z-image-turbo-q4-k",
+  "name": "Z-Image Turbo (Q4_K)",
+  "kind": 1,
+  "repository": "leejet/Z-Image-Turbo-GGUF",
+  "revision": "c61c0e422dc8b541b7548cf33a4ef8302b0f8085",
+  "quantization": "Q4_K",
+  "license": "Apache-2.0 (model, Qwen3-4B text encoder, and VAE)",
+  "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
+  "runtime_status": "experimental",
+  "image_capabilities": ["text_to_image"],
+  "image_defaults": {"width": 1024, "height": 1024, "steps": 8, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
+  "files": [
+   {"source": "z_image_turbo-Q4_K.gguf", "path": "diffusion_models/z_image_turbo-Q4_K.gguf", "size": 3864250304, "sha256": "14b375ab4f226bc5378f68f37e899ef3c2242b8541e61e2bc1aff40976086fbd"},
+   {"source": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "path": "text_encoders/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "size": 2497281120, "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597", "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF", "revision": "a06e946bb6b655725eafa393f4a9745d460374c9"},
+   {"source": "split_files/vae/ae.safetensors", "path": "vae/flux1-ae.safetensors", "size": 335304388, "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38", "repository": "Comfy-Org/z_image_turbo", "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5"}
   ]
  },
  {

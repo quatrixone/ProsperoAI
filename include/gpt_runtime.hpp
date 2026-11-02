@@ -29,6 +29,21 @@ struct gpt_runtime_settings_t
     unsigned ubatch_length = 0;
 };
 
+enum : std::uint32_t
+{
+    GPT_IMAGE_CAP_TEXT_TO_IMAGE = 1u << 0,
+    GPT_IMAGE_CAP_IMAGE_TO_IMAGE = 1u << 1,
+    GPT_IMAGE_CAP_INPAINTING = 1u << 2,
+    GPT_IMAGE_CAP_CONTROLNET = 1u << 3,
+};
+
+struct gpt_runtime_image_defaults_t
+{
+    unsigned width, height, steps;
+    float cfg_scale;
+    const char *sampler, *scheduler;
+};
+
 struct gpt_runtime_stats_t
 {
     unsigned prompt_tokens;
@@ -54,6 +69,9 @@ unsigned gpt_runtime_selected_model();
 const char *gpt_runtime_model_id(unsigned index);
 const char *gpt_runtime_model_name(unsigned index);
 const char *gpt_runtime_model_purpose(unsigned index);
+bool gpt_runtime_model_image_metadata(unsigned index, std::uint32_t *capabilities,
+                                      gpt_runtime_image_defaults_t *defaults,
+                                      const char **edit_strategy);
 bool gpt_runtime_select_model(unsigned index);
 // Delete an installed model when it is not selected and inference is idle.
 bool gpt_runtime_delete_model(const char *id);

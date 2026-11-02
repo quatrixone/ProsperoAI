@@ -847,6 +847,23 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual(data["model"], "second.gguf")
         self.assertEqual(data["usage"]["total_tokens"], 14)
 
+    def test_image_model_metadata_is_exposed_by_both_catalog_routes(self):
+        _, body = self.request("/v1/models", environment={"PROSPERO_TEST_IMAGE_METADATA": "1"})
+        image = next(model for model in json.loads(body)["data"] if model["id"] == "sdxl-base-q8-0")
+        self.assertEqual(image["details"]["capabilities"], ["text_to_image", "image_to_image"])
+        self.assertEqual(image["details"]["image_edit_strategy"], "init_image_strength")
+        self.assertEqual(image["details"]["image_defaults"], {
+            "width": 1024, "height": 1024, "steps": 10, "cfg_scale": 6.0,
+            "sampler": "dpm++2m", "scheduler": "ays"})
+
+        _, body = self.request("/api/models/presets")
+        preset = next(item for item in json.loads(body)["data"] if item["id"] == "sdxl-canny-q8-0")
+        self.assertEqual(preset["image_capabilities"], ["text_to_image", "image_to_image", "controlnet"])
+        self.assertEqual(preset["image_edit_strategy"], "init_image_strength")
+        self.assertEqual(preset["image_defaults"]["steps"], 25)
+        self.assertEqual(preset["verified_by"], "PS5SD")
+        self.assertEqual(preset["runtime_status"], "experimental")
+
     def test_model_memory_estimate_requires_settings(self):
         head, body = self.request("/api/models/estimate", body={"id": "second.gguf"})
         self.assertIn("400 Bad Request", head)

@@ -193,7 +193,8 @@ static std::string http_body(const std::string &response)
 }
 unsigned gpt_runtime_model_count()
 {
-    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") || std::getenv("PROSPERO_TEST_QWEN_IMAGE")
+    return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") || std::getenv("PROSPERO_TEST_QWEN_IMAGE") ||
+                   std::getenv("PROSPERO_TEST_IMAGE_METADATA")
                ? 3
                : 2;
 }
@@ -209,10 +210,11 @@ void gpt_runtime_set_idle_unload_timeout(unsigned)
 }
 const char *gpt_runtime_model_id(unsigned i)
 {
-    return i == 0                                    ? "tiny.gguf"
-           : i == 1                                  ? "second.gguf"
-           : std::getenv("PROSPERO_TEST_QWEN_IMAGE") ? "qwen-image-test"
-                                                     : "sheetsage-test";
+    return i == 0                                        ? "tiny.gguf"
+           : i == 1                                      ? "second.gguf"
+           : std::getenv("PROSPERO_TEST_IMAGE_METADATA") ? "sdxl-base-q8-0"
+           : std::getenv("PROSPERO_TEST_QWEN_IMAGE")     ? "qwen-image-test"
+                                                         : "sheetsage-test";
 }
 const char *gpt_runtime_model_name(unsigned index)
 {
@@ -220,10 +222,25 @@ const char *gpt_runtime_model_name(unsigned index)
 }
 const char *gpt_runtime_model_purpose(unsigned index)
 {
-    if (std::getenv("PROSPERO_TEST_QWEN_IMAGE") && index == 2)
+    if ((std::getenv("PROSPERO_TEST_QWEN_IMAGE") || std::getenv("PROSPERO_TEST_IMAGE_METADATA")) &&
+        index == 2)
         return "text-to-image";
     return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") && index == 2 ? "text-to-audio"
                                                                     : "text-to-text";
+}
+bool gpt_runtime_model_image_metadata(unsigned index, std::uint32_t *capabilities,
+                                      gpt_runtime_image_defaults_t *defaults,
+                                      const char **edit_strategy)
+{
+    if (!std::getenv("PROSPERO_TEST_IMAGE_METADATA") || index != 2)
+        return false;
+    if (capabilities)
+        *capabilities = GPT_IMAGE_CAP_TEXT_TO_IMAGE | GPT_IMAGE_CAP_IMAGE_TO_IMAGE;
+    if (defaults)
+        *defaults = {1024, 1024, 10, 6.0f, "dpm++2m", "ays"};
+    if (edit_strategy)
+        *edit_strategy = "init_image_strength";
+    return true;
 }
 bool gpt_runtime_model_is_qwen_image_2_1(const char *model_id)
 {

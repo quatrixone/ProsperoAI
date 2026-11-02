@@ -336,4 +336,57 @@ int main()
                                 "/download0/ProsperoAI/work/image/reference.upload") == 0);
     assert(generated_image_path == "/download0/ProsperoAI/work/image/reference.upload");
     assert(std::strcmp(out, "edited-image.png") == 0 && stats.elapsed_microseconds == 789);
+
+    const auto image_preset = std::find_if(
+        std::begin(prospero_model_download::presets), std::end(prospero_model_download::presets),
+        [](const auto &preset) { return std::strcmp(preset.id, "sdxl-base-q8-0") == 0; });
+    assert(image_preset != std::end(prospero_model_download::presets));
+    const auto image_root = std::filesystem::path(prospero::model_root()) / image_preset->id;
+    for (std::size_t i = 0; i < image_preset->count; ++i)
+    {
+        const auto path = image_root / image_preset->files[i].path;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << "fixture";
+    }
+    const auto custom_root = std::filesystem::path(prospero::model_root()) / "custom-sdxl";
+    std::filesystem::create_directories(custom_root);
+    std::ofstream(custom_root / "model_index.json")
+        << "{\"_class_name\":\"StableDiffusionXLPipeline\"}";
+    const auto custom_sd3_root = std::filesystem::path(prospero::model_root()) / "custom-sd3";
+    std::filesystem::create_directories(custom_sd3_root);
+    std::ofstream(custom_sd3_root / "model_index.json")
+        << "{\"_class_name\":\"StableDiffusion3Pipeline\"}";
+    gpt_runtime_refresh_models();
+    unsigned curated_index = gpt_runtime_model_count(), custom_index = gpt_runtime_model_count();
+    unsigned custom_sd3_index = gpt_runtime_model_count();
+    for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
+    {
+        if (std::strcmp(gpt_runtime_model_id(i), image_preset->id) == 0)
+            curated_index = i;
+        if (std::strcmp(gpt_runtime_model_id(i), "custom-sdxl") == 0)
+            custom_index = i;
+        if (std::strcmp(gpt_runtime_model_id(i), "custom-sd3") == 0)
+            custom_sd3_index = i;
+    }
+    assert(curated_index < gpt_runtime_model_count() && custom_index < gpt_runtime_model_count() &&
+           custom_sd3_index < gpt_runtime_model_count());
+    std::uint32_t capabilities = 0;
+    gpt_runtime_image_defaults_t defaults{};
+    const char *strategy = nullptr;
+    assert(gpt_runtime_model_image_metadata(curated_index, &capabilities, &defaults, &strategy));
+    assert(capabilities == (GPT_IMAGE_CAP_TEXT_TO_IMAGE | GPT_IMAGE_CAP_IMAGE_TO_IMAGE));
+    assert(defaults.width == 1024 && defaults.height == 1024 && defaults.steps == 10);
+    assert(defaults.cfg_scale == 6 && std::strcmp(defaults.sampler, "dpm++2m") == 0);
+    assert(std::strcmp(defaults.scheduler, "ays") == 0);
+    assert(strategy && std::strcmp(strategy, "init_image_strength") == 0);
+    capabilities = 0;
+    strategy = "sentinel";
+    assert(gpt_runtime_model_image_metadata(custom_index, &capabilities, &defaults, &strategy));
+    assert(capabilities == GPT_IMAGE_CAP_TEXT_TO_IMAGE && strategy == nullptr);
+    assert(defaults.width == 512 && defaults.height == 512 && defaults.steps == 10);
+    assert(defaults.cfg_scale == 5 && std::strcmp(defaults.sampler, "euler") == 0);
+    assert(gpt_runtime_model_image_metadata(custom_sd3_index, &capabilities, &defaults, &strategy));
+    assert(capabilities == GPT_IMAGE_CAP_TEXT_TO_IMAGE && strategy == nullptr);
+    assert(defaults.width == 768 && defaults.height == 768 && defaults.steps == 28);
+    assert(defaults.cfg_scale == 4.5f && std::strcmp(defaults.sampler, "euler") == 0);
 }

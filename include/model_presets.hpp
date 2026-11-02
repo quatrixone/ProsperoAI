@@ -7,7 +7,19 @@ namespace prospero_model_download {
 // the preset, as the speech GGUFs do.
 struct PresetFile { const char *source, *path, *sha256; std::uint64_t size;
                     const char *repository, *revision; };
-struct Preset { const char *id, *name, *repository, *revision; int kind; std::uint64_t size; const PresetFile *files; std::size_t count; };
+enum ImageCapability : std::uint32_t {
+    IMAGE_CAP_TEXT_TO_IMAGE = 1u << 0,
+    IMAGE_CAP_IMAGE_TO_IMAGE = 1u << 1,
+    IMAGE_CAP_INPAINTING = 1u << 2,
+    IMAGE_CAP_CONTROLNET = 1u << 3,
+};
+struct ImageDefaults { unsigned width, height, steps; float cfg_scale;
+                       const char *sampler, *scheduler; };
+struct Preset { const char *id, *name, *repository, *revision; int kind; std::uint64_t size;
+                    const PresetFile *files; std::size_t count; std::uint32_t image_capabilities;
+                    const char *image_edit_strategy; ImageDefaults image_defaults;
+                    const char *license, *upstream_url, *verified_by, *evidence_revision;
+                    const char *evidence, *runtime_status; };
 inline constexpr PresetFile preset_files_0[] = {
     {"Mistral-7B-Instruct-v0.3.Q4_0.gguf", "", "19c3cf872246d48e7a9784d6def7a694a6c9056cfbeb98f7061d43cd0a7c8b7f", 4113289152ULL, nullptr, nullptr},
 };
@@ -29,9 +41,61 @@ inline constexpr PresetFile preset_files_3[] = {
     {"vae/diffusion_pytorch_model.safetensors", "vae.safetensors", "68a430f8a51413e80ecec6c13fff4b6b63e57600a2ec661a016a14fd1037fa4b", 334643276ULL, nullptr, nullptr},
 };
 inline constexpr PresetFile preset_files_4[] = {
-    {"Stable-Audio-3-Small-SFX-GGUF/stable-audio-3-small-sfx-q8_0.gguf", "stable-audio-3-small-sfx-q8_0.gguf", "5bb1ec653134e63dac46264e336ae198a2590195fc996fcd0605021215e9b26f", 1683570688ULL, nullptr, nullptr},
+    {"sdxs-512-tinySDdistilled_Q8_0.gguf", "sdxs-512-tinySDdistilled_Q8_0.gguf", "409ab23582ee074c6b9d5395784fc0741b0599fb9d138686c69087c71678eb6a", 682847200ULL, nullptr, nullptr},
 };
 inline constexpr PresetFile preset_files_5[] = {
+    {"stable-diffusion-xl-base-1.0-Q8_0.gguf", "stable-diffusion-xl-base-1.0-Q8_0.gguf", "2ef973152d2fbe27e37e4fd5ec3569dec1f828ee279975e60acc12bc78c9f981", 5040957760ULL, nullptr, nullptr},
+    {"sdxl_vae.safetensors", "vae/sdxl_vae_fp16_fix.safetensors", "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", 334641162ULL, "madebyollin/sdxl-vae-fp16-fix", "207b116dae70ace3637169f1ddd2434b91b3a8cd"},
+};
+inline constexpr PresetFile preset_files_6[] = {
+    {"raehoshi-illust-xl-11.safetensors", "raehoshiIllustXL_v110.safetensors", "0753c9ddcb82f4d47d98ca2f65b0e5944a8e4528b848d0741654be0740973e64", 6938063182ULL, nullptr, nullptr},
+    {"sdxl_vae.safetensors", "vae/sdxl_vae_fp16_fix.safetensors", "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", 334641162ULL, "madebyollin/sdxl-vae-fp16-fix", "207b116dae70ace3637169f1ddd2434b91b3a8cd"},
+};
+inline constexpr PresetFile preset_files_7[] = {
+    {"ilustmix_v111.safetensors", "ilustmix_v111.safetensors", "038dad76321eb847a115eab813ed6ff68c603d4bc0e9eb7c3e1be756dabf3dc2", 7105357284ULL, nullptr, nullptr},
+    {"sdxl_vae.safetensors", "vae/sdxl_vae_fp16_fix.safetensors", "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", 334641162ULL, "madebyollin/sdxl-vae-fp16-fix", "207b116dae70ace3637169f1ddd2434b91b3a8cd"},
+};
+inline constexpr PresetFile preset_files_8[] = {
+    {"stable-diffusion-xl-inpainting-1.0-Q8_0.gguf", "stable-diffusion-xl-inpainting-1.0-Q8_0.gguf", "4a08b13f91933e06625a7026c787408100e2116326aeda961c9a428e61c2d9c0", 4873718560ULL, nullptr, nullptr},
+    {"sdxl_vae.safetensors", "vae/sdxl_vae_fp16_fix.safetensors", "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", 334641162ULL, "madebyollin/sdxl-vae-fp16-fix", "207b116dae70ace3637169f1ddd2434b91b3a8cd"},
+};
+inline constexpr PresetFile preset_files_9[] = {
+    {"stable-diffusion-v1-5-inpainting-Q8_0.gguf", "stable-diffusion-v1-5-inpainting-Q8_0.gguf", "2301f1a0712de3dc2ff16181e1023865aa837922216e439491b98b00d12eb5fc", 1881270304ULL, nullptr, nullptr},
+};
+inline constexpr PresetFile preset_files_10[] = {
+    {"stable-diffusion-xl-base-1.0-Q8_0.gguf", "stable-diffusion-xl-base-1.0-Q8_0.gguf", "2ef973152d2fbe27e37e4fd5ec3569dec1f828ee279975e60acc12bc78c9f981", 5040957760ULL, nullptr, nullptr},
+    {"sdxl_vae.safetensors", "vae/sdxl_vae_fp16_fix.safetensors", "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", 334641162ULL, "madebyollin/sdxl-vae-fp16-fix", "207b116dae70ace3637169f1ddd2434b91b3a8cd"},
+    {"diffusion_pytorch_model_V2.safetensors", "controlnet/xinsir-canny-sdxl-v2.safetensors", "b3e4ac47bc814019d50dc842f579301440deb6d8f09ee1b91a30f527ace1b852", 2502139104ULL, "xinsir/controlnet-canny-sdxl-1.0", "1271357eda52d54b857c650cacb5b51144643ccb"},
+};
+inline constexpr PresetFile preset_files_11[] = {
+    {"flux-2-klein-4b-Q8_0.gguf", "diffusion_models/flux-2-klein-4b-Q8_0.gguf", "0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28", 4300629440ULL, nullptr, nullptr},
+    {"Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "text_encoders/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597", 2497281120ULL, "unsloth/Qwen3-4B-Instruct-2507-GGUF", "a06e946bb6b655725eafa393f4a9745d460374c9"},
+    {"split_files/vae/flux2-vae.safetensors", "vae/flux2-vae.safetensors", "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", 336213556ULL, "Comfy-Org/flux2-dev", "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"},
+};
+inline constexpr PresetFile preset_files_12[] = {
+    {"flux-2-klein-9b-Q4_0.gguf", "diffusion_models/flux-2-klein-9b-Q4_0.gguf", "a7e77afa96871d16679ff7b949bd25f20c8179f219c4b662cac91e81ed99b944", 5616208032ULL, nullptr, nullptr},
+    {"Qwen3-8B-Q4_K_M.gguf", "text_encoders/Qwen3-8B-Q4_K_M.gguf", "120307ba529eb2439d6c430d94104dabd578497bc7bfe7e322b5d9933b449bd4", 5027784512ULL, "unsloth/Qwen3-8B-GGUF", "a6adef130ffb23ddaf1a62fec9dced968c9bc482"},
+    {"split_files/vae/flux2-vae.safetensors", "vae/flux2-vae.safetensors", "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", 336213556ULL, "Comfy-Org/flux2-dev", "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"},
+};
+inline constexpr PresetFile preset_files_13[] = {
+    {"flux3-image-klein-Q4_K.gguf", "diffusion_models/flux3-image-klein-Q4_K.gguf", "19ddbfbed61da4bb16ebf169aaf48e9e5db43aba557be1ee537e9f00f586092e", 3514023104ULL, nullptr, nullptr},
+    {"Qwen3VL-4B-Instruct-Q4_K_M.gguf", "text_encoders/Qwen3VL-4B-Instruct-Q4_K_M.gguf", "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a", 2497281664ULL, "Qwen/Qwen3-VL-4B-Instruct-GGUF", "1cd86afb9a95c410a6038ab3b40d8b578c892266"},
+    {"split_files/vae/flux2-vae.safetensors", "vae/flux2-vae.safetensors", "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", 336213556ULL, "Comfy-Org/flux2-dev", "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"},
+};
+inline constexpr PresetFile preset_files_14[] = {
+    {"flux3-image-klein-Q6_K.gguf", "diffusion_models/flux3-image-klein-Q6_K.gguf", "a1ba881f2940a58a3f6090d357516ee611bcc29215256bbf46731c0350b9e6d4", 4874083520ULL, nullptr, nullptr},
+    {"Qwen3VL-4B-Instruct-Q4_K_M.gguf", "text_encoders/Qwen3VL-4B-Instruct-Q4_K_M.gguf", "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a", 2497281664ULL, "Qwen/Qwen3-VL-4B-Instruct-GGUF", "1cd86afb9a95c410a6038ab3b40d8b578c892266"},
+    {"split_files/vae/flux2-vae.safetensors", "vae/flux2-vae.safetensors", "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5", 336213556ULL, "Comfy-Org/flux2-dev", "9630c1b4b6e690497ae0c19bb6b1b35d4ebedcb7"},
+};
+inline constexpr PresetFile preset_files_15[] = {
+    {"z_image_turbo-Q4_K.gguf", "diffusion_models/z_image_turbo-Q4_K.gguf", "14b375ab4f226bc5378f68f37e899ef3c2242b8541e61e2bc1aff40976086fbd", 3864250304ULL, nullptr, nullptr},
+    {"Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "text_encoders/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597", 2497281120ULL, "unsloth/Qwen3-4B-Instruct-2507-GGUF", "a06e946bb6b655725eafa393f4a9745d460374c9"},
+    {"split_files/vae/ae.safetensors", "vae/flux1-ae.safetensors", "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38", 335304388ULL, "Comfy-Org/z_image_turbo", "6fc90a3b1b653e935a0d175e260736de25b84df5"},
+};
+inline constexpr PresetFile preset_files_16[] = {
+    {"Stable-Audio-3-Small-SFX-GGUF/stable-audio-3-small-sfx-q8_0.gguf", "stable-audio-3-small-sfx-q8_0.gguf", "5bb1ec653134e63dac46264e336ae198a2590195fc996fcd0605021215e9b26f", 1683570688ULL, nullptr, nullptr},
+};
+inline constexpr PresetFile preset_files_17[] = {
     {"ACE-Step1.5-GGUF/turbo/ace-step-1.5-turbo-q8_0.gguf", "ace-step-1.5-turbo-q8_0.gguf", "cd7bf272588f548d4a253f57483132ef0f8f54a549f26471b09caa72c654270b", 6185460032ULL, nullptr, nullptr},
     {"Qwen3-Embedding-0.6B/chat_template.jinja", "Qwen3-Embedding-0.6B/chat_template.jinja", "87a2728cb8dc9fe424d624542f6060ec05a1d285ebbec578bb078900e33396b5", 4116ULL, "ACE-Step/Ace-Step1.5", "19671f406d603126926c1b7e2adc169acbcade22"},
     {"Qwen3-Embedding-0.6B/config.json", "Qwen3-Embedding-0.6B/config.json", "bb23c1607cfe059a58d8f0196cf1cebb52082b1056b8e358a579da80a5759420", 1359ULL, "ACE-Step/Ace-Step1.5", "19671f406d603126926c1b7e2adc169acbcade22"},
@@ -48,7 +112,7 @@ inline constexpr PresetFile preset_files_5[] = {
     {"acestep-v15-turbo/config.json", "acestep-v15-turbo/config.json", "74745ff704ea49164c3d2d1c99fc0670f3fc635a869f0aec2d1311e6a52d400a", 1968ULL, "ACE-Step/Ace-Step1.5", "19671f406d603126926c1b7e2adc169acbcade22"},
     {"vae/config.json", "vae/config.json", "14e019904df567f26df750317a70e2bd08f9f8f3c40ff4a24c97d1cd3f20ccd2", 425ULL, "ACE-Step/Ace-Step1.5", "19671f406d603126926c1b7e2adc169acbcade22"},
 };
-inline constexpr PresetFile preset_files_6[] = {
+inline constexpr PresetFile preset_files_18[] = {
     {"LICENSE-ADRENO-LLMS", "licenses/LICENSE-ADRENO-LLMS", "cc07e69b4e40ee657c2e4562a344b967d88c5a8c622840cf224f5816d2e6186b", 11278ULL, nullptr, nullptr},
     {"LICENSE-ESPEAK-NG", "licenses/LICENSE-ESPEAK-NG", "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986", 35149ULL, nullptr, nullptr},
     {"LICENSE.md", "licenses/LICENSE.md", "cc07e69b4e40ee657c2e4562a344b967d88c5a8c622840cf224f5816d2e6186b", 11278ULL, nullptr, nullptr},
@@ -78,21 +142,21 @@ inline constexpr PresetFile preset_files_6[] = {
     {"voices/kokoro-voice-af_sarah.gguf", "voices/kokoro/kokoro-voice-af_sarah.gguf", "43cedb17753fd8fae61a1583a81b93a2bf360ccc48c69b9ea2f1a09aa647f0bc", 522560ULL, "simonfxr/kokoro.cpp-GGUF", "c64650d0950e0b718b6eeb2f18620e25daf5c90b"},
     {"voices/kokoro-voice-am_adam.gguf", "voices/kokoro/kokoro-voice-am_adam.gguf", "4cad76e54f38f2ba97811caa97ed220feb7f0973b0fbfe719e0a8b8ca2561634", 522560ULL, "simonfxr/kokoro.cpp-GGUF", "c64650d0950e0b718b6eeb2f18620e25daf5c90b"},
 };
-inline constexpr PresetFile preset_files_7[] = {
+inline constexpr PresetFile preset_files_19[] = {
     {"MiniCPM5-2B-Q8_0.gguf", "", "c5415f8989bf88a8288f1b55a3cc371af53c07b0faa220a63bd7a990cfaba078", 2679710688ULL, nullptr, nullptr},
 };
 #ifdef PROSPERO_PRISM_RUNTIME
-inline constexpr PresetFile preset_files_8[] = {
+inline constexpr PresetFile preset_files_20[] = {
     {"Ternary-Bonsai-2-27B-PTQ1_0.gguf", "", "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3", 5946648928ULL, nullptr, nullptr},
 };
 #endif
-inline constexpr PresetFile preset_files_9[] = {
+inline constexpr PresetFile preset_files_21[] = {
     {"granite-4.0-h-tiny-Q4_K_M.gguf", "", "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd", 4230976352ULL, nullptr, nullptr},
 };
-inline constexpr PresetFile preset_files_10[] = {
+inline constexpr PresetFile preset_files_22[] = {
     {"bohf-12b-moe-3a-q3_k_m.gguf", "", "a13ef6785d0753fe7270d96c061d8c0f32e1bc2b8c17acf6e28fd021ebb5023b", 4703718432ULL, nullptr, nullptr},
 };
-inline constexpr PresetFile preset_files_11[] = {
+inline constexpr PresetFile preset_files_23[] = {
     {"Chatterbox-GGUF/chatterbox-q8_0.gguf", "chatterbox-q8_0.gguf", "d586dd1aa59613cab8046176fb7ca5ba191c02a9b10ffa5b0d892ed22b470656", 2088393668ULL, nullptr, nullptr},
     {"tokenizer.json", "tokenizer.json", "d71e3a44eabb1784df9a68e9f95b251ecbf1a7af6a9f50835856b2ca9d8c14a5", 25470ULL, "ResembleAI/chatterbox", "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
     {"grapheme_mtl_merged_expanded_v1.json", "grapheme_mtl_merged_expanded_v1.json", "69632f47220a788a52ce2661d096453c5655e9bf25289d89a8d832c46ee07dbf", 69989ULL, "ResembleAI/chatterbox", "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"},
@@ -104,7 +168,7 @@ inline constexpr PresetFile preset_files_11[] = {
     {"voices/ruth_golding.flac", "voices/chatterbox/ruth_golding.flac", "f381a6ea1e26bcd24f30a61946ec8056cc34eea6bfdbcaad72efd2f72ebd2405", 295300ULL, "github:CoisLR/TTS-Reference-Voices", "f6be3bc580483c1027e4a66a887ca8510566ae40"},
     {"voices/phil_chenevert.flac", "voices/chatterbox/phil_chenevert.flac", "2c66f024ceee942fec277f9700d07abcffcd5dbccb81e714eb48d95505f117da", 296237ULL, "github:CoisLR/TTS-Reference-Voices", "f6be3bc580483c1027e4a66a887ca8510566ae40"},
 };
-inline constexpr PresetFile preset_files_12[] = {
+inline constexpr PresetFile preset_files_24[] = {
     {"yue2-3b-q8_0.gguf", "yue2-3b-q8_0.gguf", "9694dbcdf67c31875eb78abbe94cc30169465ed7f259af98df96b84d999cba1c", 4264194240ULL, nullptr, nullptr},
     {"yue2-vae-f16.gguf", "yue2-vae-f16.gguf", "81e05a79e78ce5cb8deb1d87e17b73e5d205b440be2bd510ae62acf37b300ddb", 265226496ULL, nullptr, nullptr},
     {"sidecars/yue2-model-config.json", "sidecars/yue2-model-config.json", "ad3477bbef890bf98ae196c1e4b44779494a6231c4ab66f32708eabadf265329", 959ULL, nullptr, nullptr},
@@ -112,30 +176,42 @@ inline constexpr PresetFile preset_files_12[] = {
     {"sidecars/yue2-vae-config.json", "sidecars/yue2-vae-config.json", "f0191bb9694009956de44e0c361a6f1334760be4c8f848e599bde242a54a0970", 1378ULL, nullptr, nullptr},
     {"sidecars/yue2-qwen.tiktoken", "sidecars/yue2-qwen.tiktoken", "b2b1b8dfb5cc5f024bafc373121c6aba3f66f9a5a0269e243470a1de16a33186", 2561218ULL, nullptr, nullptr},
 };
-inline constexpr PresetFile preset_files_13[] = {
+inline constexpr PresetFile preset_files_25[] = {
     {"sheetsage2-orig.gguf", "sheetsage2-orig.gguf", "d858bfdf5ac7be16261ac6ee38754d6fca502149131b44a5262b4039fb72876e", 2708224256ULL, nullptr, nullptr},
 };
-inline constexpr PresetFile preset_files_14[] = {
+inline constexpr PresetFile preset_files_26[] = {
     {"HTDemucs-GGUF/htdemucs-q8_0.gguf", "htdemucs-q8_0.gguf", "b0f532ac6e5f373aeb11fa0df73253251e133832d9c8b9942dc58f50bc5b4388", 61940768ULL, nullptr, nullptr},
 };
 inline constexpr Preset presets[] = {
-    {"Mistral-7B-Instruct-v0.3.Q4_0.gguf", "Mistral 7B Instruct v0.3 Q4_0", "QuantFactory/Mistral-7B-Instruct-v0.3-GGUF", "a83fbb7c79c1afd59dfcce75272591cbe5a2412f", 0, 4113289152ULL, preset_files_0, 1},
-    {"qwen3.8-9b-distill-q4-k-m.gguf", "Qwen3.8 9B Distill Q4_K_M", "empero-ai/Qwen3.8-9B-Distill-GGUF", "760121cd70bb4c36b2b5ec58eb765e0df5987efe", 0, 5780090176ULL, preset_files_1, 1},
-    {"sd-turbo-fp16", "SD-Turbo FP16", "blackbearreloaded/ProsperoAI-SD-Turbo-FP16-PS5", "77d748daee145ea432a0cc20744ba18b5ef4c137", 1, 2580079090ULL, preset_files_2, 8},
-    {"realistic-vision-v51-fp16", "Realistic Vision v5.1 FP16", "SG161222/Realistic_Vision_V5.1_noVAE", "305469dfd7d7410cff6299d34727e237374b5f36", 1, 2467269170ULL, preset_files_3, 2},
-    {"stable-audio-3-small-sfx-vulkan", "Stable Audio 3 Small SFX (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 2, 1683570688ULL, preset_files_4, 1},
-    {"ace-step-1.5-turbo-q8-0", "ACE-Step 1.5 Turbo Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 2, 6244194798ULL, preset_files_5, 15},
-    {"kokoro-82m-vulkan", "Kokoro 82M Vulkan", "blackbearreloaded/ProsperoAI-Kokoro-82M-FP16-PS5", "a06dcbed88d1d04f7653d899e95d025daa55f16d", 3, 167324763ULL, preset_files_6, 28},
-    {"minicpm5-2b-q8-0.gguf", "MiniCPM5 2B Q8_0", "openbmb/MiniCPM5-2B-GGUF", "2079a22f3beaa4e306449978533478fe0522f4b3", 0, 2679710688ULL, preset_files_7, 1},
+    {"Mistral-7B-Instruct-v0.3.Q4_0.gguf", "Mistral 7B Instruct v0.3 Q4_0", "QuantFactory/Mistral-7B-Instruct-v0.3-GGUF", "a83fbb7c79c1afd59dfcce75272591cbe5a2412f", 0, 4113289152ULL, preset_files_0, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"qwen3.8-9b-distill-q4-k-m.gguf", "Qwen3.8 9B Distill Q4_K_M", "empero-ai/Qwen3.8-9B-Distill-GGUF", "760121cd70bb4c36b2b5ec58eb765e0df5987efe", 0, 5780090176ULL, preset_files_1, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"sd-turbo-fp16", "SD-Turbo FP16", "blackbearreloaded/ProsperoAI-SD-Turbo-FP16-PS5", "77d748daee145ea432a0cc20744ba18b5ef4c137", 1, 2580079090ULL, preset_files_2, 8, IMAGE_CAP_TEXT_TO_IMAGE, nullptr, {512, 512, 1, 1.0f, "euler_a", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"realistic-vision-v51-fp16", "Realistic Vision v5.1 FP16", "SG161222/Realistic_Vision_V5.1_noVAE", "305469dfd7d7410cff6299d34727e237374b5f36", 1, 2467269170ULL, preset_files_3, 2, IMAGE_CAP_TEXT_TO_IMAGE, nullptr, {512, 512, 20, 7.0f, "euler", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"sdxs-512-q8-0", "SDXS-512 (Q8_0)", "concedo/sdxs-512-tinySDdistilled-GGUF", "3144d898d61492f8382ffcabec055733fc5b2a0e", 1, 682847200ULL, preset_files_4, 1, IMAGE_CAP_TEXT_TO_IMAGE, nullptr, {512, 512, 1, 1.0f, "euler_a", ""}, "OpenRAIL++", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"sdxl-base-q8-0", "SDXL Base 1.0 (Q8_0)", "gpustack/stable-diffusion-xl-base-1.0-GGUF", "f00927e80a399ecb0bcacca868131d5e9d4e77aa", 1, 5375598922ULL, preset_files_5, 2, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE, "init_image_strength", {1024, 1024, 10, 6.0f, "dpm++2m", "ays"}, "OpenRAIL++ (model); MIT (SDXL VAE)", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"raehoshi-illustxl-1-1-q8-0", "Raehoshi IllustXL 1.1 (Q8_0)", "Raelina/Raehoshi-illust-XL-11", "1dc97091d5130ef87cd7a2df92551692c771b5da", 1, 7272704344ULL, preset_files_6, 2, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE, "init_image_strength", {1024, 1024, 28, 6.0f, "euler_a", ""}, "CreativeML Open RAIL++-M (SDXL model license); MIT (SDXL VAE)", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"ilustmix-v11-1-q8-0", "iLustMix v11.1 (Q8_0)", "TripleDug/my-awesome-models", "e46210d2d9992c1e094fba7f8fa97e45a97eeb7b", 1, 7439998446ULL, preset_files_7, 2, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE, "init_image_strength", {832, 1216, 10, 6.0f, "dpm++2m", "ays"}, "Illustrious License (Civitai model 1110783, version 2807896); MIT (SDXL VAE)", "https://civitai.com/models/1110783?modelVersionId=2807896", "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"sdxl-inpainting-q8-0", "SDXL Inpainting 0.1 (Q8_0)", "gpustack/stable-diffusion-xl-inpainting-1.0-GGUF", "f01275b603d7ba5cc6774b0faf70905b5d19dc47", 1, 5208359722ULL, preset_files_8, 2, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE | IMAGE_CAP_INPAINTING, "init_image_strength", {1024, 1024, 25, 6.0f, "euler_a", ""}, "OpenRAIL++ (model); MIT (SDXL VAE)", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"sd15-inpainting-q8-0", "SD 1.5 Inpainting (Q8_0)", "gpustack/stable-diffusion-v1-5-inpainting-GGUF", "21491e4f6af4723f2677172327ea34656da4ef3e", 1, 1881270304ULL, preset_files_9, 1, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE | IMAGE_CAP_INPAINTING, "init_image_strength", {512, 512, 25, 7.0f, "euler_a", ""}, "CreativeML Open RAIL-M", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"sdxl-canny-q8-0", "SDXL Base 1.0 (Q8_0) + Canny ControlNet", "gpustack/stable-diffusion-xl-base-1.0-GGUF", "f00927e80a399ecb0bcacca868131d5e9d4e77aa", 1, 7877738026ULL, preset_files_10, 3, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE | IMAGE_CAP_CONTROLNET, "init_image_strength", {1024, 1024, 25, 6.0f, "euler_a", ""}, "OpenRAIL++ (model); MIT (SDXL VAE); Apache-2.0 (xinsir Canny ControlNet)", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"flux2-klein-4b-q8-0", "FLUX.2 Klein 4B (Q8_0)", "leejet/FLUX.2-klein-4B-GGUF", "3b1f5a9dc3abb32238b053aeb3d823c30afdacbd", 1, 7134124116ULL, preset_files_11, 3, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE, "reference_image", {1024, 1024, 4, 1.0f, "euler", ""}, "Apache-2.0 (model); FLUX.2-dev non-commercial license (shared VAE)", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"flux2-klein-9b-q4-0", "FLUX.2 Klein 9B (Q4_0)", "leejet/FLUX.2-klein-9B-GGUF", "cc588497a95ffc2937ebbd6b9b3916a11ada6e5b", 1, 10980206100ULL, preset_files_12, 3, IMAGE_CAP_TEXT_TO_IMAGE | IMAGE_CAP_IMAGE_TO_IMAGE, "reference_image", {1024, 1024, 8, 1.0f, "dpm2", ""}, "FLUX Non-Commercial License (model); FLUX.2-dev non-commercial license (shared VAE)", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"flux3-image-klein-q4-k", "FLUX.3 Image Klein (Q4_K)", "leejet/flux-3-image-klein-GGUF", "1c2ad2f9b9247ccca6506a23bdb033fdb0873321", 1, 6347518324ULL, preset_files_13, 3, IMAGE_CAP_TEXT_TO_IMAGE, nullptr, {1024, 1024, 16, 1.0f, "euler", ""}, "FLUX Kommunity License v.1.0; FLUX.2-dev non-commercial license (shared VAE); Qwen3-VL text encoder: Apache-2.0", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"flux3-image-klein-q6-k", "FLUX.3 Image Klein (Q6_K)", "leejet/flux-3-image-klein-GGUF", "1c2ad2f9b9247ccca6506a23bdb033fdb0873321", 1, 7707578740ULL, preset_files_14, 3, IMAGE_CAP_TEXT_TO_IMAGE, nullptr, {896, 896, 16, 1.0f, "euler", ""}, "FLUX Kommunity License v.1.0; FLUX.2-dev non-commercial license (shared VAE); Qwen3-VL text encoder: Apache-2.0", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"z-image-turbo-q4-k", "Z-Image Turbo (Q4_K)", "leejet/Z-Image-Turbo-GGUF", "c61c0e422dc8b541b7548cf33a4ef8302b0f8085", 1, 6696835812ULL, preset_files_15, 3, IMAGE_CAP_TEXT_TO_IMAGE, nullptr, {1024, 1024, 8, 1.0f, "euler", ""}, "Apache-2.0 (model, Qwen3-4B text encoder, and VAE)", nullptr, "PS5SD", "0654534bc7042d9164167835fba67e74215f1617", "docs/CONSOLE.md; ps5/app/catalog.hpp", "experimental"},
+    {"stable-audio-3-small-sfx-vulkan", "Stable Audio 3 Small SFX (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 2, 1683570688ULL, preset_files_16, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"ace-step-1.5-turbo-q8-0", "ACE-Step 1.5 Turbo Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 2, 6244194798ULL, preset_files_17, 15, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"kokoro-82m-vulkan", "Kokoro 82M Vulkan", "blackbearreloaded/ProsperoAI-Kokoro-82M-FP16-PS5", "a06dcbed88d1d04f7653d899e95d025daa55f16d", 3, 167324763ULL, preset_files_18, 28, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"minicpm5-2b-q8-0.gguf", "MiniCPM5 2B Q8_0", "openbmb/MiniCPM5-2B-GGUF", "2079a22f3beaa4e306449978533478fe0522f4b3", 0, 2679710688ULL, preset_files_19, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
 #ifdef PROSPERO_PRISM_RUNTIME
-    {"Ternary-Bonsai-2-27B-PTQ1_0.gguf", "Ternary Bonsai 2 27B PTQ1_0", "prism-ml/Ternary-Bonsai-2-27B-gguf", "b072e1d3b35a0a630cece372c2127528e0994386", 0, 5946648928ULL, preset_files_8, 1},
+    {"Ternary-Bonsai-2-27B-PTQ1_0.gguf", "Ternary Bonsai 2 27B PTQ1_0", "prism-ml/Ternary-Bonsai-2-27B-gguf", "b072e1d3b35a0a630cece372c2127528e0994386", 0, 5946648928ULL, preset_files_20, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
 #endif
-    {"granite-4.0-h-tiny-q4-k-m.gguf", "Granite 4.0 H-Tiny Q4_K_M", "ibm-granite/granite-4.0-h-tiny-GGUF", "08d5a8a9741dd5c1a95d2d39e25253226aa1464e", 0, 4230976352ULL, preset_files_9, 1},
-    {"bohf-12b-moe-3a-q3-k-m.gguf", "BoHF 12B MoE 3A Q3_K_M", "theprint/Bohf-12B-MoE-3A-GGUF", "a0ab1f1455f4bad47f31c8c52f6aec1569699da5", 0, 4703718432ULL, preset_files_10, 1},
-    {"chatterbox-500m-q8-0", "Chatterbox 500M Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 3, 2092546523ULL, preset_files_11, 10},
-    {"yue2-3b-q8-0", "YuE2 3B Q8_0 (Vulkan)", "ngquocvinh/YuE2-3B-GGUF", "9711e46e444185449185914dfb8694e6ce4069c9", 2, 4531984757ULL, preset_files_12, 6},
-    {"sheetsage2-orig", "SheetSage2 Cover (Vulkan)", "audio-cpp/SheetSage2-GGUF", "4e88814450385334524e50df43724af583f74206", 2, 2708224256ULL, preset_files_13, 1},
-    {"htdemucs-q8_0", "HTDemucs Stems Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "661a224e9d9adbd49c01626f85e426f5f425d771", 2, 61940768ULL, preset_files_14, 1},
+    {"granite-4.0-h-tiny-q4-k-m.gguf", "Granite 4.0 H-Tiny Q4_K_M", "ibm-granite/granite-4.0-h-tiny-GGUF", "08d5a8a9741dd5c1a95d2d39e25253226aa1464e", 0, 4230976352ULL, preset_files_21, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"bohf-12b-moe-3a-q3-k-m.gguf", "BoHF 12B MoE 3A Q3_K_M", "theprint/Bohf-12B-MoE-3A-GGUF", "a0ab1f1455f4bad47f31c8c52f6aec1569699da5", 0, 4703718432ULL, preset_files_22, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"chatterbox-500m-q8-0", "Chatterbox 500M Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "f861648c0c1f4da9f18e9a0ce5e217b0679bb2f5", 3, 2092546523ULL, preset_files_23, 10, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"yue2-3b-q8-0", "YuE2 3B Q8_0 (Vulkan)", "ngquocvinh/YuE2-3B-GGUF", "9711e46e444185449185914dfb8694e6ce4069c9", 2, 4531984757ULL, preset_files_24, 6, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"sheetsage2-orig", "SheetSage2 Cover (Vulkan)", "audio-cpp/SheetSage2-GGUF", "4e88814450385334524e50df43724af583f74206", 2, 2708224256ULL, preset_files_25, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"htdemucs-q8_0", "HTDemucs Stems Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "661a224e9d9adbd49c01626f85e426f5f425d771", 2, 61940768ULL, preset_files_26, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
 };
 inline constexpr std::size_t preset_count = sizeof(presets) / sizeof(presets[0]);
 }
