@@ -231,11 +231,14 @@ bool gpt_runtime_model_image_metadata(unsigned index, std::uint32_t *capabilitie
     if (!std::getenv("PROSPERO_TEST_IMAGE_METADATA") || index != 2)
         return false;
     if (capabilities)
-        *capabilities = GPT_IMAGE_CAP_TEXT_TO_IMAGE | GPT_IMAGE_CAP_IMAGE_TO_IMAGE;
+        *capabilities = GPT_IMAGE_CAP_TEXT_TO_IMAGE | GPT_IMAGE_CAP_IMAGE_TO_IMAGE |
+            (std::getenv("PROSPERO_TEST_IMAGE_WORKFLOWS")
+                 ? GPT_IMAGE_CAP_INPAINTING | GPT_IMAGE_CAP_CONTROLNET : 0);
     if (defaults)
         *defaults = {1024, 1024, 10, 6.0f, "dpm++2m", "ays"};
     if (edit_strategy)
-        *edit_strategy = "init_image_strength";
+        *edit_strategy = std::getenv("PROSPERO_TEST_REFERENCE_IMAGE")
+                             ? "reference_image" : "init_image_strength";
     return true;
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
@@ -270,8 +273,36 @@ bool gpt_runtime_delete_model(const char *id)
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *out, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const gpt_runtime_image_options_t *image_options)
 {
+    if (const char *calls_file = std::getenv("PROSPERO_TEST_GENERATE_CALLS_FILE"))
+    {
+        std::ofstream calls(calls_file, std::ios::app);
+        if (image_options)
+            calls << nlohmann::json{{"workflow", image_options->workflow},
+                                    {"width", image_options->width},
+                                    {"height", image_options->height},
+                                    {"steps", image_options->steps},
+                                    {"seed", image_options->seed},
+                                    {"cfg_scale", image_options->cfg_scale},
+                                    {"strength", image_options->strength},
+                                    {"control_strength", image_options->control_strength},
+                                    {"canny", image_options->canny},
+                                    {"negative_prompt", image_options->negative_prompt
+                                        ? image_options->negative_prompt : ""},
+                                    {"sampler", image_options->sampler ? image_options->sampler : ""},
+                                    {"scheduler", image_options->scheduler ? image_options->scheduler : ""},
+                                    {"image_path", image_options->image_path ? image_options->image_path : ""},
+                                    {"mask_path", image_options->mask_path ? image_options->mask_path : ""},
+                                    {"control_image_path", image_options->control_image_path
+                                        ? image_options->control_image_path : ""},
+                                    {"strategy", image_options->image_edit_strategy
+                                        ? image_options->image_edit_strategy : ""}}.dump()
+                   << '\n';
+        else
+            calls << "text\n";
+    }
     if (generation_hook)
         generation_hook();
     if (settings.model_id)
@@ -284,6 +315,25 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
     {
         std::ofstream calls(calls_file, std::ios::app);
         calls << "call\n";
+    }
+    if (image_options)
+    {
+        if (const char *fixture = std::getenv("PROSPERO_TEST_IMAGE_OUTPUT_SOURCE"))
+        {
+            std::ifstream source(fixture, std::ios::binary);
+            std::ofstream generated(std::string(PROSPERO_IMAGE_DIR) + "generated-image.png",
+                                   std::ios::binary);
+            generated << source.rdbuf();
+        }
+        if (std::getenv("PROSPERO_TEST_IMAGE_GENERATE_FAIL"))
+        {
+            std::snprintf(out, capacity, "fixture image generation failure");
+            return 1;
+        }
+        std::snprintf(out, capacity, "Image generated locally.\nPNG: %sgenerated-image.png",
+                      PROSPERO_IMAGE_DIR);
+        *stats = {};
+        return 0;
     }
     if (current_model == 2)
     {
@@ -376,6 +426,7 @@ int main(int argc, char **argv)
         }
 
         const std::string sentinel = image_upload_directory() + ".image-upload-unrelated.upload";
+        const std::string legacy = image_upload_directory() + ".qwen-image-expired.upload";
         {
             std::ofstream marker(sentinel, std::ios::binary);
             marker << "keep";
@@ -384,15 +435,33 @@ int main(int argc, char **argv)
                 finish_image_upload(&leased, true);
                 return 7;
             }
+            std::ofstream old_upload(legacy, std::ios::binary);
+            old_upload << "expired";
+            if (!old_upload)
+            {
+                finish_image_upload(&leased, true);
+                return 7;
+            }
+        }
+        old_times.actime = cleanup_now - 901;
+        old_times.modtime = cleanup_now - 901;
+        if (::utime(legacy.c_str(), &old_times) != 0)
+        {
+            finish_image_upload(&leased, true);
+            ::unlink(sentinel.c_str());
+            ::unlink(legacy.c_str());
+            return 7;
         }
         cleanup_expired_image_uploads(cleanup_now);
         const bool active_file_retained = ::access(path.c_str(), F_OK) == 0;
+        const bool legacy_file_removed = ::access(legacy.c_str(), F_OK) != 0;
         finish_image_upload(&leased, false);
         cleanup_expired_image_uploads(cleanup_now);
         const bool released_file_removed = ::access(path.c_str(), F_OK) != 0;
         const bool unrelated_file_retained = ::access(sentinel.c_str(), F_OK) == 0;
         ::unlink(sentinel.c_str());
-        if (!active_file_retained || !released_file_removed || !unrelated_file_retained)
+        if (!active_file_retained || !legacy_file_removed || !released_file_removed ||
+            !unrelated_file_retained)
             return 8;
         std::cout << "image upload lifecycle: ok\n";
         return 0;

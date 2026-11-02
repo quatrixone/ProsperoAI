@@ -98,6 +98,8 @@ extern "C"
 namespace
 {
 
+std::string image_upload_directory();
+
 char last_net_detail[96] = "";
 std::mutex last_status_mutex;
 char last_status[96] = "";
@@ -361,7 +363,8 @@ bool run_generation(const gpt_runtime_message_t *messages, unsigned message_coun
                     char *response_text, std::size_t response_capacity, unsigned max_tokens = 512,
                     gpt_runtime_stats_t *reported_stats = nullptr, const char *model_id = nullptr,
                     unsigned context_tokens = 0, unsigned batch_tokens = 0,
-                    unsigned ubatch_tokens = 0)
+                    unsigned ubatch_tokens = 0,
+                    const gpt_runtime_image_options_t *image_options = nullptr)
 {
     pthread_mutex_lock(&generation_mutex);
     struct GenerationUnlock {
@@ -379,7 +382,7 @@ bool run_generation(const gpt_runtime_message_t *messages, unsigned message_coun
     settings.ubatch_length = ubatch_tokens;
     gpt_runtime_stats_t stats{};
     const int result = gpt_runtime_generate(messages, message_count, settings, response_text,
-                                            response_capacity, &stats, nullptr);
+                                            response_capacity, &stats, nullptr, image_options);
     if (reported_stats)
         *reported_stats = stats;
     return result == 0;
@@ -649,6 +652,30 @@ static int jobs_thread_join(void *thread)
 // finished the job successfully. With "async":true in the body the
 // generation runs on its own worker thread and the caller polls
 // /api/jobs?id=N instead — no long-held connection anywhere in the flow.
+struct ImageUploadLease;
+void finish_image_upload(ImageUploadLease *lease, bool remove);
+bool acquire_image_upload(const char *id, ImageUploadLease *lease);
+bool valid_image_upload_id(const char *id);
+
+struct ImageUploadLease
+{
+    std::string id;
+    std::string path;
+    bool active = false;
+
+    ImageUploadLease() = default;
+    ImageUploadLease(const ImageUploadLease &) = delete;
+    ImageUploadLease &operator=(const ImageUploadLease &) = delete;
+    void discard() { finish_image_upload(this, true); }
+    ~ImageUploadLease()
+    {
+        if (active)
+            finish_image_upload(this, false);
+    }
+};
+
+struct ImageWorkflowRequest;
+
 struct AsyncJob
 {
     unsigned id = 0;
@@ -658,6 +685,9 @@ struct AsyncJob
     unsigned long long started_ms = 0;
     char model[128] = {};
     void *thread = nullptr;  // join from the poll path; detach is broken
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    std::unique_ptr<ImageWorkflowRequest> image_workflow;
+#endif
 };
 
 std::mutex jobs_mutex;
@@ -809,6 +839,460 @@ std::string audio_workflow_json(const AudioWorkflowRequest &request,
         body["retryable"] = true;
     return body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
+
+struct ImageWorkflowRequest
+{
+    std::string model, prompt, workflow, negative_prompt, sampler, scheduler, strategy;
+    std::string output_session_id;
+    unsigned output_message_index = 0;
+    ImageUploadLease image, mask, guide;
+    gpt_runtime_image_options_t options{};
+};
+
+bool supported_image_sampler(const std::string &name)
+{
+    static const char *const names[] = {
+        "euler", "euler_a", "heun", "dpm2", "dpm++2s_a", "dpm++2m", "dpm++2mv2",
+        "ipndm", "ipndm_v", "lcm", "ddim_trailing", "tcd", "res_multistep", "res_2s",
+        "er_sde", "euler_cfg_pp", "euler_a_cfg_pp", "euler_ge", "dpm++2m_sde",
+        "dpm++2m_sde_bt", "lms"};
+    return std::any_of(std::begin(names), std::end(names),
+                       [&](const char *name_value) { return name == name_value; });
+}
+
+bool supported_image_scheduler(const std::string &name)
+{
+    static const char *const names[] = {
+        "", "discrete", "karras", "exponential", "ays", "gits", "sgm_uniform", "simple",
+        "smoothstep", "kl_optimal", "lcm", "bong_tangent", "ltx2", "logit_normal",
+        "flux2", "flux", "beta", "llada_image"};
+    return std::any_of(std::begin(names), std::end(names),
+                       [&](const char *name_value) { return name == name_value; });
+}
+
+bool image_upload_id_field(const nlohmann::json &workflow, const char *field,
+                           std::string &id, std::string &error)
+{
+    if (!workflow.contains(field))
+        return true;
+    if (!workflow[field].is_string())
+    {
+        error = std::string(field) + " must be an opaque upload ID.";
+        return false;
+    }
+    id = workflow[field].get<std::string>();
+    if (!valid_image_upload_id(id.c_str()))
+    {
+        error = std::string(field) + " is not a valid image upload ID.";
+        return false;
+    }
+    return true;
+}
+
+bool resolve_image_upload(const std::string &id, ImageUploadLease &lease, std::string &error,
+                          unsigned *image_width = nullptr, unsigned *image_height = nullptr)
+{
+    if (id.empty())
+        return true;
+    if (!acquire_image_upload(id.c_str(), &lease))
+    {
+        error = "An image upload ID is expired, unowned, or already in use.";
+        return false;
+    }
+    prospero_image::EncodedFormat format{};
+    unsigned width = 0, height = 0;
+    if (!prospero_image::inspect_file(lease.path.c_str(), &format, &width, &height))
+    {
+        lease.discard();
+        error = "An image upload is corrupt or unsupported.";
+        return false;
+    }
+    if (image_width)
+        *image_width = width;
+    if (image_height)
+        *image_height = height;
+    return true;
+}
+
+bool parse_image_workflow(const nlohmann::json &request,
+                          std::unique_ptr<ImageWorkflowRequest> &parsed, std::string &error)
+{
+    if (!request.is_object() || !request.contains("image_workflow") ||
+        !request["image_workflow"].is_object())
+    {
+        error = "image_workflow must be an object.";
+        return false;
+    }
+    const auto &workflow = request["image_workflow"];
+    auto result = std::make_unique<ImageWorkflowRequest>();
+    const auto string_value = [](const nlohmann::json &object, const char *key,
+                                 std::string &value, std::size_t max_size, bool required,
+                                 std::string &error_message)
+    {
+        if (!object.contains(key))
+        {
+            if (required)
+                error_message = std::string(key) + " is required.";
+            return !required;
+        }
+        if (!object[key].is_string())
+        {
+            error_message = std::string(key) + " must be a string.";
+            return false;
+        }
+        value = object[key].get<std::string>();
+        if (value.size() > max_size || (required && value.empty()))
+        {
+            error_message = std::string(key) + " is empty or too long.";
+            return false;
+        }
+        return true;
+    };
+    if (!string_value(request, "model", result->model, 127, true, error) ||
+        !string_value(request, "prompt", result->prompt, 65535, true, error))
+        return false;
+    unsigned model_index = gpt_runtime_model_count();
+    for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
+        if (result->model == gpt_runtime_model_id(i))
+        {
+            model_index = i;
+            break;
+        }
+    std::uint32_t capabilities = 0;
+    gpt_runtime_image_defaults_t defaults{};
+    const char *strategy = nullptr;
+    if (model_index == gpt_runtime_model_count() ||
+        std::strcmp(gpt_runtime_model_purpose(model_index), "text-to-image") != 0 ||
+        !gpt_runtime_model_image_metadata(model_index, &capabilities, &defaults, &strategy))
+    {
+        error = "The requested model does not support image workflows.";
+        return false;
+    }
+    result->strategy = strategy ? strategy : "";
+    if (!string_value(workflow, "workflow", result->workflow, 32, true, error))
+        return false;
+    std::uint32_t required_capability = 0;
+    if (result->workflow == "text_to_image")
+        required_capability = GPT_IMAGE_CAP_TEXT_TO_IMAGE;
+    else if (result->workflow == "image_to_image")
+        required_capability = GPT_IMAGE_CAP_IMAGE_TO_IMAGE;
+    else if (result->workflow == "inpainting")
+        required_capability = GPT_IMAGE_CAP_INPAINTING;
+    else if (result->workflow == "controlnet")
+        required_capability = GPT_IMAGE_CAP_CONTROLNET;
+    else
+    {
+        error = "Unsupported image workflow.";
+        return false;
+    }
+    if (!(capabilities & required_capability))
+    {
+        error = "The requested model does not support this image workflow.";
+        return false;
+    }
+
+    const auto unsigned_field = [&](const char *key, unsigned fallback, unsigned *value)
+    {
+        if (!workflow.contains(key))
+        {
+            *value = fallback;
+            return true;
+        }
+        const auto &field = workflow[key];
+        if (!field.is_number_integer())
+        {
+            error = std::string(key) + " must be a non-negative integer.";
+            return false;
+        }
+        if (field.is_number_unsigned())
+        {
+            const auto number = field.get<std::uint64_t>();
+            if (number > UINT_MAX)
+            {
+                error = std::string(key) + " must be a non-negative integer.";
+                return false;
+            }
+            *value = static_cast<unsigned>(number);
+        }
+        else
+        {
+            const auto number = field.get<std::int64_t>();
+            if (number < 0 || number > UINT_MAX)
+            {
+                error = std::string(key) + " must be a non-negative integer.";
+                return false;
+            }
+            *value = static_cast<unsigned>(number);
+        }
+        return true;
+    };
+    unsigned width = defaults.width, height = defaults.height;
+    if (workflow.contains("width") != workflow.contains("height"))
+    {
+        error = "width and height must be supplied together.";
+        return false;
+    }
+    if (!unsigned_field("width", defaults.width, &width) ||
+        !unsigned_field("height", defaults.height, &height) ||
+        !unsigned_field("steps", defaults.steps, &result->options.steps))
+        return false;
+    if (width < 256 || width > 1536 || height < 256 || height > 1536 || width % 64 ||
+        height % 64 || static_cast<std::uint64_t>(width) * height > 1048576 ||
+        result->options.steps < 1 || result->options.steps > 50)
+    {
+        error = "Image dimensions must be 256–1536, multiples of 64, and at most 1,048,576 pixels; steps must be 1–50.";
+        return false;
+    }
+    result->options.width = width;
+    result->options.height = height;
+    result->options.seed = -1;
+    if (workflow.contains("seed"))
+    {
+        const auto &seed = workflow["seed"];
+        if (!seed.is_number_integer())
+        {
+            error = "seed must be -1 or an integer from 0 to 4,294,967,295.";
+            return false;
+        }
+        if (seed.is_number_unsigned())
+        {
+            const auto value = seed.get<std::uint64_t>();
+            if (value > 4294967295ULL)
+            {
+                error = "seed must be -1 or an integer from 0 to 4,294,967,295.";
+                return false;
+            }
+            result->options.seed = static_cast<std::int64_t>(value);
+        }
+        else
+        {
+            const auto value = seed.get<std::int64_t>();
+            if (value < -1 || value > 4294967295LL)
+            {
+                error = "seed must be -1 or an integer from 0 to 4,294,967,295.";
+                return false;
+            }
+            result->options.seed = value;
+        }
+    }
+    const auto float_field = [&](const char *key, float fallback, float minimum, float maximum,
+                                 float *value)
+    {
+        if (!workflow.contains(key))
+        {
+            *value = fallback;
+            return true;
+        }
+        const auto &field = workflow[key];
+        if (!field.is_number())
+        {
+            error = std::string(key) + " must be a number.";
+            return false;
+        }
+        const double number = field.get<double>();
+        if (!std::isfinite(number) || number < minimum || number > maximum)
+        {
+            error = std::string(key) + " is out of range.";
+            return false;
+        }
+        *value = static_cast<float>(number);
+        return true;
+    };
+    if (!float_field("cfg_scale", defaults.cfg_scale, 0, 20, &result->options.cfg_scale) ||
+        !float_field("strength", -1, 0, 1, &result->options.strength) ||
+        !float_field("control_strength", -1, 0, 2, &result->options.control_strength))
+        return false;
+    if (result->strategy == "reference_image" && workflow.contains("strength"))
+    {
+        error = "This model uses reference images and does not accept strength.";
+        return false;
+    }
+    if (result->workflow != "image_to_image" && result->workflow != "inpainting" &&
+        workflow.contains("strength"))
+    {
+        error = "strength is only valid for image editing workflows.";
+        return false;
+    }
+    if (result->workflow != "controlnet" && workflow.contains("control_strength"))
+    {
+        error = "control_strength is only valid for ControlNet.";
+        return false;
+    }
+    if (!string_value(workflow, "negative_prompt", result->negative_prompt, 4096, false, error) ||
+        !string_value(workflow, "sampler", result->sampler, 64, false, error) ||
+        !string_value(workflow, "scheduler", result->scheduler, 64, false, error))
+        return false;
+    if (!workflow.contains("sampler"))
+        result->sampler = defaults.sampler ? defaults.sampler : "";
+    if (!workflow.contains("scheduler"))
+        result->scheduler = defaults.scheduler ? defaults.scheduler : "";
+    if (!supported_image_sampler(result->sampler) || !supported_image_scheduler(result->scheduler))
+    {
+        error = "sampler or scheduler is not supported by the pinned image runtime.";
+        return false;
+    }
+    if (workflow.contains("canny") && !workflow["canny"].is_boolean())
+    {
+        error = "canny must be a boolean.";
+        return false;
+    }
+    result->options.canny = workflow.value("canny", false);
+    if (result->options.canny && result->workflow != "controlnet")
+    {
+        error = "canny preprocessing is only valid for ControlNet.";
+        return false;
+    }
+
+    std::string image_id, mask_id, guide_id;
+    if (!image_upload_id_field(workflow, "image_id", image_id, error) ||
+        !image_upload_id_field(workflow, "mask_id", mask_id, error) ||
+        !image_upload_id_field(workflow, "guide_id", guide_id, error))
+        return false;
+    const bool needs_image = result->workflow == "image_to_image" || result->workflow == "inpainting";
+    const bool needs_mask = result->workflow == "inpainting";
+    const bool needs_guide = result->workflow == "controlnet";
+    if ((needs_image != !image_id.empty()) || (needs_mask != !mask_id.empty()) ||
+        (needs_guide != !guide_id.empty()))
+    {
+        error = needs_mask ? "inpainting requires image_id and mask_id."
+                : needs_guide ? "controlnet requires guide_id."
+                : needs_image ? "image_to_image requires image_id."
+                              : "This workflow does not accept image, mask, or guide IDs.";
+        return false;
+    }
+    unsigned image_width = 0, image_height = 0, mask_width = 0, mask_height = 0;
+    if (!resolve_image_upload(image_id, result->image, error, &image_width, &image_height) ||
+        !resolve_image_upload(mask_id, result->mask, error, &mask_width, &mask_height) ||
+        !resolve_image_upload(guide_id, result->guide, error))
+        return false;
+    if (needs_mask && (image_width != mask_width || image_height != mask_height))
+    {
+        error = "The input image and inpainting mask must have matching dimensions.";
+        return false;
+    }
+
+    if (request.contains("output_session_id"))
+    {
+        if (!request["output_session_id"].is_string())
+        {
+            error = "output_session_id is invalid.";
+            return false;
+        }
+        result->output_session_id = request["output_session_id"].get<std::string>();
+        if (result->output_session_id.find('\0') != std::string::npos ||
+            !prospero_session::valid_id(result->output_session_id.c_str()))
+        {
+            error = "output_session_id is invalid.";
+            return false;
+        }
+        if (request.contains("output_message_index"))
+        {
+            const auto &index = request["output_message_index"];
+            if (!index.is_number_integer() || index.get<long long>() < 0 ||
+                index.get<long long>() >= prospero_session::MessageCapacity)
+            {
+                error = "output_message_index is invalid.";
+                return false;
+            }
+            result->output_message_index = static_cast<unsigned>(index.get<unsigned>());
+        }
+        prospero_session::Record records[prospero_session::CatalogCapacity]{};
+        const unsigned record_count = prospero_session::scan(records,
+                                                              prospero_session::CatalogCapacity);
+        const auto record = std::find_if(records, records + record_count, [&](const auto &entry)
+        {
+            return result->output_session_id == entry.id;
+        });
+        if (record == records + record_count ||
+            result->output_message_index >= record->message_count)
+        {
+            error = "output_session_id or output_message_index does not identify a saved conversation message.";
+            return false;
+        }
+    }
+    else if (request.contains("output_message_index"))
+    {
+        error = "output_message_index requires output_session_id.";
+        return false;
+    }
+    result->options.workflow = result->workflow.c_str();
+    result->options.negative_prompt = result->negative_prompt.c_str();
+    result->options.sampler = result->sampler.c_str();
+    result->options.scheduler = result->scheduler.c_str();
+    result->options.image_path = result->image.active ? result->image.path.c_str() : nullptr;
+    result->options.mask_path = result->mask.active ? result->mask.path.c_str() : nullptr;
+    result->options.control_image_path = result->guide.active ? result->guide.path.c_str() : nullptr;
+    result->options.image_edit_strategy = result->strategy.c_str();
+    parsed = std::move(result);
+    return true;
+}
+
+void discard_image_uploads(ImageWorkflowRequest &request)
+{
+    request.image.discard();
+    request.mask.discard();
+    request.guide.discard();
+}
+
+std::string generate_image_workflow_json(ImageWorkflowRequest &request)
+{
+    const gpt_runtime_message_t message{"user", request.prompt.c_str()};
+    std::vector<char> output(kResponseTextCapacity);
+    gpt_runtime_stats_t stats{};
+    bool ok = run_generation(&message, 1, output.data(), output.size(),
+                             prospero_generation::MaxOutputTokens, &stats,
+                             request.model.c_str(), 0, 0, 0, &request.options);
+    discard_image_uploads(request);
+    std::string response = ok ? output.data() : "";
+    std::string image_path;
+    const std::string marker = "PNG: ";
+    const std::size_t path_start = response.find(marker);
+    if (ok && path_start != std::string::npos)
+    {
+        const std::size_t begin = path_start + marker.size();
+        const std::size_t end = response.find('\n', begin);
+        image_path = response.substr(begin, end == std::string::npos ? end : end - begin);
+        const std::string image_root = image_upload_directory();
+        struct stat image_info{};
+        if (image_path.compare(0, image_root.size(), image_root) != 0 ||
+            image_path.size() < 4 || image_path.compare(image_path.size() - 4, 4, ".png") != 0 ||
+            ::stat(image_path.c_str(), &image_info) != 0 || !S_ISREG(image_info.st_mode))
+        {
+            ok = false;
+            response = "Image generation output is outside the image work directory.";
+            image_path.clear();
+        }
+        if (ok)
+        {
+            if (request.output_session_id.empty() ||
+                !prospero_session::archive_media(request.output_session_id.c_str(),
+                                                 request.output_message_index, "image",
+                                                 image_path.c_str(), output.data(), output.size()))
+            {
+                if (!request.output_session_id.empty())
+                    response += "\nArchive warning: generated file retained at " + image_path;
+            }
+            else
+            {
+                response.replace(begin, image_path.size(), output.data());
+                image_path = output.data();
+            }
+        }
+    }
+    else if (ok)
+    {
+        ok = false;
+        response = "Image generation did not return an output PNG path.";
+    }
+    nlohmann::json result = {{"model", request.model}, {"response", response}, {"done", true}};
+    if (!image_path.empty())
+        result["image_path"] = image_path;
+    if (!ok)
+        result["error"] = !response.empty() ? response
+                            : output.data()[0] ? output.data()
+                                               : "image generation failed.";
+    return result.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
 #endif
 
 // Builds exactly the JSON that the synchronous /api/generate would send.
@@ -877,10 +1361,25 @@ void *generate_job_worker(void *argument)
     std::string result;
     try
     {
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+        if (job->image_workflow)
+        {
+            result = generate_image_workflow_json(*job->image_workflow);
+            job->image_workflow.reset();
+        }
+        else
+#endif
         result = generate_response_json(job->body.c_str());
     }
     catch (...)
     {
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+        if (job->image_workflow)
+        {
+            discard_image_uploads(*job->image_workflow);
+            job->image_workflow.reset();
+        }
+#endif
         result = "{\"done\":false,\"error\":\"job worker threw\"}";
     }
     {
@@ -947,6 +1446,36 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
 {
     const auto request = nlohmann::json::parse(request_body, nullptr, false);
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    if (request.is_discarded())
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"invalid JSON request\"}");
+        return;
+    }
+    if (request.is_object() && request.contains("async") && !request["async"].is_boolean())
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"async must be a boolean.\"}");
+        return;
+    }
+    std::unique_ptr<ImageWorkflowRequest> image_request;
+    const bool has_image_workflow = request.is_object() && request.contains("image_workflow");
+    if (has_image_workflow && request.contains("audio_workflow"))
+    {
+        send_status(api, sock, "400 Bad Request", "application/json",
+                    "{\"error\":\"Only one generation workflow may be specified.\"}");
+        return;
+    }
+    if (has_image_workflow)
+    {
+        std::string error;
+        if (!parse_image_workflow(request, image_request, error))
+        {
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        nlohmann::json{{"error", error}}.dump().c_str());
+            return;
+        }
+    }
     AudioWorkflowRequest audio_request;
     const bool has_audio_workflow = request.is_object() && request.contains("audio_workflow");
     if (has_audio_workflow)
@@ -979,6 +1508,13 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
         auto job = std::make_unique<AsyncJob>();
         job->body = request_body;
         json_find_string(request_body, "model", job->model, sizeof(job->model));
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+        if (image_request)
+        {
+            std::snprintf(job->model, sizeof(job->model), "%s", image_request->model.c_str());
+            job->image_workflow = std::move(image_request);
+        }
+#endif
         job->id = ++job_seq;
         job->started_ms = jobs_now_ms();
         AsyncJob *raw = job.get();
@@ -989,6 +1525,9 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
             raw->thread = nullptr;
             raw->state = 2;
             raw->result = "{\"done\":false,\"error\":\"job thread spawn failed\"}";
+#if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+            raw->image_workflow.reset();
+#endif
         }
         char out[64];
         std::snprintf(out, sizeof(out), "{\"job_id\":%u}", raw->id);
@@ -1002,6 +1541,15 @@ void handle_generate(const NetApi &api, int sock, const char *request_body)
         const auto response = audio_workflow_json(audio_request, result);
         send_status(api, sock, result.ok ? "200 OK" : result.retryable ? "409 Conflict"
                                                                         : "400 Bad Request",
+                    "application/json", response.c_str());
+        return;
+    }
+    if (image_request)
+    {
+        const std::string response = generate_image_workflow_json(*image_request);
+        const auto result = nlohmann::json::parse(response, nullptr, false);
+        send_status(api, sock,
+                    result.is_object() && result.contains("error") ? "502 Bad Gateway" : "200 OK",
                     "application/json", response.c_str());
         return;
     }
@@ -1086,27 +1634,6 @@ void handle_chat(const NetApi &api, int sock, const char *request_body)
     }
 #endif
 }
-
-struct ImageUploadLease;
-void finish_image_upload(ImageUploadLease *lease, bool remove);
-bool acquire_image_upload(const char *id, ImageUploadLease *lease);
-bool valid_image_upload_id(const char *id);
-
-struct ImageUploadLease
-{
-    std::string id;
-    std::string path;
-    bool active = false;
-
-    ImageUploadLease() = default;
-    ImageUploadLease(const ImageUploadLease &) = delete;
-    ImageUploadLease &operator=(const ImageUploadLease &) = delete;
-    ~ImageUploadLease()
-    {
-        if (active)
-            finish_image_upload(this, false);
-    }
-};
 
 #include "openai_api.inc"
 
@@ -1422,16 +1949,21 @@ void cleanup_expired_image_uploads(std::time_t now)
     if (!entries)
         return;
     constexpr char Prefix[] = ".image-upload-";
+    constexpr char LegacyPrefix[] = ".qwen-image-";
     constexpr char Suffix[] = ".upload";
     while (const dirent *entry = ::readdir(entries))
     {
         const std::string name = entry->d_name;
-        if (name.size() != sizeof(Prefix) - 1 + 32 + sizeof(Suffix) - 1 ||
-            name.compare(0, sizeof(Prefix) - 1, Prefix) != 0 ||
+        const bool current_upload =
+            name.size() == sizeof(Prefix) - 1 + 32 + sizeof(Suffix) - 1 &&
+            name.compare(0, sizeof(Prefix) - 1, Prefix) == 0;
+        const bool legacy_upload = name.size() > sizeof(LegacyPrefix) - 1 + sizeof(Suffix) - 1 &&
+            name.compare(0, sizeof(LegacyPrefix) - 1, LegacyPrefix) == 0;
+        if ((!current_upload && !legacy_upload) ||
             name.compare(name.size() - (sizeof(Suffix) - 1), sizeof(Suffix) - 1, Suffix) != 0)
             continue;
-        const std::string id = name.substr(sizeof(Prefix) - 1, 32);
-        if (!valid_image_upload_id(id.c_str()) || active_image_upload_ids.count(id))
+        const std::string id = current_upload ? name.substr(sizeof(Prefix) - 1, 32) : std::string();
+        if (current_upload && (!valid_image_upload_id(id.c_str()) || active_image_upload_ids.count(id)))
             continue;
         const std::string path = directory + name;
         struct stat info
@@ -2743,6 +3275,19 @@ void handle_media_file(const NetApi &api, int sock, const char *path, const char
 nlohmann::json list_saved_media()
 {
     std::map<std::string, nlohmann::json> media;
+    const auto add_path = [&media](const std::string &path,
+                                   const prospero_session::Record &record)
+    {
+        const bool image = path.size() >= 4 &&
+                           (path.compare(path.size() - 4, 4, ".png") == 0 ||
+                            path.compare(path.size() - 4, 4, ".tga") == 0);
+        const bool audio = path.size() >= 4 && path.compare(path.size() - 4, 4, ".wav") == 0;
+        if ((image || audio) && media_path_allowed(path))
+            media.emplace(path, nlohmann::json{{"path", path},
+                {"kind", image ? "image" : "audio"}, {"conversation_id", record.id},
+                {"title", record.title}, {"model", record.model_id},
+                {"modelName", record.model_name}});
+    };
     prospero_session::Record records[prospero_session::CatalogCapacity]{};
     const unsigned count = prospero_session::scan(records, prospero_session::CatalogCapacity);
     for (unsigned i = 0; i < count; ++i)
@@ -2766,18 +3311,12 @@ nlohmann::json list_saved_media()
                                     content[end - 1] == '.' || content[end - 1] == ';'))
                     --end;
                 const std::string path = content.substr(at, end - at);
-                const bool image = path.size() >= 4 &&
-                                   (path.compare(path.size() - 4, 4, ".png") == 0 ||
-                                    path.compare(path.size() - 4, 4, ".tga") == 0);
-                const bool audio = path.size() >= 4 &&
-                                   (path.compare(path.size() - 4, 4, ".wav") == 0);
-                if ((image || audio) && media_path_allowed(path))
-                    media.emplace(path, nlohmann::json{{"path", path},
-                        {"kind", image ? "image" : "audio"}, {"conversation_id", record.id},
-                        {"title", record.title}, {"model", record.model_id},
-                        {"modelName", record.model_name}});
+                add_path(path, record);
                 at = std::max(end, at + 1);
             }
+            std::string output_path;
+            if (prospero_session::read_output_reference(record.id, message_index, &output_path))
+                add_path(output_path, record);
         }
     }
     nlohmann::json data = nlohmann::json::array();

@@ -39,6 +39,7 @@ struct GenerationRequest
     std::size_t output_capacity;
     gpt_runtime_stats_t *stats;
     gpt_runtime_progress_fn progress;
+    const gpt_runtime_image_options_t *image_options = nullptr;
 };
 
 struct Adapter

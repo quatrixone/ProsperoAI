@@ -516,7 +516,8 @@ int gpt_runtime_prepare()
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *output, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const gpt_runtime_image_options_t *image_options)
 {
     if (!messages || !count || !output || !capacity)
         return 1;
@@ -557,7 +558,8 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         ~GenerationCounterGuard() { active_generations.fetch_sub(1, std::memory_order_acq_rel); }
     } generation_guard;
     const int result = adapter->generate(
-        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress});
+        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress,
+                          image_options});
     note_inference_activity();
     return result;
 }

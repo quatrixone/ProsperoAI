@@ -60,6 +60,8 @@ class HttpApiTests(unittest.TestCase):
         self.audio_calls_file.unlink(missing_ok=True)
         self.image_calls_file = Path(self.scratch.name) / "image-calls.txt"
         self.image_calls_file.unlink(missing_ok=True)
+        self.generate_calls_file = Path(self.scratch.name) / "generate-calls.txt"
+        self.generate_calls_file.unlink(missing_ok=True)
         for path in self.image_dir.iterdir():
             path.unlink()
 
@@ -241,6 +243,184 @@ class HttpApiTests(unittest.TestCase):
         result = subprocess.run([str(self.binary), "--test-image-upload-lifecycle"],
                                 check=True, capture_output=True, text=True)
         self.assertIn("image upload lifecycle: ok", result.stdout)
+
+    def test_image_workflow_requires_owned_source_before_runtime(self):
+        header, body = self.request("/api/generate", {
+            "model": "sdxl-base-q8-0", "prompt": "turn this into a painting",
+            "image_workflow": {"workflow": "image_to_image", "strength": 0.5},
+        }, environment={
+            "PROSPERO_TEST_IMAGE_METADATA": "1",
+            "PROSPERO_TEST_GENERATE_CALLS_FILE": str(self.generate_calls_file),
+        })
+        self.assertIn("400 Bad Request", header)
+        self.assertIn("image_id", json.loads(body)["error"])
+        self.assertFalse(self.generate_calls_file.exists())
+
+    def image_workflow_environment(self, **extra):
+        return {
+            "PROSPERO_TEST_IMAGE_METADATA": "1",
+            "PROSPERO_TEST_IMAGE_WORKFLOWS": "1",
+            "PROSPERO_TEST_GENERATE_CALLS_FILE": str(self.generate_calls_file),
+            "PROSPERO_TEST_IMAGE_OUTPUT_SOURCE": str(ROOT / "tests/fixtures/one-pixel.png"),
+            **extra,
+        }
+
+    def test_image_workflows_forward_fields_and_consume_leases(self):
+        environment = self.image_workflow_environment()
+        cases = [
+            ({"workflow": "text_to_image", "width": 768, "height": 1024, "steps": 17,
+              "seed": -1, "cfg_scale": 2.5, "negative_prompt": "no text",
+              "sampler": "heun", "scheduler": "karras"}, None),
+            ({"workflow": "image_to_image", "strength": 0.4, "seed": 4294967295,
+              "cfg_scale": 20}, "image_id"),
+            ({"workflow": "inpainting", "strength": 0.65}, ("image_id", "mask_id")),
+            ({"workflow": "controlnet", "control_strength": 1.7, "canny": True},
+             "guide_id"),
+        ]
+        forwarded = []
+        for workflow, upload_fields in cases:
+            body = {"model": "sdxl-base-q8-0", "prompt": "a mountain at dawn",
+                    "image_workflow": workflow}
+            upload_ids = []
+            if isinstance(upload_fields, str):
+                upload_ids.append((upload_fields, self.upload_image()[0]))
+            elif isinstance(upload_fields, tuple):
+                upload_ids.extend((field, self.upload_image()[0]) for field in upload_fields)
+            body["image_workflow"].update(upload_ids)
+            head, response = self.request("/api/generate", body, environment=environment)
+            self.assertIn("200 OK", head)
+            result = json.loads(response)
+            self.assertTrue(result["done"])
+            self.assertTrue(Path(result["image_path"]).is_file())
+            if upload_ids:
+                for _, image_id in upload_ids:
+                    self.assertFalse((self.image_dir / f".image-upload-{image_id}.upload").exists())
+            forwarded.append(json.loads(self.generate_calls_file.read_text().splitlines()[-1]))
+
+        self.assertEqual([item["workflow"] for item in forwarded],
+                         ["text_to_image", "image_to_image", "inpainting", "controlnet"])
+        self.assertEqual((forwarded[0]["width"], forwarded[0]["height"], forwarded[0]["steps"]),
+                         (768, 1024, 17))
+        self.assertEqual(forwarded[0]["seed"], -1)
+        self.assertEqual(forwarded[0]["sampler"], "heun")
+        self.assertEqual(forwarded[0]["scheduler"], "karras")
+        self.assertAlmostEqual(forwarded[1]["strength"], 0.4)
+        self.assertEqual(forwarded[1]["seed"], 4294967295)
+        self.assertEqual(forwarded[1]["cfg_scale"], 20.0)
+        self.assertTrue(forwarded[1]["image_path"].endswith(".upload"))
+        self.assertTrue(forwarded[2]["mask_path"].endswith(".upload"))
+        self.assertAlmostEqual(forwarded[3]["control_strength"], 1.7)
+        self.assertTrue(forwarded[3]["canny"])
+
+    def test_image_workflow_rejects_bounds_capabilities_and_invalid_uploads_before_runtime(self):
+        image_id, image_path = self.upload_image()
+        base = {"model": "sdxl-base-q8-0", "prompt": "valid prompt",
+                "image_workflow": {"workflow": "image_to_image", "image_id": image_id}}
+        invalid_workflows = [
+            {"width": 255}, {"width": 1024}, {"width": 1024, "height": 1088},
+            {"width": 1536, "height": 1536},
+            {"steps": 0}, {"steps": 51}, {"seed": -2}, {"seed": 4294967296},
+            {"seed": 1.5}, {"cfg_scale": -0.1}, {"cfg_scale": 20.1},
+            {"strength": -0.1}, {"strength": 1.1}, {"sampler": "unknown"},
+            {"scheduler": "unknown"},
+        ]
+        for invalid in invalid_workflows:
+            with self.subTest(invalid=invalid):
+                self.generate_calls_file.unlink(missing_ok=True)
+                body = json.loads(json.dumps(base))
+                body["image_workflow"].update(invalid)
+                head, response = self.request("/api/generate", body, environment={
+                    "PROSPERO_TEST_IMAGE_METADATA": "1",
+                    "PROSPERO_TEST_GENERATE_CALLS_FILE": str(self.generate_calls_file),
+                })
+                self.assertIn("400 Bad Request", head)
+                self.assertIn("error", json.loads(response))
+                self.assertFalse(self.generate_calls_file.exists())
+
+        for workflow in (
+            {"workflow": "controlnet", "guide_id": image_id},
+            {"workflow": "inpainting", "image_id": image_id, "mask_id": image_id},
+        ):
+            head, _ = self.request("/api/generate", {**base, "image_workflow": workflow},
+                                   environment={"PROSPERO_TEST_IMAGE_METADATA": "1"})
+            self.assertIn("400 Bad Request", head)
+
+        for workflow, expected in (({"workflow": "inpainting"}, "image_id and mask_id"),
+                                   ({"workflow": "controlnet"}, "guide_id")):
+            head, response = self.request("/api/generate", {**base, "image_workflow": workflow},
+                environment={"PROSPERO_TEST_IMAGE_METADATA": "1",
+                             "PROSPERO_TEST_IMAGE_WORKFLOWS": "1"})
+            self.assertIn("400 Bad Request", head)
+            self.assertIn(expected, json.loads(response)["error"])
+
+        body = {**base, "image_workflow": {"workflow": "image_to_image",
+                                           "image_id": "0" * 32}}
+        self.assertIn("400 Bad Request", self.request("/api/generate", body,
+            environment={"PROSPERO_TEST_IMAGE_METADATA": "1"})[0])
+        self.assertTrue(image_path.exists())
+
+        corrupt_id = "f" * 32
+        corrupt_path = self.image_dir / f".image-upload-{corrupt_id}.upload"
+        corrupt_path.write_bytes(b"not a decodable image")
+        body["image_workflow"]["image_id"] = corrupt_id
+        self.assertIn("400 Bad Request", self.request("/api/generate", body,
+            environment={"PROSPERO_TEST_IMAGE_METADATA": "1"})[0])
+        self.assertFalse(corrupt_path.exists())
+
+        expired_id, expired_path = self.upload_image()
+        os.utime(expired_path, (1, 1))
+        body["image_workflow"]["image_id"] = expired_id
+        self.assertIn("400 Bad Request", self.request("/api/generate", body,
+            environment={"PROSPERO_TEST_IMAGE_METADATA": "1"})[0])
+        self.assertFalse(expired_path.exists())
+
+    def test_reference_image_models_reject_strength_and_failed_generation_discards_lease(self):
+        image_id, image_path = self.upload_image()
+        body = {"model": "sdxl-base-q8-0", "prompt": "edit",
+                "image_workflow": {"workflow": "image_to_image", "image_id": image_id,
+                                   "strength": 0.5}}
+        head, response = self.request("/api/generate", body, environment={
+            "PROSPERO_TEST_IMAGE_METADATA": "1", "PROSPERO_TEST_REFERENCE_IMAGE": "1",
+            "PROSPERO_TEST_GENERATE_CALLS_FILE": str(self.generate_calls_file),
+        })
+        self.assertIn("400 Bad Request", head)
+        self.assertIn("strength", json.loads(response)["error"])
+        self.assertFalse(self.generate_calls_file.exists())
+        self.assertTrue(image_path.exists())
+
+        body["image_workflow"].pop("strength")
+        head, response = self.request("/api/generate", body, environment={
+            **self.image_workflow_environment(), "PROSPERO_TEST_IMAGE_GENERATE_FAIL": "1",
+        })
+        self.assertIn("502 Bad Gateway", head)
+        self.assertIn("fixture image generation failure", json.loads(response)["error"])
+        self.assertFalse(image_path.exists())
+
+    def test_image_workflow_archives_output_and_async_jobs_complete(self):
+        session_id = "image-workflow-archive"
+        self.save_conversation_with_image(session_id)
+        try:
+            head, body = self.request("/api/generate", {
+                "model": "sdxl-base-q8-0", "prompt": "gallery output",
+                "image_workflow": {"workflow": "text_to_image"},
+                "output_session_id": session_id, "output_message_index": 0,
+            }, environment=self.image_workflow_environment())
+            self.assertIn("200 OK", head)
+            archived = json.loads(body)["image_path"]
+            self.assertTrue(Path(archived).is_file())
+            media = json.loads(self.request("/api/media")[1])["data"]
+            self.assertIn(archived, {item["path"] for item in media})
+
+            _, polled = self.request_audio_job_with_poll({
+                "async": True, "model": "sdxl-base-q8-0", "prompt": "async image",
+                "image_workflow": {"workflow": "text_to_image"},
+            }, environment=self.image_workflow_environment())
+            self.assertEqual(polled["state"], "done")
+            self.assertTrue(polled["result"]["done"])
+            self.assertTrue(Path(polled["result"]["image_path"]).is_file())
+        finally:
+            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                         headers=["Authorization: Bearer secret"])
 
     def upload_image(self):
         payload = (ROOT / "tests/fixtures/one-pixel.jpg").read_bytes()

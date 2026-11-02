@@ -1,8 +1,10 @@
 #include "runtime_residency.hpp"
 #include "runtime_settings.hpp"
+#include "../../../include/gpt_runtime.hpp"
 #include "ggml-vulkan.h"
 static_assert(GGML_MAX_NAME == 160, "SD and llama must share the tensor ABI");
 #include "stable-diffusion.h"
+#include "../../../include/image_codec.hpp"
 #include "../../../include/generated_output_path.hpp"
 #include "../../../include/model_paths.hpp"
 #include "../../../third_party/miniz/miniz_tdef.h"
@@ -15,6 +17,7 @@ static_assert(GGML_MAX_NAME == 160, "SD and llama must share the tensor ABI");
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -188,6 +191,77 @@ bool write_png(const char *path, const sd_image_t &image)
     return complete && closed;
 }
 
+struct DecodedInput
+{
+    prospero_image::DecodedImage image{};
+    ~DecodedInput() { prospero_image::free_image(&image); }
+    bool load(const char *path)
+    {
+        return path && prospero_image::decode_file_rgba(path, &image);
+    }
+    sd_image_t sd_image() const
+    {
+        return {image.width, image.height, image.channels, image.pixels};
+    }
+};
+
+bool valid_image_options(const gpt_runtime_image_options_t *options, bool flux2_klein)
+{
+    if (!options)
+        return true;
+    if (!options->workflow || !options->image_edit_strategy || options->width < 256 ||
+        options->height < 256 || options->width > 1536 || options->height > 1536 ||
+        options->width % 64 || options->height % 64 ||
+        static_cast<std::uint64_t>(options->width) * options->height > 1048576 ||
+        options->steps < 1 || options->steps > 50 || options->seed < -1 ||
+        options->seed > 4294967295LL || !std::isfinite(options->cfg_scale) ||
+        options->cfg_scale < 0 || options->cfg_scale > 20)
+        return false;
+    const bool text_to_image = std::strcmp(options->workflow, "text_to_image") == 0;
+    const bool image_to_image = std::strcmp(options->workflow, "image_to_image") == 0;
+    const bool inpainting = std::strcmp(options->workflow, "inpainting") == 0;
+    const bool controlnet = std::strcmp(options->workflow, "controlnet") == 0;
+    if (!(text_to_image || image_to_image || inpainting || controlnet))
+        return false;
+    if (image_to_image && !options->image_path)
+        return false;
+    if (inpainting && (!options->image_path || !options->mask_path))
+        return false;
+    if (controlnet && !options->control_image_path)
+        return false;
+    if ((text_to_image && (options->image_path || options->mask_path || options->control_image_path)) ||
+        (image_to_image && (options->mask_path || options->control_image_path)) ||
+        (inpainting && options->control_image_path) ||
+        (controlnet && (options->image_path || options->mask_path)))
+        return false;
+    if (options->strength != -1 &&
+        (!std::isfinite(options->strength) || options->strength < 0 || options->strength > 1 ||
+         std::strcmp(options->image_edit_strategy, "init_image_strength") != 0))
+        return false;
+    if (image_to_image && std::strcmp(options->image_edit_strategy, "init_image_strength") != 0 &&
+        std::strcmp(options->image_edit_strategy, "reference_image") != 0)
+        return false;
+    if (std::strcmp(options->image_edit_strategy, "reference_image") == 0 && !flux2_klein)
+        return false;
+    if (flux2_klein && std::strcmp(options->image_edit_strategy, "reference_image") != 0)
+        return false;
+    if (options->control_strength != -1 &&
+        (!std::isfinite(options->control_strength) || options->control_strength < 0 ||
+         options->control_strength > 2))
+        return false;
+    if (controlnet && std::strcmp(options->image_edit_strategy, "init_image_strength") != 0)
+        return false;
+    if (options->canny && !controlnet)
+        return false;
+    if (options->sampler && *options->sampler &&
+        str_to_sample_method(options->sampler) == SAMPLE_METHOD_COUNT)
+        return false;
+    if (options->scheduler && *options->scheduler &&
+        str_to_scheduler(options->scheduler) == SCHEDULER_COUNT)
+        return false;
+    return true;
+}
+
 void release_context()
 {
     prospero_runtime::set_model_resident(false);
@@ -291,6 +365,7 @@ extern "C" void ps5_sd_shutdown()
 
 extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *response,
                                std::size_t response_capacity, std::uint64_t *elapsed_microseconds,
+                               const gpt_runtime_image_options_t *image_options,
                                void (*progress)(const char *))
 {
     constexpr char oracle_output[] = "/download0/ProsperoAI/work/image/prosperoai-image.ppm";
@@ -306,6 +381,42 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     const bool sd3 = is_sd3_model(root);
     const bool sdxl = model_index_has(root, "StableDiffusionXLPipeline") || is_sdxl_checkpoint(root);
     const bool flux2_klein = is_flux2_klein_model(root);
+    if (!valid_image_options(image_options, flux2_klein))
+    {
+        std::snprintf(response, response_capacity, "Unsupported or invalid image workflow.");
+        return 1;
+    }
+    DecodedInput init_image, mask_image, control_image;
+    if (image_options &&
+        ((image_options->image_path && !init_image.load(image_options->image_path)) ||
+         (image_options->mask_path && !mask_image.load(image_options->mask_path)) ||
+         (image_options->control_image_path && !control_image.load(image_options->control_image_path))))
+    {
+        std::snprintf(response, response_capacity, "Could not decode a workflow input image.");
+        return 1;
+    }
+    if (image_options && image_options->mask_path &&
+        (init_image.image.width != mask_image.image.width ||
+         init_image.image.height != mask_image.image.height))
+    {
+        std::snprintf(response, response_capacity, "Input and mask dimensions must match.");
+        return 1;
+    }
+    const bool reference_edit = image_options &&
+        std::strcmp(image_options->workflow, "image_to_image") == 0 &&
+        std::strcmp(image_options->image_edit_strategy, "reference_image") == 0;
+    if (image_options && image_options->sampler && *image_options->sampler &&
+        str_to_sample_method(image_options->sampler) == SAMPLE_METHOD_COUNT)
+    {
+        std::snprintf(response, response_capacity, "Unsupported sampler.");
+        return 1;
+    }
+    if (image_options && image_options->scheduler && *image_options->scheduler &&
+        str_to_scheduler(image_options->scheduler) == SCHEDULER_COUNT)
+    {
+        std::snprintf(response, response_capacity, "Unsupported scheduler.");
+        return 1;
+    }
     progress_callback = progress;
     if (progress_callback)
         progress_callback(flux2_klein ? "Loading FLUX.2 Klein 4B"
@@ -343,29 +454,70 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     sd_img_gen_params_t parameters;
     sd_img_gen_params_init(&parameters);
     parameters.prompt = prompt;
-    parameters.negative_prompt = "";
+    parameters.negative_prompt = image_options && image_options->negative_prompt
+                                     ? image_options->negative_prompt : "";
     parameters.ref_images = nullptr;
     parameters.ref_images_count = 0;
     const unsigned default_size = (sd3 || flux2_klein) ? 768 : 512;
-    parameters.width = runtime_settings.sd_width ? runtime_settings.sd_width : default_size;
-    parameters.height = runtime_settings.sd_height ? runtime_settings.sd_height : default_size;
-    parameters.seed = runtime_settings.sd_seed == 0 ? -1
-                      : static_cast<std::int64_t>(runtime_settings.sd_seed);
+    parameters.width = image_options ? static_cast<int>(image_options->width)
+                        : runtime_settings.sd_width ? runtime_settings.sd_width : default_size;
+    parameters.height = image_options ? static_cast<int>(image_options->height)
+                         : runtime_settings.sd_height ? runtime_settings.sd_height : default_size;
+    parameters.seed = image_options ? image_options->seed
+                        : runtime_settings.sd_seed == 0 ? -1
+                                                        : static_cast<std::int64_t>(runtime_settings.sd_seed);
     parameters.batch_count = 1;
-    parameters.sample_params.sample_steps = flux2_klein ? 4
+    parameters.sample_params.sample_steps = image_options ? static_cast<int>(image_options->steps)
+                                            : flux2_klein ? 4
                                             : sdxl ? 10
                                             : sd3 ? 28
                                             : is_realistic_vision_v51(root) ? 20
                                                   : 1;
-    parameters.sample_params.sample_method = (sdxl || sd3 || flux2_klein || is_realistic_vision_v51(root))
+    parameters.sample_params.sample_method = image_options && image_options->sampler && *image_options->sampler
+                                                 ? str_to_sample_method(image_options->sampler)
+                                             : (sdxl || sd3 || flux2_klein || is_realistic_vision_v51(root))
                                                  ? EULER_SAMPLE_METHOD
                                                  : EULER_A_SAMPLE_METHOD;
-    if (flux2_klein)
+    if (image_options && image_options->scheduler && *image_options->scheduler)
+        parameters.sample_params.scheduler = str_to_scheduler(image_options->scheduler);
+    else if (flux2_klein)
         parameters.sample_params.scheduler = FLUX2_SCHEDULER;
     if (flux2_klein)
-        parameters.sample_params.guidance.distilled_guidance = 1.0f;
-    parameters.sample_params.guidance.txt_cfg = is_realistic_vision_v51(root) ? 7.0f
+        parameters.sample_params.guidance.distilled_guidance =
+            image_options ? image_options->cfg_scale : 1.0f;
+    parameters.sample_params.guidance.txt_cfg = image_options ? image_options->cfg_scale
+                                               : is_realistic_vision_v51(root) ? 7.0f
                                                : sdxl ? 5.0f : sd3 ? 4.5f : 1.0f;
+    sd_image_t reference_image{};
+    if (image_options)
+    {
+        if (reference_edit)
+        {
+            reference_image = init_image.sd_image();
+            parameters.ref_images = &reference_image;
+            parameters.ref_images_count = 1;
+        }
+        else if (image_options->image_path)
+            parameters.init_image = init_image.sd_image();
+        if (image_options->mask_path)
+            parameters.mask_image = mask_image.sd_image();
+        if (image_options->control_image_path)
+        {
+            parameters.control_image = control_image.sd_image();
+            parameters.control_strength = image_options->control_strength == -1
+                                              ? 0.9f : image_options->control_strength;
+            if (image_options->canny && !preprocess_canny(parameters.control_image,
+                                                           0.08f, 0.08f, 0.8f, 1.0f, false))
+            {
+                std::snprintf(response, response_capacity, "Canny preprocessing failed.");
+                return 1;
+            }
+        }
+        if (image_options->strength != -1)
+            parameters.strength = image_options->strength;
+        else if (image_options->image_path && !reference_edit)
+            parameters.strength = 0.75f;
+    }
 
     sd_image_t *images = nullptr;
     int image_count = 0;

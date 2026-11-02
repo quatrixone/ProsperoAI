@@ -423,6 +423,31 @@ bool valid_image_reference(const char *id, unsigned index, const char *path)
 
 } // namespace
 
+bool read_output_reference(const char *id, unsigned index, std::string *output)
+{
+    if (!output || !valid_id(id) || index >= MessageCapacity)
+        return false;
+    output->clear();
+    char reference[256], leaf[48];
+    std::snprintf(leaf, sizeof(leaf), "output-%03u.txt", index);
+    make_path(reference, sizeof(reference), id, leaf);
+    std::FILE *file = std::fopen(reference, "rb");
+    if (!file)
+        return false;
+    char bytes[512];
+    const std::size_t count = std::fread(bytes, 1, sizeof(bytes), file);
+    const bool extra = std::fgetc(file) != EOF;
+    const bool read_ok = !std::ferror(file) && !extra;
+    const bool closed = std::fclose(file) == 0;
+    if (!read_ok || !closed || count == 0 || std::memchr(bytes, '\0', count))
+        return false;
+    if (bytes[count - 1] == '\n')
+        output->assign(bytes, count - 1);
+    else
+        output->assign(bytes, count);
+    return !output->empty();
+}
+
 bool valid_id(const char *id)
 {
     if (!id || !*id || std::strlen(id) >= sizeof(Record{}.id))

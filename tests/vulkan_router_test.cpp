@@ -18,6 +18,7 @@
 namespace
 {
 unsigned text_selected = 0, released = 0, stopped = 0, generated = 0, ace_generated = 0;
+bool image_options_forwarded = false;
 std::string deleted_model_id;
 std::atomic<bool> block_voice{false}, voice_entered{false}, voice_release{false};
 } // namespace
@@ -178,8 +179,12 @@ extern "C"
         return 1;
     }
     int ps5_sd_generate(const char *, const char *, char *out, std::size_t n,
-                        std::uint64_t *elapsed, gpt_runtime_progress_fn)
+                        std::uint64_t *elapsed, const gpt_runtime_image_options_t *options,
+                        gpt_runtime_progress_fn)
     {
+        image_options_forwarded = options && options->workflow &&
+                                  std::strcmp(options->workflow, "text_to_image") == 0 &&
+                                  options->width == 1024 && options->seed == 42;
         *elapsed = 789;
         std::snprintf(out, n, "generated-image.png");
         return 0;
@@ -387,6 +392,18 @@ int main()
     assert(capabilities == GPT_IMAGE_CAP_TEXT_TO_IMAGE && strategy == nullptr);
     assert(defaults.width == 768 && defaults.height == 768 && defaults.steps == 28);
     assert(defaults.cfg_scale == 4.5f && std::strcmp(defaults.sampler, "euler") == 0);
+    assert(gpt_runtime_select_model(curated_index));
+    gpt_runtime_image_options_t image_options{};
+    image_options.workflow = "text_to_image";
+    image_options.width = 1024;
+    image_options.height = 1024;
+    image_options.steps = 10;
+    image_options.seed = 42;
+    image_options.cfg_scale = 6.0f;
+    image_options.image_edit_strategy = "init_image_strength";
+    assert(gpt_runtime_generate(messages, 1, {}, out, sizeof(out), &stats, nullptr,
+                                &image_options) == 0);
+    assert(image_options_forwarded);
     assert(gpt_runtime_delete_model("legacy-qwen-image"));
     assert(deleted_model_id == "legacy-qwen-image");
     assert(std::filesystem::exists(qwen_root / "qwen_image_2.1-Q2_K.gguf"));

@@ -44,6 +44,24 @@ struct gpt_runtime_image_defaults_t
     const char *sampler, *scheduler;
 };
 
+struct gpt_runtime_image_options_t
+{
+    const char *workflow = nullptr;
+    unsigned width = 0, height = 0, steps = 0;
+    std::int64_t seed = -1;
+    float cfg_scale = 0;
+    float strength = -1;
+    float control_strength = -1;
+    bool canny = false;
+    const char *negative_prompt = nullptr;
+    const char *sampler = nullptr;
+    const char *scheduler = nullptr;
+    const char *image_path = nullptr;
+    const char *mask_path = nullptr;
+    const char *control_image_path = nullptr;
+    const char *image_edit_strategy = nullptr;
+};
+
 struct gpt_runtime_stats_t
 {
     unsigned prompt_tokens;
@@ -91,4 +109,5 @@ bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_b
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned message_count,
                          const gpt_runtime_settings_t &settings, char *output,
                          std::size_t output_capacity, gpt_runtime_stats_t *stats,
-                         gpt_runtime_progress_fn progress);
+                         gpt_runtime_progress_fn progress,
+                         const gpt_runtime_image_options_t *image_options = nullptr);
