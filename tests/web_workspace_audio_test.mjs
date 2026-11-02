@@ -143,32 +143,16 @@ test('a new Workspace conversation opens settings before focusing model selectio
     assert.deepEqual(calls, ['chat.add:show-history', 'openChat', 'renderMessages', 'renderHistory', 'prompt']);
 });
 
-test('Image Workspace renders image-to-image state only for models declaring that capability', () => {
-    const start = appSource.indexOf('function renderWorkspaceImage()');
-    const end = appSource.indexOf('\nfunction renderWorkspaceAudio()', start);
-    const render = appSource.slice(start, end);
-    assert.notEqual(start, -1);
-    assert.notEqual(end, -1);
-    const elements = Object.fromEntries([
-        'workspace-image', 'workspace-image-text', 'workspace-image-edit',
-        'workspace-image-i2i-ready', 'workspace-image-i2i-loading',
-        'workspace-image-i2i-empty', 'workspace-image-i2i-unavailable',
-    ].map(id => [id, {hidden: false}]));
-    const context = {
-        workspaceModeName: 'image', imageSectionName: 'image-to-image',
-        models: [{id: 'image-edit', purpose: 'text-to-image', details: {capabilities: ['text_to_image', 'image_to_image']}}], modelsStatus: 'ready',
-        workspaceUI: workspaceApi(), $: id => elements[id],
-    };
-    runInNewContext(`${render}\nrenderWorkspaceImage()`, context);
-    assert.equal(elements['workspace-image'].hidden, false);
-    assert.equal(elements['workspace-image-text'].hidden, true);
-    assert.equal(elements['workspace-image-edit'].hidden, false);
-    assert.equal(elements['workspace-image-i2i-ready'].hidden, false);
-    assert.equal(elements['workspace-image-i2i-empty'].hidden, true);
-    context.models = [{id: 'image-basic', purpose: 'text-to-image', details: {capabilities: ['text_to_image']}}];
-    runInNewContext(`${render}\nrenderWorkspaceImage()`, context);
-    assert.equal(elements['workspace-image-i2i-ready'].hidden, true);
-    assert.equal(elements['workspace-image-i2i-empty'].hidden, false);
+test('Image Studio exposes all four capability-driven modes without an ID-based catalog', () => {
+    const {imageModes} = workspaceApi();
+    const modes = ['text_to_image', 'image_to_image', 'inpainting', 'controlnet'];
+    for (const mode of modes) assert.match(htmlSource, new RegExp(`data-image-mode="${mode}"`));
+    assert.match(htmlSource, /data-image-destination="create"/);
+    assert.match(htmlSource, /data-image-destination="models"/);
+    assert.match(htmlSource, /data-image-destination="gallery"/);
+    assert.deepEqual(Array.from(imageModes({id: 'catalog-entry', purpose: 'text-to-image', details: {capabilities: modes}})), modes);
+    assert.match(appSource, /workspaceUI\.imageCapabilities\(selected\)/);
+    assert.doesNotMatch(appSource + htmlSource, /qwen-image|Qwen Image/i);
 });
 
 test('Audio/TTS reuses the Workspace voice controls and gives a no-model install state', () => {
@@ -419,10 +403,11 @@ test('Workspace exposes three modes and Music/TTS Audio sections with route stat
     assert.match(htmlSource, /data-mode="audio"/);
     assert.match(htmlSource, /data-audio-section="music"/);
     assert.match(htmlSource, /data-audio-section="tts"/);
-    assert.match(htmlSource, /data-image-section="text-to-image"/);
-    assert.match(htmlSource, /data-image-section="image-to-image"/);
-    assert.match(htmlSource, /workspace-image-i2i-empty/);
-    assert.match(appSource, /workspaceUI\.imageToImageAvailability\(models,modelsStatus\)/);
+    assert.match(htmlSource, /data-image-mode="text_to_image"/);
+    assert.match(htmlSource, /data-image-mode="image_to_image"/);
+    assert.match(htmlSource, /data-image-mode="inpainting"/);
+    assert.match(htmlSource, /data-image-mode="controlnet"/);
+    assert.match(appSource, /imageMode:\s*imageModeName/);
     assert.doesNotMatch(htmlSource, /class="nav-music"/);
     assert.doesNotMatch(htmlSource, /id="speak"/);
     assert.match(appSource, /location\.pathname === '\/audio'/);
@@ -474,12 +459,12 @@ test('Music requests share Workspace auth and model purpose metadata', () => {
 });
 
 test('Audio subsection navigation is recorded and restored by browser history', () => {
-    const start = appSource.indexOf('function setWorkspaceMode(');
-    const end = appSource.indexOf('\nasync function renderMediaLibrary()', start);
-    const routeState = appSource.slice(start, end);
-    assert.notEqual(start, -1);
-    assert.notEqual(end, -1);
-
+    const start = appSource.indexOf('function setAudioSection(');
+    const end = appSource.indexOf('\nconst imageModeLabels', start);
+    const renderStart = appSource.indexOf('function renderWorkspaceAudio()');
+    const renderEnd = appSource.indexOf('\nfunction navigateWorkspaceMode', renderStart);
+    const setSection = appSource.slice(start, end);
+    const renderAudio = appSource.slice(renderStart, renderEnd);
     const calls = [];
     const workspace = workspaceApi().createWorkspaceMode({
         models: [],
@@ -494,68 +479,29 @@ test('Audio subsection navigation is recorded and restored by browser history', 
         setAttribute(name, value) { this[name] = value; },
     });
     const audioTabs = [makeButton({audioSection: 'music'}), makeButton({audioSection: 'tts'})];
-    const modeTabs = ['text', 'image', 'audio'].map(mode => makeButton({mode}));
     const elements = Object.fromEntries([
         'welcome', 'chat', 'workspace-audio', 'workspace-audio-music', 'workspace-audio-tts', 'workspace-model-controls',
     ].map(id => [id, {hidden: false}]));
-    const location = {pathname: '/audio'};
-    const entries = [{state: {workspaceMode: 'audio', audioSection: 'music'}, path: '/audio'}];
-    let index = 0;
-    let popstate;
-    const history = {
-        get state() { return entries[index].state; },
-        pushState(state, _title, path) {
-            entries.splice(index + 1);
-            entries.push({state, path});
-            index++;
-            location.pathname = path;
-        },
-        back() {
-            if (index === 0) return;
-            index--;
-            location.pathname = entries[index].path;
-            popstate({state: this.state});
-        },
-        forward() {
-            if (index === entries.length - 1) return;
-            index++;
-            location.pathname = entries[index].path;
-            popstate({state: this.state});
-        },
-    };
-    const conversation = {id: 'saved-voice-conversation', messages: [{role: 'user', content: 'Keep me'}]};
-    const conversations = [conversation];
+    const history = {pushState(state) { this.state=state; }};
     const context = {
         workspaceModeName: 'audio',
         audioSectionName: 'music',
-        imageSectionName: 'text-to-image',
         workspaceChatOpen: true,
         workspaceMode: workspace,
         workspaceUI: workspaceApi(),
-        current: conversation,
-        conversations,
-        models: [],
-        modelsStatus: 'ready',
-        modelChooser: {value: ''},
-        stagedWorkspaceModel: '',
-        selectedModel: '',
-        controller: {abort() { calls.push(['cancel']); }},
         document: {
             querySelectorAll(selector) {
-                if (selector === '[data-mode]') return modeTabs;
                 if (selector === '[data-audio-section]') return audioTabs;
                 return [];
             },
         },
         $: id => elements[id],
         renderWorkspaceModels() {},
-        syncWorkspaceGenerationSettings() {},
+        renderWorkspaceAudio: () => runInNewContext(`${renderAudio}\nrenderWorkspaceAudio()`, context),
         history,
-        location,
+        location: {pathname: '/audio'},
     };
-    context.window = {addEventListener(type, handler) { if (type === 'popstate') popstate = handler; }};
-
-    runInNewContext(`${routeState}\ndocument.querySelectorAll('[data-audio-section]')[1].onclick();`, context);
+    runInNewContext(`${setSection}\nsetAudioSection('tts')`, context);
 
     assert.deepEqual({...history.state}, {workspaceMode: 'audio', audioSection: 'tts'});
     assert.equal(context.audioSectionName, 'tts');
@@ -563,30 +509,26 @@ test('Audio subsection navigation is recorded and restored by browser history', 
     assert.equal(elements['workspace-audio-tts'].hidden, true,
         'TTS should use the shared conversation layout once the chat is open');
     assert.equal(elements.chat.hidden, false);
-    assert.equal(context.current, conversation);
-    assert.equal(context.conversations, conversations);
     assert.deepEqual(calls, []);
 
     context.workspaceChatOpen = false;
-    runInNewContext('renderWorkspaceAudio()', context);
+    runInNewContext(`${renderAudio}\nrenderWorkspaceAudio()`, context);
     assert.equal(elements['workspace-audio-tts'].hidden, false,
         'the TTS start panel should remain available before opening a conversation');
     assert.equal(elements.chat.hidden, true);
     context.workspaceChatOpen = true;
-    runInNewContext('renderWorkspaceAudio()', context);
-
-    history.back();
+    runInNewContext(`${renderAudio}\nrenderWorkspaceAudio()`, context);
+    runInNewContext(`${setSection}\nsetAudioSection('music',false)`, context);
     assert.equal(context.audioSectionName, 'music');
     assert.equal(workspace.audioSection, 'music');
     assert.equal(audioTabs[0].classList.selected, true);
     assert.equal(elements['workspace-audio-music'].hidden, false);
     assert.equal(elements['workspace-model-controls'].hidden, true);
     assert.equal(elements.chat.hidden, true);
-    assert.equal(context.current, conversation);
-    assert.equal(context.conversations, conversations);
     assert.deepEqual(calls, []);
-
-    history.forward();
+    assert.match(appSource, /event\.state\?\.audioSection/);
+    assert.match(appSource, /setAudioSection\(audioSection,false\)/);
+    runInNewContext(`${setSection}\nsetAudioSection('tts',false)`, context);
     assert.equal(context.audioSectionName, 'tts');
     assert.equal(workspace.audioSection, 'tts');
     assert.equal(audioTabs[1].classList.selected, true);

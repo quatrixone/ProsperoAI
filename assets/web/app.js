@@ -54,13 +54,15 @@ const modelChooser=$('workspace-model');
 const workspaceUI=window.ProsperoWorkspace;
 let workspaceModeName=location.pathname === '/audio' ? 'audio' : 'text';
 let audioSectionName='music';
-let imageSectionName='text-to-image';
+let imageModeName='text_to_image', activeImageModelId='', activeImageSettingsMode='';
+let imageSourceFile=null, imageGuideFile=null, imageMaskPainted=false, imagePaintMode='paint', imageSubmitting=false;
+let imageSourceUrl='', imageGuideUrl='', mediaImageOnly=false;
 let stagedWorkspaceModel='',workspaceChatOpen=false,preparedModel='',preparation=null,submitting=false,finalWorkspaceOptions={};
 const workspaceMode=workspaceUI.createWorkspaceMode({models,selectModel:selectWorkspaceModel,prepareModel:prepareWorkspaceModel});
 workspaceMode.setMode(workspaceModeName);
 workspaceMode.setAudioSection(audioSectionName);
 const modelMemoryEstimate=document.createElement('p');modelMemoryEstimate.id='model-memory-estimate';modelMemoryEstimate.className='muted';modelMemoryEstimate.setAttribute('role','status');modelMemoryEstimate.textContent='Checking past memory measurements…';$('model-description').after(modelMemoryEstimate);
-function workspaceSection(){return workspaceModeName==='image'?imageSectionName:audioSectionName;}
+function workspaceSection(){return workspaceModeName==='image'?'text-to-image':audioSectionName;}
 function workspaceModelValue(){return [current?.model,stagedWorkspaceModel,selectedModel].find(id=>workspaceUI.filterModels(models,workspaceModeName,workspaceSection()).some(model=>model.id===id))||'';}
 let sessionToken = ''; try { sessionToken = sessionStorage.getItem('prospero-session') || ''; sessionStorage.removeItem('prospero-key'); } catch {}
 function page(name) { for (const p of ['workspace','media','models','settings']) $(p).hidden = p !== name; document.querySelectorAll('[data-page]').forEach(b => { b.classList.toggle('selected', b.dataset.page === name); b.setAttribute('aria-current', b.dataset.page === name ? 'page' : 'false'); }); }
@@ -86,8 +88,8 @@ function setWorkspaceMode(mode){
     for(const button of document.querySelectorAll('[data-mode]')){const active=button.dataset.mode===mode;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
     renderWorkspaceModels();
     renderWorkspaceAudio();
-    $('welcome').hidden=workspaceChatOpen||mode==='audio';
-    $('chat').hidden=!workspaceChatOpen||(mode==='audio'&&audioSectionName!=='tts');
+    $('welcome').hidden=workspaceChatOpen||mode==='audio'||mode==='image';
+    $('chat').hidden=!workspaceChatOpen||mode==='image'||(mode==='audio'&&audioSectionName!=='tts');
 }
 function setAudioSection(section,recordHistory=true){
     const changed=audioSectionName!==section;
@@ -96,24 +98,254 @@ function setAudioSection(section,recordHistory=true){
     renderWorkspaceModels();renderWorkspaceAudio();
     if(recordHistory&&changed&&workspaceModeName==='audio')history.pushState({workspaceMode:workspaceModeName,audioSection:section},'',location.pathname);
 }
-function setImageSection(section,recordHistory=true){
-    if(section!=='text-to-image'&&section!=='image-to-image')throw new Error('Unknown Image section.');
-    const changed=imageSectionName!==section;imageSectionName=section;
-    for(const button of document.querySelectorAll('[data-image-section]')){const active=button.dataset.imageSection===section;button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));}
-    renderWorkspaceModels();
-    if(recordHistory&&changed&&workspaceModeName==='image')history.pushState({workspaceMode:workspaceModeName,imageSection:section},'',location.pathname);
+const imageModeLabels={text_to_image:'Text to image',image_to_image:'Image to image',inpainting:'Inpainting',controlnet:'ControlNet'};
+function imageModel(){return models.find(model=>model.id===$('image-model').value)||null;}
+function setImageMode(mode){
+    if(!imageModeLabels[mode])throw new Error('Unknown image mode.');
+    const selected=imageModel();
+    if(selected&&!workspaceUI.imageCapabilities(selected).includes(mode))return;
+    imageModeName=mode;
+    for(const button of document.querySelectorAll('[data-image-mode]')){
+        const active=button.dataset.imageMode===mode;
+        button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-pressed',String(active));
+    }
+    syncImageForm(true);
+}
+function imageInputValues(){
+    return {width:Number($('image-width').value),height:Number($('image-height').value),steps:Number($('image-steps').value),
+        cfg_scale:Number($('image-cfg-scale').value),sampler:$('image-sampler').value,scheduler:$('image-scheduler').value,
+        strength:Number($('image-strength').value),control_strength:Number($('image-control-strength').value),
+        canny:$('image-canny').checked,seed:Number($('image-seed').value),negative_prompt:$('image-negative-prompt').value};
+}
+function applyImageDefaults(model,mode){
+    const settings=workspaceUI.imageSettings(model,mode);
+    $('image-width').value=String(settings.width);$('image-height').value=String(settings.height);
+    $('image-steps').value=String(settings.steps);$('image-cfg-scale').value=String(settings.cfg_scale);
+    $('image-sampler').value=settings.sampler;$('image-scheduler').value=settings.scheduler;
+    $('image-strength').value=String(settings.strength??0.75);
+    $('image-control-strength').value=String(settings.control_strength??1);
+    $('image-canny').checked=settings.canny??true;
+    $('image-strength-control').hidden=!settings.showStrength;
+    $('image-control-strength-control').hidden=!settings.showControlStrength;
+    $('image-canny-control').hidden=!settings.showControlStrength;
+    $('image-model-defaults').textContent=`${settings.width} × ${settings.height} · ${settings.steps} steps · CFG ${settings.cfg_scale} · ${settings.sampler}${settings.scheduler?` · ${settings.scheduler}`:''}`;
+}
+function syncImageForm(resetDefaults=false){
+    const selected=imageModel(),capabilities=workspaceUI.imageCapabilities(selected);
+    if(selected&&!capabilities.includes(imageModeName))imageModeName=capabilities.includes('text_to_image')?'text_to_image':capabilities[0]||'text_to_image';
+    for(const button of document.querySelectorAll('[data-image-mode]')){
+        const mode=button.dataset.imageMode,available=capabilities.includes(mode),active=mode===imageModeName;
+        button.disabled=!available;button.title=available?imageModeLabels[mode]:`This model does not declare ${imageModeLabels[mode].toLowerCase()} support.`;
+        button.classList.toggle('selected',active);button.setAttribute('aria-selected',String(active));button.setAttribute('aria-pressed',String(active));
+    }
+    $('image-model-empty').hidden=workspaceUI.filterModels(models,'image').length!==0;
+    $('image-mode-note').textContent=selected?(capabilities.includes(imageModeName)?`${imageModeLabels[imageModeName]} · supported by ${selected.name||selected.id}`:`${selected.name||selected.id} does not declare image capabilities.`):'Choose an installed image model to see supported modes.';
+    $('image-capability-note').textContent=selected?`Supported: ${workspaceUI.imageModes(selected).map(mode=>imageModeLabels[mode]).join(', ')||'none declared'}`:'';
+    $('image-source-control').hidden=!['image_to_image','inpainting'].includes(imageModeName);
+    $('image-mask-control').hidden=imageModeName!=='inpainting';
+    $('image-guide-control').hidden=imageModeName!=='controlnet';
+    if(resetDefaults||activeImageModelId!==selected?.id||activeImageSettingsMode!==imageModeName){
+        if(selected)applyImageDefaults(selected,imageModeName);
+        activeImageModelId=selected?.id||'';activeImageSettingsMode=imageModeName;
+    }
 }
 function renderWorkspaceImage(){
-    const imageMode=workspaceModeName==='image',editing=imageSectionName==='image-to-image';
+    const imageMode=workspaceModeName==='image';
     $('workspace-image').hidden=!imageMode;
-    $('workspace-image-text').hidden=!imageMode||editing;
-    $('workspace-image-edit').hidden=!imageMode||!editing;
-    const state=workspaceUI.imageToImageAvailability(models,modelsStatus);
-    $('workspace-image-i2i-ready').hidden=state!=='available';
-    $('workspace-image-i2i-loading').hidden=state!=='loading';
-    $('workspace-image-i2i-empty').hidden=state!=='empty';
-    $('workspace-image-i2i-unavailable').hidden=state!=='unavailable';
+    const select=$('image-model'),previous=select.value||activeImageModelId;
+    const available=workspaceUI.filterModels(models,'image');
+    select.replaceChildren();
+    const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Choose an image model…';select.append(placeholder);
+    for(const model of available){const option=document.createElement('option');option.value=model.id;option.textContent=model.name||model.id;select.append(option);}
+    select.value=available.some(model=>model.id===previous)?previous:available.some(model=>model.id===current?.model)?current.model:available[0]?.id||'';
+    syncImageForm();
 }
+function setImageFile(kind,file){
+    if(kind==='source'){
+        if(imageSourceUrl)URL.revokeObjectURL(imageSourceUrl);
+        imageSourceFile=file||null;imageSourceUrl=file?URL.createObjectURL(file):'';
+        $('image-source-preview').hidden=!file;$('image-source-preview-img').src=imageSourceUrl;
+        $('image-mask-stage').hidden=!file;
+        imageMaskPainted=false;
+        if(file)loadMaskCanvas();else clearMaskCanvas();
+    }else{
+        if(imageGuideUrl)URL.revokeObjectURL(imageGuideUrl);
+        imageGuideFile=file||null;imageGuideUrl=file?URL.createObjectURL(file):'';
+        $('image-guide-preview').hidden=!file;$('image-guide-preview-img').src=imageGuideUrl;
+    }
+}
+function clearMaskCanvas(){
+    const canvas=$('image-mask-canvas'),output=$('image-mask-output');
+    const preview=canvas.getContext('2d');preview.clearRect(0,0,canvas.width,canvas.height);
+    const mask=output.getContext('2d');mask.fillStyle='#000';mask.fillRect(0,0,output.width,output.height);
+    imageMaskPainted=false;
+}
+function loadMaskCanvas(){
+    const image=$('image-mask-source'),canvas=$('image-mask-canvas'),output=$('image-mask-output');
+    image.src=imageSourceUrl;
+    image.onload=()=>{
+        canvas.width=output.width=image.naturalWidth;canvas.height=output.height=image.naturalHeight;
+        const ctx=output.getContext('2d');ctx.fillStyle='#000';ctx.fillRect(0,0,output.width,output.height);
+        $('image-mask-stage').hidden=false;imageMaskPainted=false;
+    };
+}
+let maskLastPoint=null;
+function paintMask(event){
+    if(!imageSourceFile)return;
+    const canvas=$('image-mask-canvas'),rect=canvas.getBoundingClientRect(),scaleX=canvas.width/rect.width,scaleY=canvas.height/rect.height;
+    const x=(event.clientX-rect.left)*scaleX,y=(event.clientY-rect.top)*scaleY;
+    const brush=Number($('image-brush-size').value)*scaleX,erase=imagePaintMode==='erase';
+    const preview=canvas.getContext('2d'),mask=$('image-mask-output').getContext('2d');
+    for(const [ctx,color] of [[preview,erase?'destination-out':'source-over'],[mask,'source-over']]){
+        ctx.save();ctx.globalCompositeOperation=ctx===preview?color:'source-over';ctx.fillStyle=erase?'#000':'#fff';
+        ctx.strokeStyle=erase?'#000':'#fff';ctx.lineWidth=brush;ctx.lineCap='round';ctx.lineJoin='round';
+        if(ctx===mask)ctx.globalCompositeOperation='source-over';
+        if(!maskLastPoint){ctx.beginPath();ctx.arc(x,y,brush/2,0,Math.PI*2);ctx.fill();}
+        else{ctx.beginPath();ctx.moveTo(maskLastPoint.x,maskLastPoint.y);ctx.lineTo(x,y);ctx.stroke();}
+        ctx.restore();
+    }
+    if(!erase)imageMaskPainted=true;
+    maskLastPoint={x,y};
+}
+function setMaskPaintMode(mode){
+    imagePaintMode=mode;
+    for(const [name,id] of [['paint','image-mask-paint'],['erase','image-mask-erase']])$(''+id).setAttribute('aria-pressed',String(name===mode));
+}
+function safeImageFile(file,filename){
+    let type=file.type;
+    if(!['image/png','image/jpeg'].includes(type))type=/\.jpe?g$/i.test(filename)?'image/jpeg':'image/png';
+    return new File([file],filename,{type});
+}
+async function stageGalleryImage(file,mode){
+    try{
+        const blob=await api(file.path).then(response=>response.blob());
+        const filename=file.path.split('/').at(-1)||'gallery-image.png';
+        setImageFile(mode==='controlnet'?'guide':'source',safeImageFile(blob,filename));
+        const candidate=workspaceUI.filterModels(models,'image').find(model=>workspaceUI.imageCapabilities(model).includes(mode));
+        if(candidate)$('image-model').value=candidate.id;
+        setImageMode(mode);document.querySelector('[data-image-destination="create"]').click();
+        $('image-status').textContent=mode==='controlnet'?'Guide image staged from Gallery.':'Image staged from Gallery.';
+    }catch(error){$('feedback').textContent=`Could not stage this Gallery image: ${error.message}`;}
+}
+async function renderMediaLibrary(imageOnly=mediaImageOnly){
+    mediaImageOnly=imageOnly;
+    $('media-heading').textContent=imageOnly?'Image gallery':'Media library';
+    document.querySelectorAll('[data-media-filter]').forEach(button=>{const active=button.dataset.mediaFilter===(imageOnly?'image':'all');button.classList.toggle('selected',active);button.setAttribute('aria-pressed',String(active));});
+    const root=$('media-library');root.replaceChildren();const loading=document.createElement('p');loading.className='muted';loading.textContent='Loading media…';root.append(loading);
+    try{
+        const payload=await api('/api/media').then(response=>response.json()),files=(payload.data||[]).filter(file=>!imageOnly||file.kind==='image');root.replaceChildren();
+        if(!files.length){const note=document.createElement('p');note.className='muted';note.textContent=imageOnly?'No generated images are linked to saved conversations yet.':'Generated images and audio linked to saved conversations will appear here.';root.append(note);return;}
+        for(const file of files){
+            const card=document.createElement('article');card.className='glass model-card';
+            const heading=document.createElement('strong');heading.textContent=file.path.split('/').at(-1)||'Generated media';
+            const source=document.createElement('button');source.className='secondary';source.type='button';source.textContent=`From: ${file.title||'Conversation'}`;
+            source.onclick=async()=>{try{let conversation=conversations.find(item=>item.id===file.conversation_id);if(!conversation)conversation=await api(`/api/conversations/${encodeURIComponent(file.conversation_id)}`).then(r=>r.json());if(!conversations.some(item=>item.id===conversation.id)){conversations.unshift(conversation);save('prospero-conversations',conversations.slice(0,50));}current=conversation;currentModelChosen=false;openChat();renderMessages();renderHistory();}catch(error){$('feedback').textContent=error.message;}};
+            const model=document.createElement('small');model.className='muted';model.textContent=`Model: ${file.modelName||file.model||'Unknown'}`;
+            const preview=document.createElement('div');preview.className='media-library-preview';
+            const remove=document.createElement('button');remove.className='secondary';remove.type='button';remove.textContent='Delete archived copy';remove.title='Deletes only the archived copy stored with this conversation';
+            remove.onclick=async()=>{if(!confirm(`Delete archived media “${heading.textContent}”? The generated source file is kept.`))return;remove.disabled=true;try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});card.remove();if(!root.children.length){const note=document.createElement('p');note.className='muted';note.textContent=imageOnly?'No generated images are linked to saved conversations yet.':'Generated images and audio linked to saved conversations will appear here.';root.append(note);}}catch(error){$('feedback').textContent=error.message;remove.disabled=false;}};
+            card.append(heading,source,model,preview);
+            if(file.kind==='image'){
+                const edit=document.createElement('button');edit.className='secondary';edit.type='button';edit.textContent='Stage image for editing';edit.onclick=()=>void stageGalleryImage(file,'image_to_image');
+                const guide=document.createElement('button');guide.className='secondary';guide.type='button';guide.textContent='Use as ControlNet guide';guide.onclick=()=>void stageGalleryImage(file,'controlnet');
+                card.append(edit,guide);
+            }
+            card.append(remove);appendMedia(preview,{path:file.path,kind:file.kind});root.append(card);
+        }
+    }catch(error){root.replaceChildren();const note=document.createElement('p');note.className='muted';note.textContent=`Could not load media: ${error.message}`;root.append(note);}
+}
+async function submitImageGeneration(){
+    if(imageSubmitting)return;
+    const model=imageModel(),prompt=$('image-prompt').value.trim(),mode=imageModeName;
+    if(!model){$('image-status').textContent='Choose an installed image model before generating.';$('image-model').focus();return;}
+    const currentUploads={image:mode==='image_to_image'||mode==='inpainting'?imageSourceFile:null,
+        mask:mode==='inpainting'&&imageMaskPainted?imageMaskPainted:null,guide:mode==='controlnet'?imageGuideFile:null};
+    const missing=workspaceUI.validateImageInputs(mode,currentUploads);
+    if(missing){$('image-status').textContent=missing;return;}
+    if(!prompt){$('image-status').textContent='Enter a prompt before generating.';$('image-prompt').focus();return;}
+    imageSubmitting=true;$('image-generate').disabled=true;$('image-retry').hidden=true;$('image-status').textContent='Preparing image request…';
+    let conversation=current;
+    if(!conversation||conversation.purpose!=='text-to-image'||conversation.model!==model.id){
+        conversation={id:globalThis.crypto?.randomUUID?.()||String(Date.now()),title:prompt.slice(0,70),model:model.id,
+            modelName:model.name||model.id,purpose:'text-to-image',messages:[],updatedAt:Date.now()};
+        current=conversation;currentModelChosen=true;workspaceChatOpen=true;
+        if(!conversations.includes(conversation))conversations.unshift(conversation);
+    }
+    if(conversation.messages.at(-1)?.role==='user'&&conversation.messages.at(-2)?.role==='assistant'&&!conversation.messages.at(-2).content)
+        conversation.messages.pop();
+    const userMessage={role:'user',content:prompt},answer={role:'assistant',content:''};
+    conversation.messages.push(userMessage,answer);conversation.title=conversation.title||prompt.slice(0,70);conversation.updatedAt=Date.now();
+    try{
+        const conversationResponse=await api('/api/conversations',{method:'POST',body:JSON.stringify(conversation)});
+        const saved=await conversationResponse.json();conversation._serverUpdatedUs=Number(saved.updated_us)||0;
+        save('prospero-conversations',conversations.slice(0,50));
+        await selectWorkspaceModel(model.id);await prepareWorkspaceModel(model.id);
+        const uploads={};
+        if(mode==='image_to_image'||mode==='inpainting'){
+            $('image-status').textContent='Uploading source image…';uploads.image=await workspaceUI.uploadImageInput(api,imageSourceFile);
+        }
+        if(mode==='inpainting'){
+            const blob=await new Promise((resolve,reject)=>$('image-mask-output').toBlob(value=>value?resolve(value):reject(new Error('Could not create the inpainting mask.')),'image/png'));
+            $('image-status').textContent='Uploading inpainting mask…';uploads.mask=await workspaceUI.uploadImageInput(api,new File([blob],'mask.png',{type:'image/png'}));
+        }
+        if(mode==='controlnet'){
+            $('image-status').textContent='Uploading guide image…';uploads.guide=await workspaceUI.uploadImageInput(api,imageGuideFile);
+        }
+        const request=workspaceUI.buildImageRequest({model,mode,prompt,values:imageInputValues(),uploads,
+            sessionId:conversation.id,messageIndex:conversation.messages.length-1});
+        const started=await api('/api/generate',{method:'POST',body:JSON.stringify(request)}).then(response=>response.json());
+        if(!Number.isInteger(Number(started.job_id)))throw new Error(started.error||'The image job did not start.');
+        $('image-status').textContent='Generating image…';
+        const result=await workspaceUI.waitForImageJob(path=>api(path).then(response=>response.json()),started.job_id);
+        answer.content=result.response||`PNG: ${result.image_path||''}`;conversation.updatedAt=Date.now();
+        save('prospero-conversations',conversations.slice(0,50));renderMessages();renderHistory();
+        const archiveWarning=(result.response||'').includes('Archive warning:');
+        $('image-status').textContent=archiveWarning?'Image created but could not be archived. Your selected inputs are still staged.':`Image created with ${model.name||model.id}.`;
+        $('image-result').replaceChildren();
+        if(result.image_path)appendMedia($('image-result'),{path:result.image_path,kind:'image'},'','Generated image');
+        await persistConversation(conversation);await renderMediaLibrary(true);
+        $('image-retry').hidden=!archiveWarning;
+    }catch(error){
+        if(conversation.messages.at(-1)===answer)conversation.messages.pop();
+        conversation.updatedAt=Date.now();save('prospero-conversations',conversations.slice(0,50));
+        $('image-status').textContent=`${error.message} Your image inputs are still staged.`;$('image-retry').hidden=false;
+        renderMessages();renderHistory();
+    }finally{imageSubmitting=false;$('image-generate').disabled=false;}
+}
+document.getElementById('image-model').onchange=()=>{
+    activeImageModelId='';syncImageForm(true);
+};
+document.getElementById('image-studio-form').onsubmit=event=>{event.preventDefault();void submitImageGeneration();};
+document.getElementById('image-retry').onclick=()=>void submitImageGeneration();
+document.getElementById('image-source-file').onchange=event=>setImageFile('source',event.target.files?.[0]||null);
+document.getElementById('image-guide-file').onchange=event=>setImageFile('guide',event.target.files?.[0]||null);
+document.getElementById('image-source-remove').onclick=()=>{setImageFile('source',null);$('image-source-file').value='';};
+document.getElementById('image-guide-remove').onclick=()=>{setImageFile('guide',null);$('image-guide-file').value='';};
+document.getElementById('image-mask-paint').onclick=()=>setMaskPaintMode('paint');
+document.getElementById('image-mask-erase').onclick=()=>setMaskPaintMode('erase');
+document.getElementById('image-mask-clear').onclick=clearMaskCanvas;
+const maskCanvas=$('image-mask-canvas');let maskPointerDown=false;
+maskCanvas.onpointerdown=event=>{maskPointerDown=true;maskLastPoint=null;maskCanvas.setPointerCapture(event.pointerId);paintMask(event);};
+maskCanvas.onpointermove=event=>{if(maskPointerDown)paintMask(event);};
+maskCanvas.onpointerup=()=>{maskPointerDown=false;maskLastPoint=null;};maskCanvas.onpointercancel=()=>{maskPointerDown=false;maskLastPoint=null;};
+document.querySelectorAll('[data-image-mode]').forEach(button=>button.onclick=()=>setImageMode(button.dataset.imageMode));
+document.querySelectorAll('[data-image-destination]').forEach(button=>button.onclick=()=>{
+    const destination=button.dataset.imageDestination;
+    document.querySelectorAll('[data-image-destination]').forEach(item=>{const active=item===button;item.classList.toggle('selected',active);item.setAttribute('aria-current',active?'page':'false');});
+    if(destination==='create'){page('workspace');setWorkspaceMode('image');return;}
+    if(destination==='models'){
+        page('models');modelFilter='1';for(const tab of document.querySelectorAll('[data-kind]'))tab.classList.toggle('selected',tab.dataset.kind==='1');renderModels();return;
+    }
+    mediaImageOnly=true;page('media');renderMediaLibrary(true);
+});
+document.querySelector('[data-page="workspace"]').addEventListener('click',()=>{
+    if(workspaceModeName==='image')document.querySelector('[data-image-destination="create"]').click();
+});
+document.querySelectorAll('[data-media-filter]').forEach(button=>button.onclick=()=>{
+    mediaImageOnly=button.dataset.mediaFilter==='image';
+    document.querySelectorAll('[data-media-filter]').forEach(item=>{const active=item===button;item.classList.toggle('selected',active);item.setAttribute('aria-pressed',String(active));});
+    renderMediaLibrary(mediaImageOnly);
+});
 function renderWorkspaceAudio(){
     const audioMode=workspaceModeName==='audio';
     $('workspace-audio').hidden=!audioMode;
@@ -125,19 +357,19 @@ function renderWorkspaceAudio(){
 function navigateWorkspaceMode(mode){
     setWorkspaceMode(mode);syncWorkspaceGenerationSettings();
     const path=mode==='audio'?'/audio':'/';
-    if(location.pathname!==path||history.state?.workspaceMode!==mode)history.pushState({workspaceMode:mode,audioSection:audioSectionName,imageSection:imageSectionName},'',path);
+    if(location.pathname!==path||history.state?.workspaceMode!==mode)history.pushState({workspaceMode:mode,audioSection:audioSectionName,imageMode:imageModeName},'',path);
 }
 document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>navigateWorkspaceMode(button.dataset.mode));
 document.querySelectorAll('[data-audio-section]').forEach(button=>button.onclick=()=>{setAudioSection(button.dataset.audioSection);syncWorkspaceGenerationSettings();});
-document.querySelectorAll('[data-image-section]').forEach(button=>button.onclick=()=>setImageSection(button.dataset.imageSection));
 window.addEventListener('popstate',event=>{
     const mode=event.state?.workspaceMode||(location.pathname==='/audio'?'audio':'text');
     const audioSection=event.state?.audioSection==='tts'?'tts':'music';
-    const imageSection=event.state?.imageSection==='image-to-image'?'image-to-image':'text-to-image';
-    setWorkspaceMode(['text','image','audio'].includes(mode)?mode:'text');setAudioSection(audioSection,false);setImageSection(imageSection,false);syncWorkspaceGenerationSettings();
+    setWorkspaceMode(['text','image','audio'].includes(mode)?mode:'text');setAudioSection(audioSection,false);
+    const imageMode=event.state?.imageMode;
+    if(imageMode&&imageModeLabels[imageMode])setImageMode(imageMode);
+    syncWorkspaceGenerationSettings();
 });
-async function renderMediaLibrary(){const root=$('media-library');root.replaceChildren();const loading=document.createElement('p');loading.className='muted';loading.textContent='Loading media…';root.append(loading);try{const payload=await api('/api/media');const files=payload.data||[];root.replaceChildren();if(!files.length){const note=document.createElement('p');note.className='muted';note.textContent='Generated images and audio linked to saved conversations will appear here.';root.append(note);return;}for(const file of files){const card=document.createElement('article');card.className='glass model-card';const heading=document.createElement('strong');heading.textContent=file.path.split('/').at(-1)||'Generated media';const source=document.createElement('button');source.className='secondary';source.type='button';source.textContent=`From: ${file.title||'Conversation'}`;source.onclick=async()=>{try{let conversation=conversations.find(item=>item.id===file.conversation_id);if(!conversation)conversation=await api(`/api/conversations/${encodeURIComponent(file.conversation_id)}`).then(r=>r.json());if(!conversations.some(item=>item.id===conversation.id)){conversations.unshift(conversation);save('prospero-conversations',conversations.slice(0,50));}current=conversation;currentModelChosen=false;openChat();renderMessages();renderHistory();}catch(error){$('feedback').textContent=error.message;}};const model=document.createElement('small');model.className='muted';model.textContent=`Model: ${file.modelName||file.model||'Unknown'}`;const preview=document.createElement('div');preview.className='media-library-preview';const remove=document.createElement('button');remove.className='secondary';remove.type='button';remove.textContent='Delete archived copy';remove.title='Deletes only the archived copy stored with this conversation';remove.onclick=async()=>{if(!confirm(`Delete archived media “${heading.textContent}”? The generated source file is kept.`))return;remove.disabled=true;try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});card.remove();if(!root.children.length){const note=document.createElement('p');note.className='muted';note.textContent='Generated images and audio linked to saved conversations will appear here.';root.append(note);}}catch(error){$('feedback').textContent=error.message;remove.disabled=false;}};card.append(heading,source,model,preview,remove);appendMedia(preview,{path:file.path,kind:file.kind});root.append(card);}}catch(error){root.replaceChildren();const note=document.createElement('p');note.className='muted';note.textContent=`Could not load media: ${error.message}`;root.append(note);}}
-document.querySelector('[data-page="media"]').addEventListener('click',renderMediaLibrary);
+document.querySelector('[data-page="media"]').addEventListener('click',()=>renderMediaLibrary(false));
 document.querySelector('.brand').onclick = e => { e.preventDefault(); showWelcome(); };
 function showWelcome(){if(controller){$('feedback').textContent='Stop the current response before leaving this conversation.';return;}current=null;currentModelChosen=false;workspaceChatOpen=false;page('workspace');setWorkspaceMode(workspaceModeName);renderHistory();}
 $('workspace-back').onclick=showWelcome;
@@ -401,7 +633,7 @@ function newConversation(){
     if(matchMedia('(max-width:700px)').matches)$('chat').classList.add('show-history');
     openChat();renderMessages();renderHistory();$('prompt').focus();
 }
-function startKind(mode){if(controller){$('feedback').textContent='Stop the current response before starting a new conversation.';return;}if(mode==='tts'){navigateWorkspaceMode('audio');setAudioSection('tts');}else navigateWorkspaceMode(mode);if(mode==='audio')return;newConversation();modelChooser.focus();const kind={text:0,image:1,tts:3}[mode]??0;$('model-load-status').textContent=`Choose a ${kindNames[kind].toLowerCase()} model; it loads when you submit.`;}
+function startKind(mode){if(controller){$('feedback').textContent='Stop the current response before starting a new conversation.';return;}if(mode==='tts'){navigateWorkspaceMode('audio');setAudioSection('tts');}else navigateWorkspaceMode(mode);if(mode==='audio'||mode==='image')return;newConversation();modelChooser.focus();const kind={text:0,image:1,tts:3}[mode]??0;$('model-load-status').textContent=`Choose a ${kindNames[kind].toLowerCase()} model; it loads when you submit.`;}
 function closeHistory(){$('chat').classList.remove('show-history');$('history-toggle').setAttribute('aria-expanded','false');}
 $('start').onclick=()=>startKind('text');$('converse').onclick=()=>startKind('text');$('imagine').onclick=()=>startKind('image');$('compose').onclick=()=>startKind('audio');$('workspace-tts-start').onclick=()=>startKind('tts');$('new').onclick=newConversation;$('history-close').onclick=closeHistory;$('history-toggle').onclick=()=>{$('chat').classList.toggle('show-history');$('history-toggle').setAttribute('aria-expanded',String($('chat').classList.contains('show-history')));};
 function extractMedia(text){const paths=[...text.matchAll(/\/download0\/[^\s]+\.(?:png|tga|wav)/g)];if(!paths.length)return null;const match=paths.find(item=>item[0].startsWith('/download0/ProsperoAI/sessions/')||item[0].startsWith('/download0/ProsperoAI/work/image/'))||paths[0],path=match[0],kind=path.endsWith('.wav')?'audio':'image';return{path,kind,before:text.slice(0,match.index)};}

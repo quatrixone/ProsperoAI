@@ -39,18 +39,61 @@
       </section>
 
       <section id="workspace-image" class="workspace-image" hidden aria-label="Image Workspace">
-        <div class="workspace-audio-sections" role="tablist" aria-label="Image section">
-          <button id="workspace-image-text-tab" type="button" role="tab" aria-selected="true" class="selected" aria-controls="workspace-image-text" data-image-section="text-to-image">Text to image</button>
-          <button id="workspace-image-edit-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-image-edit" data-image-section="image-to-image">Image to image</button>
-        </div>
-        <section id="workspace-image-text" role="tabpanel" aria-labelledby="workspace-image-text-tab">
-          <p class="muted">Create an image from a text prompt.</p>
-        </section>
-        <section id="workspace-image-edit" role="tabpanel" aria-labelledby="workspace-image-edit-tab" hidden>
-          <p id="workspace-image-i2i-ready" class="muted" hidden>A model with image-to-image support is available.</p>
-          <p id="workspace-image-i2i-loading" class="muted" role="status" hidden>Checking image-model capabilities…</p>
-          <p id="workspace-image-i2i-empty" class="audio-empty-models" hidden>No installed image model declares image-to-image support.</p>
-          <p id="workspace-image-i2i-unavailable" class="muted" role="status" hidden>Could not check installed image models. Reconnect to your PS5 and try again.</p>
+        <nav class="image-destinations" aria-label="Image workspace">
+          <button type="button" class="selected" aria-current="page" data-image-destination="create">Create</button>
+          <button type="button" data-image-destination="models">Models</button>
+          <button type="button" data-image-destination="gallery">Gallery</button>
+        </nav>
+        <section id="image-studio" aria-label="Create image">
+          <div class="image-studio-heading"><div><h1>Image Studio</h1><p class="muted">Create from a prompt, refine an image, paint a mask, or follow a guide.</p></div></div>
+          <div class="image-studio-layout">
+            <section class="glass image-create-panel" aria-label="Image generation form">
+              <label for="image-model">Image model<select id="image-model" aria-label="Choose an image model"></select></label>
+              <p id="image-model-empty" class="audio-empty-models" role="status" hidden>No image models are installed. Open Models to choose an image preset.</p>
+              <p id="image-capability-note" class="muted" role="status"></p>
+              <div class="image-mode-tabs" role="tablist" aria-label="Image mode">
+                <button type="button" role="tab" aria-selected="true" aria-pressed="true" data-image-mode="text_to_image" aria-controls="image-studio-form">Text to image</button>
+                <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="image_to_image" aria-controls="image-studio-form">Image to image</button>
+                <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="inpainting" aria-controls="image-studio-form">Inpainting</button>
+                <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="controlnet" aria-controls="image-studio-form">ControlNet</button>
+              </div>
+              <p id="image-mode-note" class="muted" role="status"></p>
+              <form id="image-studio-form">
+                <label for="image-prompt">Prompt<textarea id="image-prompt" rows="3" placeholder="Describe what you want to create" required></textarea></label>
+                <label for="image-negative-prompt">Negative prompt<textarea id="image-negative-prompt" rows="2" placeholder="Optional: details to avoid"></textarea></label>
+                <div class="image-input-grid">
+                  <label for="image-width">Width<input id="image-width" type="number" min="256" max="1536" step="64"></label>
+                  <label for="image-height">Height<input id="image-height" type="number" min="256" max="1536" step="64"></label>
+                  <label for="image-steps">Steps<input id="image-steps" type="number" min="1" max="50" step="1"></label>
+                  <label for="image-cfg-scale">CFG scale<input id="image-cfg-scale" type="number" min="0" max="20" step="0.1"></label>
+                  <label for="image-seed">Seed<input id="image-seed" type="number" min="-1" max="4294967295" step="1" value="-1"></label>
+                  <label for="image-sampler">Sampler<select id="image-sampler"><option>euler</option><option>euler_a</option><option>heun</option><option>dpm2</option><option>dpm++2s_a</option><option>dpm++2m</option><option>dpm++2mv2</option><option>ipndm</option><option>ipndm_v</option><option>lcm</option><option>ddim_trailing</option><option>tcd</option><option>res_multistep</option><option>res_2s</option><option>er_sde</option><option>euler_cfg_pp</option><option>euler_a_cfg_pp</option><option>euler_ge</option><option>dpm++2m_sde</option><option>dpm++2m_sde_bt</option><option>lms</option></select></label>
+                  <label for="image-scheduler">Scheduler<select id="image-scheduler"><option value="">Model default</option><option>discrete</option><option>karras</option><option>exponential</option><option>ays</option><option>gits</option><option>sgm_uniform</option><option>simple</option><option>smoothstep</option><option>kl_optimal</option><option>lcm</option><option>bong_tangent</option><option>ltx2</option><option>logit_normal</option><option>flux2</option><option>flux</option><option>beta</option><option>llada_image</option></select></label>
+                </div>
+                <label id="image-strength-control" for="image-strength">Strength <input id="image-strength" type="number" min="0" max="1" step="0.05" value="0.75"></label>
+                <label id="image-control-strength-control" for="image-control-strength">Control strength <input id="image-control-strength" type="number" min="0" max="2" step="0.05" value="1"></label>
+                <label id="image-canny-control" class="check" for="image-canny"><input id="image-canny" type="checkbox" checked>Apply Canny edge detection</label>
+                <div id="image-source-control" class="image-file-control">
+                  <label for="image-source-file">Source image<input id="image-source-file" type="file" accept="image/png,image/jpeg"></label>
+                  <div id="image-source-preview" class="image-source-preview" hidden><img id="image-source-preview-img" alt="Selected source image"><button id="image-source-remove" class="secondary" type="button">Remove image</button></div>
+                </div>
+                <div id="image-mask-control" class="image-file-control" hidden>
+                  <p>Paint the area to regenerate. White marks the mask; unpainted areas stay black.</p>
+                  <div id="image-mask-stage" class="image-mask-stage" hidden><img id="image-mask-source" alt="Image under the inpainting mask"><canvas id="image-mask-canvas" aria-label="Paint inpainting mask"></canvas></div>
+                  <div class="image-actions"><button id="image-mask-paint" type="button" aria-pressed="true">Paint</button><button id="image-mask-erase" type="button" aria-pressed="false">Erase</button><label for="image-brush-size">Brush size<input id="image-brush-size" type="range" min="8" max="160" value="48"></label><button id="image-mask-clear" class="secondary" type="button">Clear mask</button></div>
+                  <canvas id="image-mask-output" hidden></canvas>
+                </div>
+                <div id="image-guide-control" class="image-file-control" hidden>
+                  <label for="image-guide-file">ControlNet guide<input id="image-guide-file" type="file" accept="image/png,image/jpeg"></label>
+                  <div id="image-guide-preview" class="image-source-preview" hidden><img id="image-guide-preview-img" alt="Selected ControlNet guide"><button id="image-guide-remove" class="secondary" type="button">Remove guide</button></div>
+                </div>
+                <div class="image-actions"><button id="image-generate" class="primary" type="submit">Generate image</button><button id="image-retry" class="secondary" type="button" hidden>Retry</button></div>
+                <p id="image-status" role="status" aria-live="polite"></p>
+                <div id="image-result" class="image-result" aria-live="polite"></div>
+              </form>
+            </section>
+            <aside class="glass image-settings-note"><h2>Model settings</h2><p>Each model starts with its server-provided defaults. Choose a different image model to update these settings.</p><p id="image-model-defaults" class="muted"></p></aside>
+          </div>
         </section>
       </section>
 
@@ -195,7 +238,7 @@
 
     </main>
 
-    <main id="media" hidden><p class="eyebrow">YOUR CREATIONS</p><h1>Media library</h1><p class="muted">Generated images and audio referenced by saved conversations. Files stay on your PS5.</p><div id="media-library" class="model-grid" aria-live="polite"></div></main>
+    <main id="media" hidden><p class="eyebrow">YOUR CREATIONS</p><h1 id="media-heading">Media library</h1><p class="muted">Generated images and audio referenced by saved conversations. Files stay on your PS5.</p><div class="media-filters" role="group" aria-label="Media type"><button type="button" data-media-filter="all" aria-pressed="true" class="selected">All media</button><button type="button" data-media-filter="image" aria-pressed="false">Images</button></div><div id="media-library" class="model-grid" aria-live="polite"></div></main>
     <main id="models" hidden><p class="eyebrow">YOUR SPACE</p><h1>Your models.</h1><p class="intro">A little intelligence. A world of possibilities.</p><div class="model-tools"><input id="search" type="search" placeholder="Search your models" aria-label="Search models"><div id="model-filters" class="model-filters" aria-label="Model categories"><button data-kind="all" class="selected">All</button><button data-kind="0">Text</button><button data-kind="1">Image</button><button data-kind="2">Audio</button><button data-kind="3">Voice</button></div></div><div id="model-list" class="model-grid"></div><p id="model-count"></p><section class="glass downloader"><p class="eyebrow">MODEL LIBRARY</p><h2>Find a model.</h2><p class="muted">Search by name, browse matching repositories, and download a verified GGUF model.</p><form id="download-repo" class="download-form"><label for="model-query">Model name</label><div><input id="model-query" name="query" type="search" placeholder="Mistral 7B, Llama 3, Qwen…" autocomplete="off" maxlength="96" required><button id="browse-models" class="primary">Search models</button></div></form><p id="download-status" role="status" aria-live="polite">Enter a model name to search public repositories.</p><progress id="download-progress" max="100" value="0" hidden aria-label="Model download progress"></progress><button id="download-cancel" type="button" hidden>Cancel download</button><div id="download-list" class="download-list"></div></section></main>
     <main id="settings" hidden><p class="eyebrow">SETTINGS</p><h1>Make it feel like yours.</h1><div class="settings-grid"><div class="glass settings-categories" role="tablist" aria-label="Settings categories"><button data-category="appearance" role="tab" aria-selected="true" class="selected">Appearance</button><button data-category="sound" role="tab" aria-selected="false">Sound</button><button data-category="accessibility" role="tab" aria-selected="false">Accessibility</button><button data-category="opencode" role="tab" aria-selected="false">OpenCode</button><button data-category="about" role="tab" aria-selected="false">About</button></div><div class="glass settings-panel"><section id="setting-appearance"><label>Color theme<select id="theme"><option value="midnight">Midnight</option><option value="daylight">Daylight</option></select></label><label>Accent color<select id="accent"><option value="gold">Amber</option><option value="blue">Soft blue</option><option value="green">Quiet green</option></select></label></section><section id="setting-sound" hidden><label class="check"><input id="sounds" type="checkbox">Interface sounds</label><label>Volume<input id="volume" type="range" min="0" max="1" step="0.05" value="0.4"></label></section><section id="setting-accessibility" hidden><label>Text size<select id="text-size"><option value="normal">Standard</option><option value="large">Large</option></select></label><label class="check"><input id="motion" type="checkbox">Reduced motion</label><label class="check"><input id="contrast" type="checkbox">High contrast</label></section><section id="setting-opencode" hidden><h2>OpenCode</h2><p class="muted">Connect coding tools to your PS5 and configure built-in web search.</p><button id="access" class="secondary">Connection key</button><h3>Connection security</h3><p id="connection-security" class="muted" role="status">Checking API security…</p></section><section id="setting-about" hidden><h2>ProsperoAI</h2><p class="muted">A space to think, imagine, and create.<br>Models run on your PS5. No account, no cloud, nothing uploaded.</p><p class="muted">Made by BlackBearReloaded and Quatrixone.</p><h3>Diagnostics</h3><p class="muted">Export recent lifecycle and model errors. Prompts, responses, keys and recordings are excluded.</p><button id="export-diagnostics" class="secondary" type="button">Export diagnostics</button></section></div><section class="glass settings-preview"><p class="eyebrow">LIVE PREVIEW</p><div class="preview-user">Tell me a story.</div><strong><span>◎</span> ProsperoAI</strong><p>Once, a small light learned to think for itself.</p><button class="primary" type="button" id="preview-send">Send</button><span class="preview-wave">≋</span></section></div></main>
     <footer><span>PRIVATE BY DESIGN</span><span id="footer-note">Entirely yours.</span></footer>
