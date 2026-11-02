@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <cstring>
 #include <initializer_list>
+#include <mutex>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -39,6 +40,7 @@ constexpr const char *kRoot = "/download0/ProsperoAI/sessions";
 constexpr const char *kWork = "/download0/ProsperoAI/work";
 #endif
 alignas(16) char directory_entries[0x10000];
+std::mutex output_reference_mutex;
 
 std::uint64_t now_microseconds()
 {
@@ -361,7 +363,7 @@ std::FILE *open_output(const char *id, unsigned index, const char *kind, const c
     return nullptr;
 }
 
-bool save_output_reference(const char *id, unsigned index, const char *output)
+bool write_output_reference(const char *id, unsigned index, const char *output)
 {
     char reference[256], temporary[272], leaf[48];
     std::snprintf(leaf, sizeof(leaf), "output-%03u.txt", index);
@@ -376,6 +378,12 @@ bool save_output_reference(const char *id, unsigned index, const char *output)
     if (!ok)
         std::remove(temporary);
     return ok;
+}
+
+bool save_output_reference(const char *id, unsigned index, const char *output)
+{
+    std::lock_guard<std::mutex> lock(output_reference_mutex);
+    return write_output_reference(id, index, output);
 }
 
 bool image_sidecar_path(char *output, std::size_t capacity, const char *id, unsigned index)
@@ -452,6 +460,7 @@ bool remove_archived_media(const char *id, unsigned index, const char *path)
 {
     if (!valid_id(id) || index >= MessageCapacity || !path)
         return false;
+    std::lock_guard<std::mutex> lock(output_reference_mutex);
     std::string recorded_path;
     if (!read_output_reference(id, index, &recorded_path) || recorded_path != path)
         return false;
@@ -463,7 +472,7 @@ bool remove_archived_media(const char *id, unsigned index, const char *path)
         return false;
     if (std::remove(path) == 0)
         return true;
-    (void)save_output_reference(id, index, path);
+    (void)write_output_reference(id, index, path);
     return false;
 }
 

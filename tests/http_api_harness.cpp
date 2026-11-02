@@ -87,6 +87,23 @@ extern "C"
     }
 }
 
+extern "C" int __real_remove(const char *path);
+extern "C" int __wrap_remove(const char *path)
+{
+    const char *gate = std::getenv("PROSPERO_TEST_REMOVE_GATE");
+    if (gate && path && std::string(path).ends_with("/output-000.txt"))
+    {
+        const std::string entered = std::string(gate) + ".entered";
+        const std::string release = std::string(gate) + ".release";
+        std::ofstream(entered).put('1');
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (access(release.c_str(), F_OK) != 0 &&
+               std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return __real_remove(path);
+}
+
 static thread_local std::string input, wire;
 static thread_local std::size_t position;
 static std::barrier<> *upload_race_barrier = nullptr;
@@ -393,6 +410,125 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
 }
 int main(int argc, char **argv)
 {
+    if (argc > 1 && std::strcmp(argv[1], "--test-output-reference-delete-race") == 0)
+    {
+        const char *gate = std::getenv("PROSPERO_TEST_REMOVE_GATE");
+        const char *source = std::getenv("PROSPERO_TEST_IMAGE_OUTPUT_SOURCE");
+        if (!gate || !source)
+            return 2;
+        NetApi api{};
+        api.send = fake_send;
+        api.recv = fake_recv;
+        api.socket_close = fake_close;
+        auto request = [&](const char *method, const char *route, const std::string &body)
+        {
+            input = std::string(method) + " " + route + " HTTP/1.1\r\nHost: test\r\nContent-Length: " +
+                    std::to_string(body.size()) + "\r\n\r\n" + body;
+            position = 0;
+            wire.clear();
+            handle_connection(api, 1);
+            return wire;
+        };
+        const std::string generate_body =
+            R"({"model":"sdxl-base-q8-0","prompt":"first output","image_workflow":{"workflow":"text_to_image"},"output_session_id":"image-output-race","output_message_index":0})";
+        const std::string first_response = request("POST", "/api/generate", generate_body);
+        const auto first = nlohmann::json::parse(http_body(first_response), nullptr, false);
+        if (!first.is_object() || !first.contains("image_path"))
+            return 3;
+        const std::string previous_path = first["image_path"].get<std::string>();
+        std::string delete_response;
+        std::thread deleter([&]
+        {
+            delete_response = request("DELETE", "/api/media",
+                                      nlohmann::json{{"path", previous_path}}.dump());
+        });
+
+        const std::string entered = std::string(gate) + ".entered";
+        const std::string release = std::string(gate) + ".release";
+        const auto entered_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (access(entered.c_str(), F_OK) != 0 &&
+               std::chrono::steady_clock::now() < entered_deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (access(entered.c_str(), F_OK) != 0)
+        {
+            std::ofstream(release).put('1');
+            deleter.join();
+            std::cerr << "delete did not reach the output-reference unlink\n";
+            return 4;
+        }
+
+        std::string archive_response;
+        const std::string newer_body =
+            R"({"model":"sdxl-base-q8-0","prompt":"newer output","image_workflow":{"workflow":"text_to_image"},"output_session_id":"image-output-race","output_message_index":0})";
+        std::thread archiver([&] { archive_response = request("POST", "/api/generate", newer_body); });
+        struct stat source_info{};
+        if (stat(source, &source_info) != 0)
+        {
+            std::ofstream(release).put('1');
+            deleter.join();
+            archiver.join();
+            return 5;
+        }
+        const std::string output_directory =
+            "/tmp/prosperoai-session-test/work/image/image-output-race";
+        bool newer_file_ready = false;
+        const auto file_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!newer_file_ready && std::chrono::steady_clock::now() < file_deadline)
+        {
+            DIR *directory = opendir(output_directory.c_str());
+            if (directory)
+            {
+                while (const dirent *entry = readdir(directory))
+                {
+                    if (entry->d_name[0] == '.')
+                        continue;
+                    const std::string candidate = output_directory + "/" + entry->d_name;
+                    struct stat info{};
+                    if (candidate != previous_path && candidate.ends_with(".png") &&
+                        stat(candidate.c_str(), &info) == 0 && info.st_size == source_info.st_size)
+                    {
+                        newer_file_ready = true;
+                        break;
+                    }
+                }
+                closedir(directory);
+            }
+            if (!newer_file_ready)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::ofstream(release).put('1');
+        deleter.join();
+        archiver.join();
+
+        const auto newer = nlohmann::json::parse(http_body(archive_response), nullptr, false);
+        if (!newer_file_ready || delete_response.find("HTTP/1.1 200 OK") != 0 ||
+            archive_response.find("HTTP/1.1 200 OK") != 0 ||
+            !newer.is_object() || !newer.contains("image_path"))
+        {
+            std::cerr << "concurrent delete/archive requests did not both complete successfully\n";
+            return 6;
+        }
+        const std::string newer_path = newer["image_path"].get<std::string>();
+        std::string current_reference;
+        if (!prospero_session::read_output_reference("image-output-race", 0, &current_reference) ||
+            current_reference != newer_path || access(newer_path.c_str(), F_OK) != 0)
+        {
+            std::cerr << "newer archived output was orphaned by deletion\n";
+            return 7;
+        }
+        const std::string media_response = request("GET", "/api/media", "");
+        const auto media = nlohmann::json::parse(http_body(media_response), nullptr, false);
+        if (!media.is_object() || !media.contains("data") ||
+            std::none_of(media["data"].begin(), media["data"].end(),
+                         [&](const auto &item) { return item.value("path", "") == newer_path; }))
+        {
+            std::cerr << "newer archived output is absent from the media listing\n";
+            return 8;
+        }
+        std::cout << "output reference race: ok\n";
+        return 0;
+    }
     if (argc > 1 && std::strcmp(argv[1], "--test-image-upload-lifecycle") == 0)
     {
         if (!ensure_image_upload_directory())

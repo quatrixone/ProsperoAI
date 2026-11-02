@@ -45,8 +45,10 @@ class HttpApiTests(unittest.TestCase):
                         str(ROOT / "search-engine/src/transport.cpp"),
                         "-DPROSPERO_HOST", str(ROOT / "src/voice_recorder.cpp"),
                         "-o", str(cls.binary)]
+        command.insert(command.index("-Wl,--gc-sections") + 1, "-Wl,--wrap=remove")
         subprocess.run(command, check=True)
         cls.lifecycle_binary = tmp / "http-lifecycle-test"
+        command.remove("-Wl,--wrap=remove")
         command[command.index(str(ROOT / "tests/http_api_harness.cpp"))] = str(ROOT / "tests/http_lifecycle_test.cpp")
         command[-1] = str(cls.lifecycle_binary)
         subprocess.run(command, check=True)
@@ -471,6 +473,23 @@ class HttpApiTests(unittest.TestCase):
                 unowned.parent.rmdir()
             except OSError:
                 pass
+            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                         headers=["Authorization: Bearer secret"])
+
+    def test_concurrent_archive_cannot_be_orphaned_by_output_reference_delete(self):
+        session_id = "image-output-race"
+        self.save_conversation_with_image(session_id)
+        gate = Path(self.scratch.name) / "reference-delete-gate"
+        try:
+            result = subprocess.run(
+                [str(self.binary), "--test-output-reference-delete-race"],
+                env={**os.environ, **self.image_workflow_environment(),
+                     "PROSPERO_TEST_REMOVE_GATE": str(gate)},
+                capture_output=True, text=True, timeout=20,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("output reference race: ok", result.stdout)
+        finally:
             self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
                          headers=["Authorization: Bearer secret"])
 
