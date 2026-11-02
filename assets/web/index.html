@@ -81,6 +81,16 @@
                   <p>Paint the area to regenerate. White marks the mask; unpainted areas stay black.</p>
                   <div id="image-mask-stage" class="image-mask-stage" hidden><img id="image-mask-source" alt="Image under the inpainting mask"><canvas id="image-mask-canvas" aria-label="Paint inpainting mask"></canvas></div>
                   <div class="image-actions"><button id="image-mask-paint" type="button" aria-pressed="true">Paint</button><button id="image-mask-erase" type="button" aria-pressed="false">Erase</button><label for="image-brush-size">Brush size<input id="image-brush-size" type="range" min="8" max="160" value="48"></label><button id="image-mask-clear" class="secondary" type="button">Clear mask</button></div>
+                  <div id="image-mask-keyboard-controls" class="image-mask-keyboard-controls" role="group" aria-label="Keyboard mask editor" aria-describedby="image-mask-keyboard-help">
+                    <p id="image-mask-keyboard-help">Set a rectangle as percentages of the image, then use Paint selected rectangle or Erase selected rectangle.</p>
+                    <div class="image-mask-coordinate-grid">
+                      <label for="image-mask-x">Left (%)<input id="image-mask-x" type="number" min="0" max="100" step="1" value="25"></label>
+                      <label for="image-mask-y">Top (%)<input id="image-mask-y" type="number" min="0" max="100" step="1" value="25"></label>
+                      <label for="image-mask-width">Width (%)<input id="image-mask-width" type="number" min="1" max="100" step="1" value="30"></label>
+                      <label for="image-mask-height">Height (%)<input id="image-mask-height" type="number" min="1" max="100" step="1" value="30"></label>
+                    </div>
+                    <div class="image-actions"><button id="image-mask-paint-rectangle" type="button">Paint selected rectangle</button><button id="image-mask-erase-rectangle" class="secondary" type="button">Erase selected rectangle</button></div>
+                  </div>
                   <canvas id="image-mask-output" hidden></canvas>
                 </div>
                 <div id="image-guide-control" class="image-file-control" hidden>

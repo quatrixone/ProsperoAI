@@ -144,6 +144,10 @@ body.contrast :is(button,a,summary,[role=tab],select,input,textarea):focus-visib
 .image-mask-stage{position:relative;max-width:100%;width:max-content;margin:12px auto 0;overflow:hidden;touch-action:none;border-radius:10px;background:#07090d}
 .image-mask-stage img{display:block;max-width:100%;max-height:480px;object-fit:contain}
 .image-mask-stage canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}
+.image-mask-keyboard-controls{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:12px}
+.image-mask-coordinate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.image-mask-coordinate-grid label{display:block;min-width:0;margin:8px 0}
+.image-mask-coordinate-grid input{width:100%}
 .image-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:18px 0 8px}
 .image-actions label{margin:0;gap:8px}
 .image-actions input[type=range]{width:120px;max-width:none}
@@ -156,4 +160,5 @@ body.contrast :is(button,a,summary,[role=tab],select,input,textarea):focus-visib
 .media-filters button{border:1px solid var(--line);min-height:40px;padding:8px 14px}
 .media-filters button.selected{background:var(--raised)}
 @media(max-width:1000px){.image-studio-layout{grid-template-columns:minmax(0,1fr)}.image-settings-note{display:none}}
+@media(max-width:700px){.image-mask-coordinate-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:700px){.image-destinations{width:100%;justify-content:space-between;margin-bottom:20px}.image-destinations button{flex:1;padding:8px}.image-studio-heading h1{font-size:38px}.image-create-panel{padding:18px}.image-mode-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.image-mode-tabs button{min-height:46px}.image-input-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.image-file-control{padding:12px}.image-actions{align-items:stretch;flex-direction:column}.image-actions button{width:100%}.image-actions label{justify-content:space-between;flex-wrap:nowrap}.image-mask-stage img{max-height:360px}.media-filters{width:100%}.media-filters button{flex:1}}

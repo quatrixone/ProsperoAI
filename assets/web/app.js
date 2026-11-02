@@ -56,7 +56,7 @@ let workspaceModeName=location.pathname === '/audio' ? 'audio' : 'text';
 let audioSectionName='music';
 let imageModeName='text_to_image', activeImageModelId='', activeImageSettingsMode='';
 let imageSourceFile=null, imageGuideFile=null, imageMaskPainted=false, imagePaintMode='paint', imageSubmitting=false;
-let imageSourceUrl='', imageGuideUrl='', mediaImageOnly=false;
+let imageSourceUrl='', imageGuideUrl='', mediaImageOnly=false, imageJobId=null, imageAttempt=null;
 let stagedWorkspaceModel='',workspaceChatOpen=false,preparedModel='',preparation=null,submitting=false,finalWorkspaceOptions={};
 const workspaceMode=workspaceUI.createWorkspaceMode({models,selectModel:selectWorkspaceModel,prepareModel:prepareWorkspaceModel});
 workspaceMode.setMode(workspaceModeName);
@@ -207,6 +207,18 @@ function paintMask(event){
     if(!erase)imageMaskPainted=true;
     maskLastPoint={x,y};
 }
+function editMaskRectangle(erase=false){
+    if(!imageSourceFile)return;
+    const output=$('image-mask-output'),preview=$('image-mask-canvas');
+    const percent=id=>Math.max(0,Math.min(100,Number($(id).value)||0))/100;
+    const x=percent('image-mask-x')*output.width,y=percent('image-mask-y')*output.height;
+    const width=percent('image-mask-width')*output.width,height=percent('image-mask-height')*output.height;
+    if(!width||!height)return;
+    const mask=output.getContext('2d');mask.fillStyle=erase?'#000':'#fff';mask.fillRect(x,y,width,height);
+    const overlay=preview.getContext('2d');
+    if(erase)overlay.clearRect(x,y,width,height);
+    else{overlay.fillStyle='rgba(255,255,255,.5)';overlay.fillRect(x,y,width,height);imageMaskPainted=true;}
+}
 function setMaskPaintMode(mode){
     imagePaintMode=mode;
     for(const [name,id] of [['paint','image-mask-paint'],['erase','image-mask-erase']])$(''+id).setAttribute('aria-pressed',String(name===mode));
@@ -218,11 +230,17 @@ function safeImageFile(file,filename){
 }
 async function stageGalleryImage(file,mode){
     try{
+        const candidate=workspaceUI.filterModels(models,'image').find(model=>workspaceUI.imageCapabilities(model).includes(mode));
+        if(!candidate){
+            document.querySelector('[data-image-destination="create"]').click();
+            const modeName=mode==='controlnet'?'ControlNet':'image-to-image';
+            $('image-status').textContent=`No installed ${modeName} model is available. Open Models and install an image model that supports ${modeName}.`;
+            return;
+        }
         const blob=await api(file.path).then(response=>response.blob());
         const filename=file.path.split('/').at(-1)||'gallery-image.png';
         setImageFile(mode==='controlnet'?'guide':'source',safeImageFile(blob,filename));
-        const candidate=workspaceUI.filterModels(models,'image').find(model=>workspaceUI.imageCapabilities(model).includes(mode));
-        if(candidate)$('image-model').value=candidate.id;
+        $('image-model').value=candidate.id;
         setImageMode(mode);document.querySelector('[data-image-destination="create"]').click();
         $('image-status').textContent=mode==='controlnet'?'Guide image staged from Gallery.':'Image staged from Gallery.';
     }catch(error){$('feedback').textContent=`Could not stage this Gallery image: ${error.message}`;}
@@ -256,47 +274,67 @@ async function renderMediaLibrary(imageOnly=mediaImageOnly){
 }
 async function submitImageGeneration(){
     if(imageSubmitting)return;
-    const model=imageModel(),prompt=$('image-prompt').value.trim(),mode=imageModeName;
+    const pendingJob=Boolean(imageJobId&&imageAttempt);
+    const model=pendingJob?imageAttempt.model:imageModel();
+    const prompt=pendingJob?imageAttempt.prompt:$('image-prompt').value.trim();
+    const mode=pendingJob?imageAttempt.mode:imageModeName;
     if(!model){$('image-status').textContent='Choose an installed image model before generating.';$('image-model').focus();return;}
-    const currentUploads={image:mode==='image_to_image'||mode==='inpainting'?imageSourceFile:null,
-        mask:mode==='inpainting'&&imageMaskPainted?imageMaskPainted:null,guide:mode==='controlnet'?imageGuideFile:null};
-    const missing=workspaceUI.validateImageInputs(mode,currentUploads);
-    if(missing){$('image-status').textContent=missing;return;}
-    if(!prompt){$('image-status').textContent='Enter a prompt before generating.';$('image-prompt').focus();return;}
-    imageSubmitting=true;$('image-generate').disabled=true;$('image-retry').hidden=true;$('image-status').textContent='Preparing image request…';
-    let conversation=current;
-    if(!conversation||conversation.purpose!=='text-to-image'||conversation.model!==model.id){
-        conversation={id:globalThis.crypto?.randomUUID?.()||String(Date.now()),title:prompt.slice(0,70),model:model.id,
-            modelName:model.name||model.id,purpose:'text-to-image',messages:[],updatedAt:Date.now()};
-        current=conversation;currentModelChosen=true;workspaceChatOpen=true;
-        if(!conversations.includes(conversation))conversations.unshift(conversation);
+    if(!pendingJob){
+        const currentUploads={image:mode==='image_to_image'||mode==='inpainting'?imageSourceFile:null,
+            mask:mode==='inpainting'&&imageMaskPainted?imageMaskPainted:null,guide:mode==='controlnet'?imageGuideFile:null};
+        const missing=workspaceUI.validateImageInputs(mode,currentUploads);
+        if(missing){$('image-status').textContent=missing;return;}
+        if(!prompt){$('image-status').textContent='Enter a prompt before generating.';$('image-prompt').focus();return;}
     }
-    if(conversation.messages.at(-1)?.role==='user'&&conversation.messages.at(-2)?.role==='assistant'&&!conversation.messages.at(-2).content)
-        conversation.messages.pop();
-    const userMessage={role:'user',content:prompt},answer={role:'assistant',content:''};
-    conversation.messages.push(userMessage,answer);conversation.title=conversation.title||prompt.slice(0,70);conversation.updatedAt=Date.now();
+    imageSubmitting=true;$('image-generate').disabled=true;$('image-retry').hidden=true;$('image-status').textContent='Preparing image request…';
+    let conversation,answer;
+    if(pendingJob){
+        ({conversation,answer}=imageAttempt);current=conversation;
+    }else{
+        const retryAttempt=imageAttempt&&imageAttempt.conversation===current&&imageAttempt.model.id===model.id&&
+            imageAttempt.prompt===prompt&&imageAttempt.mode===mode&&current.messages.at(-2)===imageAttempt.userMessage&&
+            current.messages.at(-1)===imageAttempt.answer;
+        if(retryAttempt){conversation=imageAttempt.conversation;answer=imageAttempt.answer;answer.content='';}
+        else{
+            conversation=current;
+            if(!conversation||conversation.purpose!=='text-to-image'||conversation.model!==model.id){
+                conversation={id:globalThis.crypto?.randomUUID?.()||String(Date.now()),title:prompt.slice(0,70),model:model.id,
+                    modelName:model.name||model.id,purpose:'text-to-image',messages:[],updatedAt:Date.now()};
+                current=conversation;currentModelChosen=true;workspaceChatOpen=true;
+                if(!conversations.includes(conversation))conversations.unshift(conversation);
+            }
+            const userMessage={role:'user',content:prompt};answer={role:'assistant',content:''};
+            conversation.messages.push(userMessage,answer);
+            imageAttempt={conversation,userMessage,answer,model,prompt,mode};
+        }
+        conversation.title=conversation.title||prompt.slice(0,70);conversation.updatedAt=Date.now();
+    }
     try{
-        const conversationResponse=await api('/api/conversations',{method:'POST',body:JSON.stringify(conversation)});
-        const saved=await conversationResponse.json();conversation._serverUpdatedUs=Number(saved.updated_us)||0;
-        save('prospero-conversations',conversations.slice(0,50));
-        await selectWorkspaceModel(model.id);await prepareWorkspaceModel(model.id);
-        const uploads={};
-        if(mode==='image_to_image'||mode==='inpainting'){
-            $('image-status').textContent='Uploading source image…';uploads.image=await workspaceUI.uploadImageInput(api,imageSourceFile);
+        if(!pendingJob){
+            const conversationResponse=await api('/api/conversations',{method:'POST',body:JSON.stringify(conversation)});
+            const saved=await conversationResponse.json();conversation._serverUpdatedUs=Number(saved.updated_us)||0;
+            save('prospero-conversations',conversations.slice(0,50));
+            await selectWorkspaceModel(model.id);await prepareWorkspaceModel(model.id);
+            const uploads={};
+            if(mode==='image_to_image'||mode==='inpainting'){
+                $('image-status').textContent='Uploading source image…';uploads.image=await workspaceUI.uploadImageInput(api,imageSourceFile);
+            }
+            if(mode==='inpainting'){
+                const blob=await new Promise((resolve,reject)=>$('image-mask-output').toBlob(value=>value?resolve(value):reject(new Error('Could not create the inpainting mask.')),'image/png'));
+                $('image-status').textContent='Uploading inpainting mask…';uploads.mask=await workspaceUI.uploadImageInput(api,new File([blob],'mask.png',{type:'image/png'}));
+            }
+            if(mode==='controlnet'){
+                $('image-status').textContent='Uploading guide image…';uploads.guide=await workspaceUI.uploadImageInput(api,imageGuideFile);
+            }
+            const request=workspaceUI.buildImageRequest({model,mode,prompt,values:imageInputValues(),uploads,
+                sessionId:conversation.id,messageIndex:conversation.messages.length-1});
+            const started=await api('/api/generate',{method:'POST',body:JSON.stringify(request)}).then(response=>response.json());
+            if(!Number.isInteger(Number(started.job_id)))throw new Error(started.error||'The image job did not start.');
+            imageJobId=Number(started.job_id);
         }
-        if(mode==='inpainting'){
-            const blob=await new Promise((resolve,reject)=>$('image-mask-output').toBlob(value=>value?resolve(value):reject(new Error('Could not create the inpainting mask.')),'image/png'));
-            $('image-status').textContent='Uploading inpainting mask…';uploads.mask=await workspaceUI.uploadImageInput(api,new File([blob],'mask.png',{type:'image/png'}));
-        }
-        if(mode==='controlnet'){
-            $('image-status').textContent='Uploading guide image…';uploads.guide=await workspaceUI.uploadImageInput(api,imageGuideFile);
-        }
-        const request=workspaceUI.buildImageRequest({model,mode,prompt,values:imageInputValues(),uploads,
-            sessionId:conversation.id,messageIndex:conversation.messages.length-1});
-        const started=await api('/api/generate',{method:'POST',body:JSON.stringify(request)}).then(response=>response.json());
-        if(!Number.isInteger(Number(started.job_id)))throw new Error(started.error||'The image job did not start.');
         $('image-status').textContent='Generating image…';
-        const result=await workspaceUI.waitForImageJob(path=>api(path).then(response=>response.json()),started.job_id);
+        const result=await workspaceUI.waitForImageJob(path=>api(path).then(response=>response.json()),imageJobId);
+        imageJobId=null;imageAttempt=null;
         answer.content=result.response||`PNG: ${result.image_path||''}`;conversation.updatedAt=Date.now();
         save('prospero-conversations',conversations.slice(0,50));renderMessages();renderHistory();
         const archiveWarning=(result.response||'').includes('Archive warning:');
@@ -304,11 +342,17 @@ async function submitImageGeneration(){
         $('image-result').replaceChildren();
         if(result.image_path)appendMedia($('image-result'),{path:result.image_path,kind:'image'},'','Generated image');
         await persistConversation(conversation);await renderMediaLibrary(true);
+        $('image-retry').textContent='Retry generation';
         $('image-retry').hidden=!archiveWarning;
     }catch(error){
-        if(conversation.messages.at(-1)===answer)conversation.messages.pop();
+        if(error.code==='IMAGE_JOB_TERMINAL')imageJobId=null;
+        answer.content=imageJobId
+            ?`Image job status could not be checked: ${error.message}. Retry will resume polling.`
+            :`Image generation failed: ${error.message}`;
         conversation.updatedAt=Date.now();save('prospero-conversations',conversations.slice(0,50));
-        $('image-status').textContent=`${error.message} Your image inputs are still staged.`;$('image-retry').hidden=false;
+        await persistConversation(conversation);
+        $('image-status').textContent=`${error.message} Your image inputs are still staged.`;
+        $('image-retry').textContent=imageJobId?'Resume polling':'Retry generation';$('image-retry').hidden=false;
         renderMessages();renderHistory();
     }finally{imageSubmitting=false;$('image-generate').disabled=false;}
 }
@@ -324,6 +368,8 @@ document.getElementById('image-guide-remove').onclick=()=>{setImageFile('guide',
 document.getElementById('image-mask-paint').onclick=()=>setMaskPaintMode('paint');
 document.getElementById('image-mask-erase').onclick=()=>setMaskPaintMode('erase');
 document.getElementById('image-mask-clear').onclick=clearMaskCanvas;
+document.getElementById('image-mask-paint-rectangle').onclick=()=>editMaskRectangle(false);
+document.getElementById('image-mask-erase-rectangle').onclick=()=>editMaskRectangle(true);
 const maskCanvas=$('image-mask-canvas');let maskPointerDown=false;
 maskCanvas.onpointerdown=event=>{maskPointerDown=true;maskLastPoint=null;maskCanvas.setPointerCapture(event.pointerId);paintMask(event);};
 maskCanvas.onpointermove=event=>{if(maskPointerDown)paintMask(event);};

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {runInNewContext} from 'node:vm';
+import {createContext, runInNewContext, runInContext} from 'node:vm';
 import {test} from 'node:test';
 
 const workspaceSource = readFileSync(new URL('../assets/web/workspace.js', import.meta.url), 'utf8');
@@ -144,7 +144,7 @@ test('image job polling returns completed output and surfaces terminal failures'
     assert.equal(result.image_path, '/download0/work/image/result.png');
     assert.deepEqual(calls, ['/api/jobs?id=42', '/api/jobs?id=42']);
     await assert.rejects(waitForImageJob(async () => ({state: 'error', result: {error: 'generation failed'}}), 43),
-        /generation failed/);
+        error => error.message === 'generation failed' && error.code === 'IMAGE_JOB_TERMINAL');
 });
 
 test('Image Create, Models, and Gallery navigation reuses existing pages and model catalog', () => {
@@ -188,4 +188,175 @@ test('image output is retained in conversation history and refreshed in the exis
     assert.match(appSource, /renderMediaLibrary\(true\)/);
     assert.match(appSource, /conversation\.messages\.push/);
     assert.match(appSource, /retry/);
+});
+
+function topLevelFunction(source, signature) {
+    const start = source.indexOf(signature);
+    if (start < 0) return '';
+    const end = source.indexOf('\n}', start);
+    return end < 0 ? '' : source.slice(start, end + 2);
+}
+
+function imageSubmitHarness(jobResults) {
+    const calls = [], polls = [], persisted = [];
+    const model = {id: 'catalog-image', name: 'Catalog Image'};
+    const elements = new Map();
+    const getElement = id => {
+        if (!elements.has(id)) elements.set(id, {
+            value: id === 'image-prompt' ? 'A castle' : '', textContent: '', hidden: true, disabled: false,
+            focus() {}, replaceChildren() {},
+        });
+        return elements.get(id);
+    };
+    const context = createContext({
+        $: getElement, document: {getElementById: getElement},
+        api: async (path, options = {}) => {
+            calls.push({path, options, body: options.body ? JSON.parse(options.body) : null});
+            return {json: async () => ({updated_us: 1, job_id: 71})};
+        },
+        workspaceUI: {
+            validateImageInputs: () => '',
+            waitForImageJob: async (_api, id) => {
+                polls.push(id);
+                const result = jobResults.shift();
+                if (result instanceof Error) throw result;
+                return result;
+            },
+            buildImageRequest: ({model: selected, prompt, sessionId, messageIndex}) => ({
+                model: selected.id, prompt, output_session_id: sessionId, output_message_index: messageIndex,
+            }),
+        },
+        imageModel: () => model, imageInputValues: () => ({}),
+        selectWorkspaceModel: async () => {}, prepareWorkspaceModel: async () => {},
+        save() {}, renderMessages() {}, renderHistory() {}, renderMediaLibrary: async () => {},
+        appendMedia() {},
+        persistConversation: async conversation => persisted.push(JSON.parse(JSON.stringify(conversation))),
+        crypto: {randomUUID: () => 'conversation-71'},
+    });
+    const submit = topLevelFunction(appSource, 'async function submitImageGeneration()');
+    runInContext(`let current=null, conversations=[], imageSubmitting=false, imageJobId=null, imageAttempt=null;
+        let imageModeName='text_to_image';
+        ${submit}`, context);
+    return {
+        calls, polls, persisted, elements,
+        submit: () => runInContext('submitImageGeneration()', context),
+        state: () => JSON.parse(runInContext(`JSON.stringify({
+            messages: current?.messages || [], imageJobId, imageSubmitting,
+            conversationId: current?.id || null, assistant: current?.messages?.at(-1)?.content || ''
+        })`, context)),
+        element: getElement,
+    };
+}
+
+test('Retry resumes a transiently interrupted image job and reuses its conversation messages', async () => {
+    const interrupted = new Error('temporary jobs API error');
+    const harness = imageSubmitHarness([interrupted, {response: 'Image complete.'}]);
+
+    await harness.submit();
+    const afterError = harness.state();
+    assert.equal(afterError.messages.length, 2, 'the failed attempt retains its user/assistant pair');
+    assert.equal(afterError.imageJobId, 71, 'the accepted job ID remains available to Retry');
+    assert.match(harness.persisted.at(-1).messages.at(-1).content, /status could not be checked/i,
+        'the server copy must not be left with an empty assistant message');
+    assert.equal(harness.element('image-retry').textContent, 'Resume polling');
+
+    await harness.submit();
+    assert.equal(harness.calls.filter(call => call.path === '/api/generate').length, 1,
+        'resuming a poll must not submit another generation');
+    assert.deepEqual(harness.polls, [71, 71]);
+    assert.equal(harness.state().messages.length, 2, 'retry must not duplicate the prompt');
+    assert.equal(harness.state().assistant, 'Image complete.');
+    assert.equal(harness.persisted.at(-1).messages.length, 2,
+        'the persisted conversation must match the reused user/assistant pair');
+});
+
+test('Retry starts a new image job only after terminal failure and reuses the failed message pair', async () => {
+    const terminal = Object.assign(new Error('generation failed'), {code: 'IMAGE_JOB_TERMINAL'});
+    const harness = imageSubmitHarness([terminal, {response: 'Image complete.'}]);
+
+    await harness.submit();
+    assert.equal(harness.state().imageJobId, null, 'terminal failure releases the completed job ID');
+    assert.equal(harness.element('image-retry').textContent, 'Retry generation');
+    assert.equal(harness.state().messages.length, 2);
+    assert.match(harness.state().assistant, /generation failed/i);
+    assert.equal(harness.calls.filter(call => call.path === '/api/generate').length, 1,
+        'a new job starts only after the explicit Retry action following terminal failure');
+
+    await harness.submit();
+    assert.equal(harness.calls.filter(call => call.path === '/api/generate').length, 2);
+    assert.equal(harness.state().messages.length, 2, 'a terminal retry reuses rather than duplicates messages');
+    assert.equal(harness.state().assistant, 'Image complete.');
+    assert.equal(harness.persisted.at(-1).messages.length, 2);
+});
+
+test('Archive-warning Retry is labeled as a new generation after a completed job', async () => {
+    const harness = imageSubmitHarness([
+        new Error('temporary jobs API error'),
+        {response: 'Archive warning: image could not be saved.'},
+    ]);
+
+    await harness.submit();
+    assert.equal(harness.element('image-retry').textContent, 'Resume polling');
+    await harness.submit();
+    assert.equal(harness.element('image-retry').hidden, false);
+    assert.equal(harness.element('image-retry').textContent, 'Retry generation');
+});
+
+test('Gallery Edit and Guide report an actionable error when no compatible model is installed', async () => {
+    const status = {textContent: ''}, feedback = {textContent: ''}, imageModel = {value: ''};
+    let apiCalls = 0, stagedFiles = 0, modeChanges = 0, createNavigations = 0;
+    const stage = topLevelFunction(appSource, 'async function stageGalleryImage(file,mode)');
+    for (const mode of ['image_to_image', 'controlnet']) {
+        const context = {
+            $: id => ({'image-status': status, feedback, 'image-model': imageModel})[id],
+            api: async () => { apiCalls++; return {blob: async () => ({})}; },
+            models: [],
+            workspaceUI: {filterModels: () => [], imageCapabilities: () => []},
+            safeImageFile: () => ({}),
+            setImageFile: () => { stagedFiles++; },
+            setImageMode: () => { modeChanges++; },
+            document: {querySelector: () => ({click: () => { createNavigations++; }})},
+        };
+        status.textContent = '';
+        await runInNewContext(`${stage}\nstageGalleryImage({path:'/archive/image.png'}, '${mode}')`, context);
+        assert.match(status.textContent, /no installed.*model/i, `${mode} should show a no-model status`);
+        assert.doesNotMatch(status.textContent, /staged/i);
+    }
+
+    assert.equal(apiCalls, 0, 'do not fetch or stage an image that cannot be used');
+    assert.equal(stagedFiles, 0);
+    assert.equal(modeChanges, 0);
+    assert.equal(createNavigations, 2, 'show the actionable status in the Create workspace');
+});
+
+test('Inpainting masks have labeled keyboard rectangle controls that paint and erase mask regions', () => {
+    for (const id of ['image-mask-keyboard-controls', 'image-mask-x', 'image-mask-y', 'image-mask-width',
+        'image-mask-height', 'image-mask-paint-rectangle', 'image-mask-erase-rectangle'])
+        assert.ok(htmlSource.includes(`id="${id}"`), `expected keyboard mask control #${id}`);
+    for (const label of ['Left (%)', 'Top (%)', 'Width (%)', 'Height (%)'])
+        assert.ok(htmlSource.includes(label), `expected accessible ${label} input`);
+    assert.ok(/Set a rectangle.*Paint selected rectangle.*Erase selected rectangle/s.test(htmlSource),
+        'keyboard mask instructions should explain the edit and paint/erase actions');
+    assert.match(appSource, /getElementById\('image-mask-paint-rectangle'\)\.onclick/);
+    assert.match(appSource, /getElementById\('image-mask-erase-rectangle'\)\.onclick/);
+
+    const drawCalls = [], previewCalls = [];
+    const maskContext = {fillStyle: '', fillRect(...args) { drawCalls.push({style: this.fillStyle, args}); }};
+    const previewContext = {fillStyle: '', fillRect(...args) { previewCalls.push({style: this.fillStyle, args}); },
+        clearRect(...args) { previewCalls.push({operation: 'clearRect', args}); }};
+    const elements = {
+        'image-mask-x': {value: '10'}, 'image-mask-y': {value: '20'},
+        'image-mask-width': {value: '30'}, 'image-mask-height': {value: '40'},
+        'image-mask-output': {width: 200, height: 100, getContext: () => maskContext},
+        'image-mask-canvas': {width: 200, height: 100, getContext: () => previewContext},
+    };
+    const edit = topLevelFunction(appSource, 'function editMaskRectangle(erase=false)');
+    assert.notEqual(edit, '', 'the keyboard editor has a rectangle painting implementation');
+    const context = createContext({$: id => elements[id], imageSourceFile: {name: 'source.png'}});
+    runInContext(`let imageMaskPainted=false; ${edit}; editMaskRectangle(false)`, context);
+    assert.deepEqual(drawCalls.at(-1), {style: '#fff', args: [20, 20, 60, 40]});
+    assert.equal(runInContext('imageMaskPainted', context), true);
+    runInContext('editMaskRectangle(true)', context);
+    assert.deepEqual(drawCalls.at(-1), {style: '#000', args: [20, 20, 60, 40]});
+    assert.deepEqual(previewCalls.at(-1), {operation: 'clearRect', args: [20, 20, 60, 40]});
 });

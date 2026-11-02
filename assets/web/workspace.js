@@ -109,8 +109,11 @@
                 await new Promise(resolve => setTimeout(resolve, delay));
                 continue;
             }
-            if (job.state !== 'done' || job.result?.error)
-                throw new Error(job.result?.error || 'Image generation failed.');
+            if (job.state !== 'done' || job.result?.error) {
+                const error = new Error(job.result?.error || 'Image generation failed.');
+                error.code = 'IMAGE_JOB_TERMINAL';
+                throw error;
+            }
             return job.result;
         }
     }
