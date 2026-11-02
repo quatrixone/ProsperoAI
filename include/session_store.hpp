@@ -105,6 +105,7 @@ bool archive_media(const char *id, unsigned message_index, const char *kind, con
                    char *output, std::size_t output_capacity,
                    const OutputMetadata *metadata = nullptr);
 bool read_output_reference(const char *id, unsigned message_index, std::string *output);
+bool remove_archived_media(const char *id, unsigned message_index, const char *path);
 bool write_optional_image_sidecar(const char *id, unsigned index, const char *path);
 bool read_optional_image_sidecar(const char *id, unsigned index, std::string *output);
 bool remove_optional_image_sidecar(const char *id, unsigned index);

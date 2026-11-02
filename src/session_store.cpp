@@ -448,6 +448,25 @@ bool read_output_reference(const char *id, unsigned index, std::string *output)
     return !output->empty();
 }
 
+bool remove_archived_media(const char *id, unsigned index, const char *path)
+{
+    if (!valid_id(id) || index >= MessageCapacity || !path)
+        return false;
+    std::string recorded_path;
+    if (!read_output_reference(id, index, &recorded_path) || recorded_path != path)
+        return false;
+
+    char reference[256], leaf[48];
+    std::snprintf(leaf, sizeof(leaf), "output-%03u.txt", index);
+    make_path(reference, sizeof(reference), id, leaf);
+    if (std::remove(reference) != 0)
+        return false;
+    if (std::remove(path) == 0)
+        return true;
+    (void)save_output_reference(id, index, path);
+    return false;
+}
+
 bool valid_id(const char *id)
 {
     if (!id || !*id || std::strlen(id) >= sizeof(Record{}.id))

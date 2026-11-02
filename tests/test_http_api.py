@@ -422,6 +422,58 @@ class HttpApiTests(unittest.TestCase):
             self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
                          headers=["Authorization: Bearer secret"])
 
+    def test_output_reference_archived_image_can_be_deleted_from_media(self):
+        session_id = "image-output-delete"
+        unowned = Path("/tmp/prosperoai-session-test/work/image/unowned-delete-case/unowned.png")
+        self.save_conversation_with_image(session_id)
+        try:
+            head, body = self.request("/api/generate", {
+                "model": "sdxl-base-q8-0", "prompt": "gallery output",
+                "image_workflow": {"workflow": "text_to_image"},
+                "output_session_id": session_id, "output_message_index": 0,
+            }, environment=self.image_workflow_environment())
+            self.assertIn("200 OK", head)
+            archived = Path(json.loads(body)["image_path"])
+            self.assertTrue(archived.is_file())
+            conversation = json.loads(self.request(
+                "/api/conversations/" + session_id, key="secret",
+                headers=["Authorization: Bearer secret"])[1])
+            self.assertNotIn(str(archived), conversation["messages"][0]["content"])
+            self.assertIn(str(archived), {
+                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
+            })
+
+            unowned.parent.mkdir(parents=True, exist_ok=True)
+            unowned.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
+            head, _ = self.request("/api/media", {"path": str(unowned)}, method="DELETE")
+            self.assertIn("409 Conflict", head)
+            self.assertTrue(unowned.is_file())
+            unowned.unlink()
+            unowned.parent.rmdir()
+
+            archived.unlink()
+            head, _ = self.request("/api/media", {"path": str(archived)}, method="DELETE")
+            self.assertIn("409 Conflict", head)
+            self.assertIn(str(archived), {
+                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
+            })
+            archived.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
+
+            head, _ = self.request("/api/media", {"path": str(archived)}, method="DELETE")
+            self.assertIn("200 OK", head)
+            self.assertFalse(archived.exists())
+            self.assertNotIn(str(archived), {
+                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
+            })
+        finally:
+            unowned.unlink(missing_ok=True)
+            try:
+                unowned.parent.rmdir()
+            except OSError:
+                pass
+            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                         headers=["Authorization: Bearer secret"])
+
     def upload_image(self):
         payload = (ROOT / "tests/fixtures/one-pixel.jpg").read_bytes()
         head, body = self.request_raw(

@@ -3347,6 +3347,7 @@ bool delete_archived_media(const std::string &path, std::string &error)
     std::vector<prospero_session::Message> owner_messages;
     unsigned owner_message = 0;
     unsigned references = 0;
+    bool owner_output_reference = false;
     for (unsigned i = 0; i < count; ++i)
     {
         for (unsigned j = 0; j < records[i].message_count; ++j)
@@ -3371,6 +3372,7 @@ bool delete_archived_media(const std::string &path, std::string &error)
             {
                 owner = records[i];
                 owner_message = j;
+                owner_output_reference = false;
                 owner_messages.resize(owner.message_count);
                 if (!prospero_session::load(owner.id, &owner, owner_messages.data(),
                                             static_cast<unsigned>(owner_messages.size())))
@@ -3378,6 +3380,19 @@ bool delete_archived_media(const std::string &path, std::string &error)
                     error = "The source conversation could not be loaded.";
                     return false;
                 }
+            }
+            std::string output_reference;
+            if (prospero_session::read_output_reference(records[i].id, j, &output_reference) &&
+                output_reference == path)
+            {
+                if (++references > 1)
+                {
+                    error = "This media file is referenced more than once.";
+                    return false;
+                }
+                owner = records[i];
+                owner_message = j;
+                owner_output_reference = true;
             }
         }
     }
@@ -3391,8 +3406,13 @@ bool delete_archived_media(const std::string &path, std::string &error)
     static const char *media_kinds[] = {"image", "audio", "voice"};
     for (const char *kind : media_kinds)
     {
+#if defined(PROSPERO_SESSION_TEST)
+        std::snprintf(owned_prefix, sizeof(owned_prefix),
+                      "/tmp/prosperoai-session-test/work/%s/%s/", kind, owner.id);
+#else
         std::snprintf(owned_prefix, sizeof(owned_prefix),
                       "/download0/ProsperoAI/work/%s/%s/", kind, owner.id);
+#endif
         if (path.compare(0, std::strlen(owned_prefix), owned_prefix) == 0 &&
             path.find('/', std::strlen(owned_prefix)) == std::string::npos)
         {
@@ -3403,6 +3423,13 @@ bool delete_archived_media(const std::string &path, std::string &error)
     if (!owned_copy)
     {
         error = "Only an archived output copy stored with its conversation can be deleted.";
+        return false;
+    }
+    if (owner_output_reference)
+    {
+        if (prospero_session::remove_archived_media(owner.id, owner_message, path.c_str()))
+            return true;
+        error = "The archived media file could not be removed.";
         return false;
     }
     auto &content = owner_messages[owner_message].content;
