@@ -32,9 +32,12 @@
     function imageSettings(model, mode, values = {}) {
         const defaults = model?.details?.image_defaults || {};
         const strategy = model?.details?.image_edit_strategy;
+        // The Studio opens every model at 512x512 and leaves the rest of the preset's
+        // defaults alone: it is the size the console renders quickest, and the upscaler
+        // takes it to 2048 afterwards. The preset's own size is still a keystroke away.
         return {
-            width: values.width ?? defaults.width ?? 512,
-            height: values.height ?? defaults.height ?? 512,
+            width: values.width ?? 512,
+            height: values.height ?? 512,
             steps: values.steps ?? defaults.steps ?? 1,
             cfg_scale: values.cfg_scale ?? defaults.cfg_scale ?? 1,
             sampler: values.sampler ?? defaults.sampler ?? 'euler_a',
