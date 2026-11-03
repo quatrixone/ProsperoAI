@@ -73,7 +73,7 @@ test('model changes stage server defaults and hide incompatible workflow options
 
     assert.deepEqual({...imageSettings(sd, 'text_to_image')}, {
         width: 1024, height: 768, steps: 25, cfg_scale: 6, sampler: 'euler_a', scheduler: 'ays',
-        showStrength: false, showControlStrength: false,
+        upscale: false, showStrength: false, showControlStrength: false,
     });
     assert.equal(imageSettings(sd, 'image_to_image').showStrength, true);
     assert.equal(imageSettings(sd, 'inpainting').showStrength, true);
@@ -126,8 +126,8 @@ test('image workflow requests contain only opaque upload IDs and staged model op
         output_message_index: 1,
         image_workflow: {
             workflow: 'image_to_image', width: 768, height: 768, steps: 20, cfg_scale: 5,
-            strength: 0.6, sampler: 'euler_a', scheduler: 'ays', negative_prompt: 'blur',
-            image_id: 'b'.repeat(32),
+            strength: 0.6, sampler: 'euler_a', scheduler: 'ays', upscale: false,
+            negative_prompt: 'blur', image_id: 'b'.repeat(32),
         },
     });
     assert.equal(JSON.stringify(request).includes('/download0/'), false);
@@ -147,11 +147,13 @@ test('image job polling returns completed output and surfaces terminal failures'
         error => error.message === 'generation failed' && error.code === 'IMAGE_JOB_TERMINAL');
 });
 
-test('Image Create, Models, and Gallery navigation reuses existing pages and model catalog', () => {
+test('Image Create and Gallery navigation reuses existing pages, without its own Models entry', () => {
     assert.match(htmlSource, /data-image-destination="create"/);
-    assert.match(htmlSource, /data-image-destination="models"/);
     assert.match(htmlSource, /data-image-destination="gallery"/);
-    assert.match(htmlSource, /data-kind="1"/);
+    // Models is reached from the top-level navigation only.
+    assert.doesNotMatch(htmlSource, /data-image-destination="models"/);
+    assert.doesNotMatch(appSource, /destination==='models'/);
+    assert.match(htmlSource, /data-page="models"/);
     assert.match(appSource, /data-image-destination/);
     assert.match(appSource, /imageOnly/);
     assert.doesNotMatch(appSource + htmlSource, /qwen-image|Qwen Image/i);
@@ -188,6 +190,24 @@ test('image output is retained in conversation history and refreshed in the exis
     assert.match(appSource, /renderMediaLibrary\(true\)/);
     assert.match(appSource, /conversation\.messages\.push/);
     assert.match(appSource, /retry/);
+});
+
+test('the upscale toggle is sent with every image request, on or off', () => {
+    const {buildImageRequest} = workspaceApi();
+    const base = {
+        model: model('generic-image', ['text_to_image']),
+        mode: 'text_to_image',
+        prompt: 'A lighthouse',
+    };
+    const off = buildImageRequest({...base, values: {upscale: false}});
+    const on = buildImageRequest({...base, values: {upscale: true}});
+    // Always sent: omitting it would fall back to the Settings toggle, so clearing the
+    // box in the Studio could not turn an upscale off.
+    assert.equal(off.image_workflow.upscale, false);
+    assert.equal(on.image_workflow.upscale, true);
+    assert.equal(buildImageRequest(base).image_workflow.upscale, false);
+    assert.match(appSource, /upscale:\$\('image-upscale'\)\.checked/);
+    assert.match(htmlSource, /id="image-upscale"/);
 });
 
 function topLevelFunction(source, signature) {

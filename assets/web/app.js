@@ -56,7 +56,7 @@ let workspaceModeName=location.pathname === '/audio' ? 'audio' : 'text';
 let audioSectionName='music';
 let imageModeName='text_to_image', activeImageModelId='', activeImageSettingsMode='';
 let imageSourceFile=null, imageGuideFile=null, imageMaskPainted=false, imagePaintMode='paint', imageSubmitting=false;
-let imageSourceUrl='', imageGuideUrl='', mediaImageOnly=false, imageJobId=null, imageAttempt=null;
+let imageSourceUrl='', imageGuideUrl='', mediaKind='all', imageJobId=null, imageAttempt=null;
 let stagedWorkspaceModel='',workspaceChatOpen=false,preparedModel='',preparation=null,submitting=false,finalWorkspaceOptions={};
 const workspaceMode=workspaceUI.createWorkspaceMode({models,selectModel:selectWorkspaceModel,prepareModel:prepareWorkspaceModel});
 workspaceMode.setMode(workspaceModeName);
@@ -115,7 +115,8 @@ function imageInputValues(){
     return {width:Number($('image-width').value),height:Number($('image-height').value),steps:Number($('image-steps').value),
         cfg_scale:Number($('image-cfg-scale').value),sampler:$('image-sampler').value,scheduler:$('image-scheduler').value,
         strength:Number($('image-strength').value),control_strength:Number($('image-control-strength').value),
-        canny:$('image-canny').checked,seed:Number($('image-seed').value),negative_prompt:$('image-negative-prompt').value};
+        canny:$('image-canny').checked,upscale:$('image-upscale').checked,
+        seed:Number($('image-seed').value),negative_prompt:$('image-negative-prompt').value};
 }
 function applyImageDefaults(model,mode){
     const settings=workspaceUI.imageSettings(model,mode);
@@ -125,6 +126,7 @@ function applyImageDefaults(model,mode){
     $('image-strength').value=String(settings.strength??0.75);
     $('image-control-strength').value=String(settings.control_strength??1);
     $('image-canny').checked=settings.canny??true;
+    $('image-upscale').checked=settings.upscale??false;
     $('image-strength-control').hidden=!settings.showStrength;
     $('image-control-strength-control').hidden=!settings.showControlStrength;
     $('image-canny-control').hidden=!settings.showControlStrength;
@@ -245,14 +247,33 @@ async function stageGalleryImage(file,mode){
         $('image-status').textContent=mode==='controlnet'?'Guide image staged from Gallery.':'Image staged from Gallery.';
     }catch(error){$('feedback').textContent=`Could not stage this Gallery image: ${error.message}`;}
 }
-async function renderMediaLibrary(imageOnly=mediaImageOnly){
-    mediaImageOnly=imageOnly;
-    $('media-heading').textContent=imageOnly?'Image gallery':'Media library';
-    document.querySelectorAll('[data-media-filter]').forEach(button=>{const active=button.dataset.mediaFilter===(imageOnly?'image':'all');button.classList.toggle('selected',active);button.setAttribute('aria-pressed',String(active));});
+// window.confirm is not available in the console browser: it returns undefined there,
+// so every confirmed action silently became a no-op. Ask with a dialog instead.
+function askConfirm(message,{title='Are you sure?',action='Confirm'}={}){
+    const dialog=$('confirm-dialog');
+    if(!dialog||typeof dialog.showModal!=='function')return Promise.resolve(true);
+    $('confirm-title').textContent=title;$('confirm-description').textContent=message;
+    $('confirm-accept').textContent=action;dialog.returnValue='';
+    return new Promise(resolve=>{
+        dialog.addEventListener('close',()=>resolve(dialog.returnValue==='confirm'),{once:true});
+        dialog.showModal();
+    });
+}
+function emptyMediaNote(){
+    if(mediaKind==='image')return 'No generated images are linked to saved conversations yet.';
+    if(mediaKind==='audio')return 'No generated audio is linked to saved conversations yet.';
+    return 'Generated images and audio linked to saved conversations will appear here.';
+}
+async function renderMediaLibrary(kind=mediaKind){
+    // Accepts the old boolean so the image Gallery entry keeps working.
+    mediaKind=kind===true?'image':kind===false?'all':kind;
+    const imageOnly=mediaKind==='image';
+    $('media-heading').textContent=imageOnly?'Image gallery':mediaKind==='audio'?'Audio library':'Media library';
+    document.querySelectorAll('[data-media-filter]').forEach(button=>{const active=button.dataset.mediaFilter===mediaKind;button.classList.toggle('selected',active);button.setAttribute('aria-pressed',String(active));});
     const root=$('media-library');root.replaceChildren();const loading=document.createElement('p');loading.className='muted';loading.textContent='Loading media…';root.append(loading);
     try{
-        const payload=await api('/api/media').then(response=>response.json()),files=(payload.data||[]).filter(file=>!imageOnly||file.kind==='image');root.replaceChildren();
-        if(!files.length){const note=document.createElement('p');note.className='muted';note.textContent=imageOnly?'No generated images are linked to saved conversations yet.':'Generated images and audio linked to saved conversations will appear here.';root.append(note);return;}
+        const payload=await api('/api/media').then(response=>response.json()),files=(payload.data||[]).filter(file=>mediaKind==='all'||file.kind===mediaKind);root.replaceChildren();
+        if(!files.length){const note=document.createElement('p');note.className='muted';note.textContent=emptyMediaNote();root.append(note);return;}
         for(const file of files){
             const card=document.createElement('article');card.className='glass model-card';
             const heading=document.createElement('strong');heading.textContent=file.path.split('/').at(-1)||'Generated media';
@@ -261,7 +282,7 @@ async function renderMediaLibrary(imageOnly=mediaImageOnly){
             const model=document.createElement('small');model.className='muted';model.textContent=`Model: ${file.modelName||file.model||'Unknown'}`;
             const preview=document.createElement('div');preview.className='media-library-preview';
             const remove=document.createElement('button');remove.className='secondary';remove.type='button';remove.textContent='Delete archived copy';remove.title='Deletes only the archived copy stored with this conversation';
-            remove.onclick=async()=>{if(!confirm(`Delete archived media “${heading.textContent}”? The generated source file is kept.`))return;remove.disabled=true;try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});card.remove();if(!root.children.length){const note=document.createElement('p');note.className='muted';note.textContent=imageOnly?'No generated images are linked to saved conversations yet.':'Generated images and audio linked to saved conversations will appear here.';root.append(note);}}catch(error){$('feedback').textContent=error.message;remove.disabled=false;}};
+            remove.onclick=async()=>{if(!await askConfirm(`Delete the archived copy of “${heading.textContent}”? The generated source file is kept.`,{title:"Delete archived media?",action:"Delete"}))return;remove.disabled=true;try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});card.remove();if(!root.children.length){const note=document.createElement('p');note.className='muted';note.textContent=emptyMediaNote();root.append(note);}}catch(error){$('feedback').textContent=error.message;remove.disabled=false;}};
             card.append(heading,source,model,preview);
             if(file.kind==='image'){
                 const edit=document.createElement('button');edit.className='secondary';edit.type='button';edit.textContent='Stage image for editing';edit.onclick=()=>void stageGalleryImage(file,'image_to_image');
@@ -379,18 +400,15 @@ document.querySelectorAll('[data-image-destination]').forEach(button=>button.onc
     const destination=button.dataset.imageDestination;
     document.querySelectorAll('[data-image-destination]').forEach(item=>{const active=item===button;item.classList.toggle('selected',active);item.setAttribute('aria-current',active?'page':'false');});
     if(destination==='create'){page('workspace');setWorkspaceMode('image');return;}
-    if(destination==='models'){
-        page('models');modelFilter='1';for(const tab of document.querySelectorAll('[data-kind]'))tab.classList.toggle('selected',tab.dataset.kind==='1');renderModels();return;
-    }
-    mediaImageOnly=true;page('media');renderMediaLibrary(true);
+    page('media');renderMediaLibrary('image');
 });
 document.querySelector('[data-page="workspace"]').addEventListener('click',()=>{
     if(workspaceModeName==='image')document.querySelector('[data-image-destination="create"]').click();
 });
 document.querySelectorAll('[data-media-filter]').forEach(button=>button.onclick=()=>{
-    mediaImageOnly=button.dataset.mediaFilter==='image';
+    mediaKind=button.dataset.mediaFilter;
     document.querySelectorAll('[data-media-filter]').forEach(item=>{const active=item===button;item.classList.toggle('selected',active);item.setAttribute('aria-pressed',String(active));});
-    renderMediaLibrary(mediaImageOnly);
+    renderMediaLibrary(mediaKind);
 });
 function renderWorkspaceAudio(){
     const audioMode=workspaceModeName==='audio';
@@ -491,7 +509,7 @@ function renderModels(){
         remove.title=remove.disabled?'Choose another model before deleting this one':'Delete installed model';
         remove.onclick=async event=>{
             event.stopPropagation();
-            if(!confirm(`Delete ${model.name||model.id} and its installed files from the PS5?`))return;
+            if(!await askConfirm(`Delete ${model.name||model.id} and its installed files from the PS5?`,{title:"Delete model?",action:"Delete"}))return;
             remove.disabled=true;
             try{await api('/api/models',{method:'DELETE',body:JSON.stringify({id:model.id})});await refreshModels();}
             catch(error){$('feedback').textContent=error.message;remove.disabled=false;}
@@ -521,7 +539,7 @@ for(const button of document.querySelectorAll('[data-kind]')) button.onclick=()=
     renderModels();
 };
 async function downloadPreset(index){
-    const preset=presetCatalog.find(item=>item.index===index);if(!preset)return;const required=(Number(preset.size||0)/1073741824).toFixed(2);const storage=preset.storage_check_available?`The console reports ${(Number(preset.available_bytes||0)/1073741824).toFixed(2)} GiB free.`:'Free console storage cannot be checked safely.';if(!confirm(`Download ${preset.name}?\n\nRequired download size: ${required} GiB.\n${storage}\n\nCheck that enough space is available before continuing.`))return;
+    const preset=presetCatalog.find(item=>item.index===index);if(!preset)return;const required=(Number(preset.size||0)/1073741824).toFixed(2);const storage=preset.storage_check_available?`The console reports ${(Number(preset.available_bytes||0)/1073741824).toFixed(2)} GiB free.`:'Free console storage cannot be checked safely.';if(!await askConfirm(`Download ${preset.name}?\n\nRequired download size: ${required} GiB.\n${storage}\n\nCheck that enough space is available before continuing.`,{title:"Start this download?",action:"Download"}))return;
     try{await api('/api/models/presets',{method:'POST',body:JSON.stringify({index})});await pollDownloads();}
     catch(error){$('download-status').textContent=error.message;}
 }
@@ -529,7 +547,7 @@ async function browseRepository(repository){$('download-status').textContent='Lo
 $('download-repo').onsubmit=async event=>{event.preventDefault();const query=$('model-query').value.trim();$('download-status').textContent='Searching public repositories…';$('browse-models').disabled=true;$('download-list').replaceChildren();try{await api('/api/models/search',{method:'POST',body:JSON.stringify({query})});await pollDownloads();}catch(error){$('download-status').textContent=error.message;}finally{$('browse-models').disabled=false;}};
 function renderDownloadItems(data){const list=$('download-list');list.replaceChildren();for(let index=0;index<(data.items||[]).length;index++){const item=data.items[index],row=document.createElement('div');row.className='download-item';const detail=document.createElement('div'),name=document.createElement('strong'),size=document.createElement('small'),button=document.createElement('button');name.textContent=item.name;if(data.state==='search_ready'){size.textContent=`${Number(item.downloads||0).toLocaleString()} downloads`;button.textContent='Browse files';button.disabled=false;button.onclick=()=>browseRepository(item.name);}else{size.textContent=`${(item.size/1073741824).toFixed(2)} GiB · ${item.fit === "tight" ? "tight on memory (estimate)" : item.fit === "does_not_fit" ? "will not fit (estimate)" : "fits (estimate)"}`;button.textContent='Download';button.disabled=data.state!=='ready';button.onclick=()=>startModelDownload(index);}button.className='primary';detail.append(name,size);row.append(detail,button);list.append(row);}}
 $('download-cancel').onclick=async()=>{
-    if(!confirm('Cancel this download? What has been downloaded so far is removed.'))return;
+    if(!await askConfirm('What has been downloaded so far is removed.',{title:'Cancel this download?',action:'Cancel download'}))return;
     try{await api('/api/models/download',{method:'DELETE'});await pollDownloads();}
     catch(error){$('download-status').textContent=error.message;}
 };
@@ -548,7 +566,7 @@ async function pollDownloads(){
         if(downloadState.state==='complete')await refreshModels();
     }catch(error){$('download-status').textContent=error.message;}
 }
-async function startModelDownload(index){const item=downloadState.items?.[index];if(!item)return;const required=(Number(item.size||0)/1073741824).toFixed(2);if(!confirm(`Download ${item.name}?\n\nRequired download size: ${required} GiB.\nFree console storage cannot be checked safely.\n\nCheck that enough space is available before continuing.`))return;$('download-status').textContent='Starting verified download…';try{await api('/api/models/download',{method:'POST',body:JSON.stringify({index})});await pollDownloads();}catch(error){$('download-status').textContent=error.message;}}
+async function startModelDownload(index){const item=downloadState.items?.[index];if(!item)return;const required=(Number(item.size||0)/1073741824).toFixed(2);if(!await askConfirm(`Download ${item.name}?\n\nRequired download size: ${required} GiB.\nFree console storage cannot be checked safely.\n\nCheck that enough space is available before continuing.`,{title:"Start this download?",action:"Download"}))return;$('download-status').textContent='Starting verified download…';try{await api('/api/models/download',{method:'POST',body:JSON.stringify({index})});await pollDownloads();}catch(error){$('download-status').textContent=error.message;}}
 let preparingModel='';
 async function selectWorkspaceModel(id){
     const response=await api('/api/models/selection',{method:'POST',body:JSON.stringify({id,prepare:false})});

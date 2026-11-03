@@ -148,7 +148,6 @@ test('Image Studio exposes all four capability-driven modes without an ID-based 
     const modes = ['text_to_image', 'image_to_image', 'inpainting', 'controlnet'];
     for (const mode of modes) assert.match(htmlSource, new RegExp(`data-image-mode="${mode}"`));
     assert.match(htmlSource, /data-image-destination="create"/);
-    assert.match(htmlSource, /data-image-destination="models"/);
     assert.match(htmlSource, /data-image-destination="gallery"/);
     assert.deepEqual(Array.from(imageModes({id: 'catalog-entry', purpose: 'text-to-image', details: {capabilities: modes}})), modes);
     assert.match(appSource, /workspaceUI\.imageCapabilities\(selected\)/);
