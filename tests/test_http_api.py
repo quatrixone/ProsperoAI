@@ -314,6 +314,41 @@ class HttpApiTests(unittest.TestCase):
         self.assertAlmostEqual(forwarded[3]["control_strength"], 1.7)
         self.assertTrue(forwarded[3]["canny"])
 
+    def test_upscale_is_per_request_and_defaults_to_the_settings_toggle(self):
+        environment = self.image_workflow_environment()
+        base = {"model": "sdxl-base-q8-0", "prompt": "a mountain at dawn"}
+
+        def run(workflow):
+            head, response = self.request("/api/generate", {**base, "image_workflow": workflow},
+                                          environment=environment)
+            self.assertIn("200 OK", head)
+            self.assertTrue(json.loads(response)["done"])
+            return json.loads(self.generate_calls_file.read_text().splitlines()[-1])
+
+        head, _ = self.request("/api/settings/runtime", {"sd_upscale": False}, method="POST",
+                               environment=environment)
+        self.assertIn("200 OK", head)
+        text_to_image = {"workflow": "text_to_image"}
+        self.assertFalse(run(text_to_image)["upscale"])
+        self.assertTrue(run({**text_to_image, "upscale": True})["upscale"])
+        self.assertFalse(run({**text_to_image, "upscale": False})["upscale"])
+
+        # Without the field the request follows the saved Settings toggle.
+        head, _ = self.request("/api/settings/runtime", {"sd_upscale": True}, method="POST",
+                               environment=environment)
+        self.assertIn("200 OK", head)
+        self.assertTrue(run(text_to_image)["upscale"])
+        self.assertFalse(run({**text_to_image, "upscale": False})["upscale"])
+        head, _ = self.request("/api/settings/runtime", {"sd_upscale": False}, method="POST",
+                               environment=environment)
+        self.assertIn("200 OK", head)
+
+        head, response = self.request("/api/generate",
+                                      {**base, "image_workflow": {**text_to_image, "upscale": "yes"}},
+                                      environment=environment)
+        self.assertIn("400", head)
+        self.assertIn("upscale must be a boolean", response)
+
     def test_image_workflow_rejects_bounds_capabilities_and_invalid_uploads_before_runtime(self):
         image_id, image_path = self.upload_image()
         base = {"model": "sdxl-base-q8-0", "prompt": "valid prompt",
@@ -1084,7 +1119,7 @@ class HttpApiTests(unittest.TestCase):
     def test_presets_and_download_progress(self):
         _, body = self.request("/api/models/presets")
         presets = json.loads(body)["data"]
-        self.assertEqual({preset["kind"] for preset in presets}, {0, 1, 2, 3})
+        self.assertEqual({preset["kind"] for preset in presets}, {0, 1, 2, 3, 4})
         self.assertTrue(all(preset["size"] > 0 for preset in presets))
         head, _ = self.request("/api/models/presets", body={"index":4})
         self.assertIn("200 OK", head)
@@ -1244,6 +1279,18 @@ class HttpApiTests(unittest.TestCase):
         head, wire = self.request(body={"padding":"x"*270000})
         self.assertIn("413", head)
         self.assertEqual(json.loads(wire)["error"]["code"], "request_too_large")
+
+    def test_tags_catalog_is_complete_valid_json(self):
+        head, body = self.request_raw("/api/tags", b"", method="GET",
+                                      environment={"PROSPERO_TEST_MANY_MODELS": "1"})
+        self.assertIn("200 OK", head)
+        models = json.loads(body)["models"]
+        self.assertEqual(len(models), 40)
+        for index, entry in enumerate(models):
+            expected = f"prospero-test-model-catalog-entry-{index}.gguf"
+            self.assertEqual(entry["model"], expected)
+            self.assertEqual(entry["name"], expected)
+            self.assertEqual(entry["details"]["family"], "text-to-text")
 
 if __name__ == "__main__":
     unittest.main()

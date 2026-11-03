@@ -7,6 +7,7 @@ static_assert(GGML_MAX_NAME == 160, "SD and llama must share the tensor ABI");
 #include "../../../include/image_codec.hpp"
 #include "../../../include/generated_output_path.hpp"
 #include "../../../include/model_paths.hpp"
+#include "../../../include/image_checkpoint_layout.hpp"
 #include "../../../third_party/miniz/miniz_tdef.h"
 #include "../../../third_party/miniz/miniz.h"
 
@@ -32,6 +33,10 @@ namespace
 
 sd_ctx_t *context;
 std::string context_identity;
+// 512x512 decodes whole on this heap (SD-Turbo and SD 1.5 inpainting are verified);
+// anything larger is split into 512-pixel tiles with the engine's default overlap.
+constexpr int kVaeTileSize = 512;
+constexpr int kUntiledDecodePixels = 512 * 512;
 void (*progress_callback)(const char *);
 bool backend_registered;
 
@@ -203,6 +208,22 @@ struct DecodedInput
     {
         return {image.width, image.height, image.channels, image.pixels};
     }
+    // Only the init image is reduced to the model's channel count by the engine. The mask
+    // and the ControlNet guide are used as decoded, and a decoded image is RGBA: the mask
+    // then fails to broadcast against the init tensor and the guide trips
+    // GGML_ASSERT(a->ne[2] == b->ne[2]), which aborts the title. Convert them here. A mask
+    // is monochrome (1), a guide is colour (3).
+    sd_image_t sd_image_with_channels(std::vector<std::uint8_t> &storage, unsigned wanted) const
+    {
+        if (!image.pixels || !image.channels || image.channels < wanted)
+            return {image.width, image.height, wanted, nullptr};
+        const std::size_t pixels = static_cast<std::size_t>(image.width) * image.height;
+        storage.resize(pixels * wanted);
+        for (std::size_t i = 0; i < pixels; ++i)
+            for (unsigned c = 0; c < wanted; ++c)
+                storage[i * wanted + c] = image.pixels[i * image.channels + c];
+        return {image.width, image.height, wanted, storage.data()};
+    }
 };
 
 bool valid_image_options(const gpt_runtime_image_options_t *options, bool flux2_klein)
@@ -292,14 +313,14 @@ bool ensure_context(const char *root)
 
     sd_ctx_params_t parameters;
     sd_ctx_params_init(&parameters);
-    const bool flux2_klein = is_flux2_klein_model(root);
+    const auto layout = prospero_image_layout::checkpoint_layout(root);
+    const bool flux2_klein = layout.flux2 || is_flux2_klein_model(root);
     char diffusion_model_path[512];
     char llm_path[512];
     char vae_path[512];
     char checkpoint_path[512];
-    const bool sdxl_checkpoint = is_sdxl_checkpoint(root);
-    const bool sdxl = sdxl_checkpoint || model_index_has(root, "StableDiffusionXLPipeline");
-    const bool realistic_vision = is_realistic_vision_v51(root);
+    const bool sdxl_checkpoint = !layout.found && is_sdxl_checkpoint(root);
+    const bool realistic_vision = !layout.found && is_realistic_vision_v51(root);
     if (sdxl_checkpoint &&
         std::snprintf(checkpoint_path, sizeof(checkpoint_path), "%s/sd_xl_base_1.0.safetensors", root) >=
             static_cast<int>(sizeof(checkpoint_path)))
@@ -311,7 +332,7 @@ bool ensure_context(const char *root)
          std::snprintf(vae_path, sizeof(vae_path), "%s/vae.safetensors", root) >=
              static_cast<int>(sizeof(vae_path))))
         return false;
-    if (flux2_klein &&
+    if (flux2_klein && !layout.found &&
         (std::snprintf(diffusion_model_path, sizeof(diffusion_model_path), "%s/diffusion_model.gguf", root) >=
              static_cast<int>(sizeof(diffusion_model_path)) ||
          std::snprintf(llm_path, sizeof(llm_path), "%s/qwen3-4b-q2-k.gguf", root) >=
@@ -320,19 +341,30 @@ bool ensure_context(const char *root)
              static_cast<int>(sizeof(vae_path))))
         return false;
     parameters.model_path = flux2_klein ? nullptr
-                            : (sdxl_checkpoint || realistic_vision) ? checkpoint_path
-                                                                  : root;
+                            : layout.found                           ? layout.model
+                            : (sdxl_checkpoint || realistic_vision)  ? checkpoint_path
+                                                                     : root;
     if (flux2_klein)
     {
-        parameters.diffusion_model_path = diffusion_model_path;
-        parameters.llm_path = llm_path;
-        parameters.vae_path = vae_path;
+        parameters.diffusion_model_path = layout.found ? layout.model : diffusion_model_path;
+        parameters.llm_path = layout.found ? layout.llm : llm_path;
+        parameters.vae_path = layout.found ? layout.vae : vae_path;
         parameters.vae_format = SD_VAE_FORMAT_FLUX2;
+    }
+    else if (layout.found)
+    {
+        if (layout.vae[0])
+            parameters.vae_path = layout.vae;
+        if (layout.control_net[0])
+            parameters.control_net_path = layout.control_net;
     }
     if (realistic_vision)
         parameters.vae_path = vae_path;
     parameters.n_threads = 1;
-    parameters.wtype = SD_TYPE_F16;
+    // Keep each checkpoint's own weight type (the library default). Forcing F16 dates
+    // from when the only image model was an fp16 diffusers folder, where it did nothing;
+    // for the Q8_0 GGUF presets it doubles resident weights and exhausts the heap.
+    parameters.wtype = SD_TYPE_COUNT;
     parameters.rng_type = CUDA_RNG;
     parameters.prediction = (is_sd3_model(root) || flux2_klein)
                                 ? FLOW_PRED
@@ -341,9 +373,19 @@ bool ensure_context(const char *root)
     parameters.eager_load = false;
     parameters.diffusion_conv_direct = false;
     parameters.vae_conv_direct = false;
+    // Flash attention stays off: it clears FLUX.2 Klein's 2.49 GiB attention workspace
+    // reservation, but sampling then kills the title inside RADV with no error. A failed
+    // allocation that the caller can report beats losing the app.
     parameters.diffusion_flash_attn = false;
-    parameters.backend = sdxl ? "CPU,diffusion=Vulkan0,vae=CPU"
-                              : "CPU,diffusion=Vulkan0,vae=Vulkan0";
+    // Everything runs on Vulkan, as the PS5SD reference build does. PS5's libc flexible
+    // heap is a few hundred MiB, so any stage left on the CPU backend either fails to
+    // allocate (SDXL's VAE decode, FLUX.2 Klein's text encoder) or crawls: with CPU as
+    // the default, the unassigned ControlNet ran a 512x512 guide in 705 s.
+    // Large VAE decodes are tiled on the device, see kVaeTileSize.
+    parameters.backend = "Vulkan0";
+    // Weights stay on the device. Streaming FLUX.2 Klein's 2.5 GB text encoder from the
+    // SSD ("te=disk") does free the VRAM its double blocks need, but the run then returns
+    // noise instead of an image, so a reported success would be worse than the failure.
     parameters.params_backend = "Vulkan0";
     context = new_sd_ctx(&parameters);
     prospero_runtime::set_model_resident(context != nullptr);
@@ -379,14 +421,17 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
                                         "prosperoai-image", "png"))
         return 1;
     const bool sd3 = is_sd3_model(root);
-    const bool sdxl = model_index_has(root, "StableDiffusionXLPipeline") || is_sdxl_checkpoint(root);
-    const bool flux2_klein = is_flux2_klein_model(root);
+    const auto layout = prospero_image_layout::checkpoint_layout(root);
+    const bool sdxl = layout.sdxl || model_index_has(root, "StableDiffusionXLPipeline") ||
+                      is_sdxl_checkpoint(root);
+    const bool flux2_klein = layout.flux2 || is_flux2_klein_model(root);
     if (!valid_image_options(image_options, flux2_klein))
     {
         std::snprintf(response, response_capacity, "Unsupported or invalid image workflow.");
         return 1;
     }
     DecodedInput init_image, mask_image, control_image;
+    std::vector<std::uint8_t> mask_storage, control_storage;
     if (image_options &&
         ((image_options->image_path && !init_image.load(image_options->image_path)) ||
          (image_options->mask_path && !mask_image.load(image_options->mask_path)) ||
@@ -427,8 +472,12 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     std::remove(display_output);
     const std::uint64_t start = sceKernelGetProcessTime();
     const auto runtime_settings = prospero_settings::get();
+    // The image workflow carries its own flag; the Settings toggle is its default and
+    // still drives the native UI, which has no per-request options.
+    const bool upscale_requested = image_options ? image_options->upscale
+                                                 : runtime_settings.sd_upscale;
     char upscaler_path[512]{};
-    if (runtime_settings.sd_upscale)
+    if (upscale_requested)
     {
         if (std::snprintf(upscaler_path, sizeof(upscaler_path), "%s/upscalers/RealESRGAN_x4plus.pth",
                           prospero::model_root()) >= static_cast<int>(sizeof(upscaler_path)))
@@ -467,6 +516,15 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
                         : runtime_settings.sd_seed == 0 ? -1
                                                         : static_cast<std::int64_t>(runtime_settings.sd_seed);
     parameters.batch_count = 1;
+    // An untiled decode needs several GiB of device workspace beside the resident
+    // weights, which the heap does not have once an SDXL-sized model is loaded.
+    // Tile anything larger than the size that is proven to decode whole.
+    if (parameters.width * parameters.height > kUntiledDecodePixels)
+    {
+        parameters.vae_tiling_params.enabled = true;
+        parameters.vae_tiling_params.tile_size_w = kVaeTileSize;
+        parameters.vae_tiling_params.tile_size_h = kVaeTileSize;
+    }
     parameters.sample_params.sample_steps = image_options ? static_cast<int>(image_options->steps)
                                             : flux2_klein ? 4
                                             : sdxl ? 10
@@ -500,10 +558,10 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
         else if (image_options->image_path)
             parameters.init_image = init_image.sd_image();
         if (image_options->mask_path)
-            parameters.mask_image = mask_image.sd_image();
+            parameters.mask_image = mask_image.sd_image_with_channels(mask_storage, 1);
         if (image_options->control_image_path)
         {
-            parameters.control_image = control_image.sd_image();
+            parameters.control_image = control_image.sd_image_with_channels(control_storage, 3);
             parameters.control_strength = image_options->control_strength == -1
                                               ? 0.9f : image_options->control_strength;
             if (image_options->canny && !preprocess_canny(parameters.control_image,
@@ -525,14 +583,14 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     sd_image_t *upscaled_images = nullptr;
     int upscaled_count = 0;
     bool upscaled = false;
-    if (generated && image_count == 1 && images && runtime_settings.sd_upscale)
+    if (generated && image_count == 1 && images && upscale_requested)
     {
         if (progress_callback)
             progress_callback("Upscaling image 4× with Real-ESRGAN");
         // Free the diffusion weights before loading ESRGAN to keep the Vulkan memory peak lower.
         release_context();
         upscaler_ctx_t *upscaler = new_upscaler_ctx(upscaler_path, false, 1, 128,
-                                                     "CPU,upscaler=Vulkan0", "Vulkan0");
+                                                     "Vulkan0", "Vulkan0");
         if (upscaler)
         {
             upscaled = upscale(upscaler, images[0], 4, &upscaled_images, &upscaled_count) &&
@@ -563,7 +621,7 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     }
     std::snprintf(response, response_capacity,
                   upscaled ? "Image generated and upscaled 4× locally.\nPNG: %s\nPreview: %s"
-                  : runtime_settings.sd_upscale
+                  : upscale_requested
                       ? "Image generated locally; ESRGAN failed, saved original size.\nPNG: %s\nPreview: %s"
                       : "Image generated locally.\nPNG: %s\nPreview: %s",
                   png_output, display_output);

@@ -53,6 +53,7 @@ struct gpt_runtime_image_options_t
     float strength = -1;
     float control_strength = -1;
     bool canny = false;
+    bool upscale = false;
     const char *negative_prompt = nullptr;
     const char *sampler = nullptr;
     const char *scheduler = nullptr;

@@ -206,8 +206,16 @@ static std::string http_body(const std::string &response)
     const std::size_t start = response.find("\r\n\r\n");
     return start == std::string::npos ? std::string() : response.substr(start + 4);
 }
+// A catalog large enough that the old fixed 2 KiB /api/tags buffer truncated it.
+constexpr unsigned kManyModels = 40;
+bool many_models()
+{
+    return std::getenv("PROSPERO_TEST_MANY_MODELS") != nullptr;
+}
 unsigned gpt_runtime_model_count()
 {
+    if (many_models())
+        return kManyModels;
     return std::getenv("PROSPERO_TEST_AUDIO_FIXTURE") || std::getenv("PROSPERO_TEST_IMAGE_METADATA")
                ? 3
                : 2;
@@ -224,6 +232,14 @@ void gpt_runtime_set_idle_unload_timeout(unsigned)
 }
 const char *gpt_runtime_model_id(unsigned i)
 {
+    if (many_models())
+    {
+        // Mirror the router: a thread_local string the next call rewrites, so callers
+        // that keep two pointers alive at once see the dangling-buffer bug.
+        thread_local std::string id;
+        id = "prospero-test-model-catalog-entry-" + std::to_string(i) + ".gguf";
+        return id.c_str();
+    }
     return i == 0                                        ? "tiny.gguf"
            : i == 1                                      ? "second.gguf"
            : std::getenv("PROSPERO_TEST_IMAGE_METADATA") ? "sdxl-base-q8-0"
@@ -306,6 +322,7 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                                     {"strength", image_options->strength},
                                     {"control_strength", image_options->control_strength},
                                     {"canny", image_options->canny},
+                                    {"upscale", image_options->upscale},
                                     {"negative_prompt", image_options->negative_prompt
                                                             ? image_options->negative_prompt
                                                             : ""},

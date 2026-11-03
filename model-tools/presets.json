@@ -811,5 +811,22 @@
     "sha256": "b0f532ac6e5f373aeb11fa0df73253251e133832d9c8b9942dc58f50bc5b4388"
    }
   ]
+ },
+ {
+  "id": "upscalers",
+  "name": "Real-ESRGAN x4 Plus (upscaler)",
+  "kind": 4,
+  "repository": "schwgHao/RealESRGAN_x4plus",
+  "revision": "9496699817027689b7fca10703bd92016c3aad69",
+  "license": "BSD-3-Clause",
+  "upstream_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+  "files": [
+   {
+    "source": "RealESRGAN_x4plus.pth",
+    "path": "RealESRGAN_x4plus.pth",
+    "size": 67040989,
+    "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1"
+   }
+  ]
  }
 ]

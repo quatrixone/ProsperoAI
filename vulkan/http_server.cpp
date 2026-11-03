@@ -580,20 +580,23 @@ const char kChatPage[] =
 void handle_get_tags(const NetApi &api, int sock)
 {
     std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
-    char body[2048];
-    std::snprintf(body, sizeof(body), "{\"models\":[");
+    nlohmann::json models = nlohmann::json::array();
     const unsigned count = gpt_runtime_model_count();
     for (unsigned i = 0; i < count; ++i)
     {
-        char entry[256];
-        std::snprintf(entry, sizeof(entry),
-                      "%s{\"name\":\"%s\",\"model\":\"%s\",\"details\":{\"family\":\"%s\"}}",
-                      i == 0 ? "" : ",", gpt_runtime_model_id(i), gpt_runtime_model_id(i),
-                      gpt_runtime_model_purpose(i));
-        std::strncat(body, entry, sizeof(body) - std::strlen(body) - 1);
+        // gpt_runtime_model_id hands back a thread_local buffer that the next call rewrites,
+        // so copy it before using it twice.
+        const std::string id = gpt_runtime_model_id(i);
+        models.push_back({{"name", id},
+                          {"model", id},
+                          {"details", {{"family", gpt_runtime_model_purpose(i)}}}});
     }
-    std::strncat(body, "]}", sizeof(body) - std::strlen(body) - 1);
-    send_json(api, sock, body);
+    // Model ids come from the filesystem and are not guaranteed UTF-8; replace rather
+    // than throw so the catalog still reaches the client.
+    send_json(api, sock,
+              nlohmann::json{{"models", models}}
+                  .dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)
+                  .c_str());
 }
 
 unsigned request_option(const char *body, const char *key, unsigned fallback, unsigned maximum)
@@ -1142,6 +1145,13 @@ bool parse_image_workflow(const nlohmann::json &request,
         error = "canny preprocessing is only valid for ControlNet.";
         return false;
     }
+    if (workflow.contains("upscale") && !workflow["upscale"].is_boolean())
+    {
+        error = "upscale must be a boolean.";
+        return false;
+    }
+    // Per request, defaulting to the Settings toggle so existing clients are unchanged.
+    result->options.upscale = workflow.value("upscale", prospero_settings::get().sd_upscale);
 
     std::string image_id, mask_id, guide_id;
     if (!image_upload_id_field(workflow, "image_id", image_id, error) ||

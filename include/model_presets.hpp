@@ -182,6 +182,9 @@ inline constexpr PresetFile preset_files_25[] = {
 inline constexpr PresetFile preset_files_26[] = {
     {"HTDemucs-GGUF/htdemucs-q8_0.gguf", "htdemucs-q8_0.gguf", "b0f532ac6e5f373aeb11fa0df73253251e133832d9c8b9942dc58f50bc5b4388", 61940768ULL, nullptr, nullptr},
 };
+inline constexpr PresetFile preset_files_27[] = {
+    {"RealESRGAN_x4plus.pth", "RealESRGAN_x4plus.pth", "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1", 67040989ULL, nullptr, nullptr},
+};
 inline constexpr Preset presets[] = {
     {"Mistral-7B-Instruct-v0.3.Q4_0.gguf", "Mistral 7B Instruct v0.3 Q4_0", "QuantFactory/Mistral-7B-Instruct-v0.3-GGUF", "a83fbb7c79c1afd59dfcce75272591cbe5a2412f", 0, 4113289152ULL, preset_files_0, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
     {"qwen3.8-9b-distill-q4-k-m.gguf", "Qwen3.8 9B Distill Q4_K_M", "empero-ai/Qwen3.8-9B-Distill-GGUF", "760121cd70bb4c36b2b5ec58eb765e0df5987efe", 0, 5780090176ULL, preset_files_1, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
@@ -212,6 +215,7 @@ inline constexpr Preset presets[] = {
     {"yue2-3b-q8-0", "YuE2 3B Q8_0 (Vulkan)", "ngquocvinh/YuE2-3B-GGUF", "9711e46e444185449185914dfb8694e6ce4069c9", 2, 4531984757ULL, preset_files_24, 6, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
     {"sheetsage2-orig", "SheetSage2 Cover (Vulkan)", "audio-cpp/SheetSage2-GGUF", "4e88814450385334524e50df43724af583f74206", 2, 2708224256ULL, preset_files_25, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
     {"htdemucs-q8_0", "HTDemucs Stems Q8_0 (Vulkan)", "audio-cpp/audio.cpp-gguf", "661a224e9d9adbd49c01626f85e426f5f425d771", 2, 61940768ULL, preset_files_26, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "", nullptr, nullptr, nullptr, nullptr, nullptr},
+    {"upscalers", "Real-ESRGAN x4 Plus (upscaler)", "schwgHao/RealESRGAN_x4plus", "9496699817027689b7fca10703bd92016c3aad69", 4, 67040989ULL, preset_files_27, 1, 0, nullptr, {0, 0, 0, 0.0f, "", ""}, "BSD-3-Clause", "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth", nullptr, nullptr, nullptr, nullptr},
 };
 inline constexpr std::size_t preset_count = sizeof(presets) / sizeof(presets[0]);
 }

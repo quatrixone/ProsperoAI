@@ -188,10 +188,10 @@ int main()
     assert(!safe_filename("../model.gguf"));
     assert(!safe_filename("mmproj-Q4_0.gguf"));
     assert(safe_filename("model-Q4_0.gguf"));
-    bool kinds[4]{};
+    bool kinds[5]{};
     for (const auto &preset : presets)
     {
-        assert(preset.kind >= 0 && preset.kind < 4);
+        assert(preset.kind >= 0 && preset.kind < 5);
         kinds[preset.kind] = true;
         assert(preset.size > 0 && estimate_fit(preset.size) != Fit::DoesNotFit);
         std::uint64_t total = 0;
