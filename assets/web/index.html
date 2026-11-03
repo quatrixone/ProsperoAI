@@ -72,7 +72,7 @@
                 <label id="image-strength-control" for="image-strength">Strength <input id="image-strength" type="number" min="0" max="1" step="0.05" value="0.75"></label>
                 <label id="image-control-strength-control" for="image-control-strength">Control strength <input id="image-control-strength" type="number" min="0" max="2" step="0.05" value="1"></label>
                 <label id="image-canny-control" class="check" for="image-canny"><input id="image-canny" type="checkbox" checked>Apply Canny edge detection</label>
-                <label class="check" for="image-upscale"><input id="image-upscale" type="checkbox">Upscale 4× with Real-ESRGAN (needs the upscaler model)</label>
+                <label for="image-upscale">Upscale with Real-ESRGAN (needs the upscaler model) <select id="image-upscale"><option value="0">Off</option><option value="2">2×</option><option value="4">4×</option></select></label>
                 <div id="image-source-control" class="image-file-control">
                   <label for="image-source-file">Source image<input id="image-source-file" type="file" accept="image/png,image/jpeg"></label>
                   <div id="image-source-preview" class="image-source-preview" hidden><img id="image-source-preview-img" alt="Selected source image"><button id="image-source-remove" class="secondary" type="button">Remove image</button></div>

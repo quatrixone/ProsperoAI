@@ -115,7 +115,7 @@ function imageInputValues(){
     return {width:Number($('image-width').value),height:Number($('image-height').value),steps:Number($('image-steps').value),
         cfg_scale:Number($('image-cfg-scale').value),sampler:$('image-sampler').value,scheduler:$('image-scheduler').value,
         strength:Number($('image-strength').value),control_strength:Number($('image-control-strength').value),
-        canny:$('image-canny').checked,upscale:$('image-upscale').checked,
+        canny:$('image-canny').checked,upscale:Number($('image-upscale').value),
         seed:Number($('image-seed').value),negative_prompt:$('image-negative-prompt').value};
 }
 function applyImageDefaults(model,mode){
@@ -126,7 +126,7 @@ function applyImageDefaults(model,mode){
     $('image-strength').value=String(settings.strength??0.75);
     $('image-control-strength').value=String(settings.control_strength??1);
     $('image-canny').checked=settings.canny??true;
-    $('image-upscale').checked=settings.upscale??false;
+    $('image-upscale').value=String(settings.upscale??0);
     $('image-strength-control').hidden=!settings.showStrength;
     $('image-control-strength-control').hidden=!settings.showControlStrength;
     $('image-canny-control').hidden=!settings.showControlStrength;
@@ -840,8 +840,8 @@ async function applyRuntimeSettings(change) {
     if($('sd-seed'))$('sd-seed').value=String(settings.sd_seed??42);
     savedSdSeed=Number(settings.sd_seed??42);
     if($('sd-size')){const size=`${Number(settings.sd_width)||0},${Number(settings.sd_height)||0}`;if(![...$('sd-size').options].some(option=>option.value===size))$('sd-size').add(new Option(`${settings.sd_width} × ${settings.sd_height}`,size));$('sd-size').value=size;savedSdSize=size;}
-    if($('sd-upscale'))$('sd-upscale').checked=Boolean(settings.sd_upscale);
-    savedSdUpscale=Boolean(settings.sd_upscale);
+    if($('sd-upscale'))$('sd-upscale').value=String(settings.sd_upscale??0);
+    savedSdUpscale=String(settings.sd_upscale??0);
     if($('web-search-enabled'))$('web-search-enabled').checked=Boolean(settings.web_search);
     if($('web-search-timeout'))$('web-search-timeout').value=String(settings.web_search_timeout||15);
     if(Number.isFinite(Number(settings.search_scopes)))applySearchScopeMask(Number(settings.search_scopes));
@@ -862,7 +862,7 @@ async function applyRuntimeSettings(change) {
     if(change?.audio_options!==undefined&&$('audio-options'))$('audio-options').value=savedAudioOptions;
     if(change?.sd_seed!==undefined&&$('sd-seed'))$('sd-seed').value=String(savedSdSeed);
     if((change?.sd_width!==undefined||change?.sd_height!==undefined)&&$('sd-size'))$('sd-size').value=savedSdSize;
-    if(change?.sd_upscale!==undefined&&$('sd-upscale'))$('sd-upscale').checked=savedSdUpscale;
+    if(change?.sd_upscale!==undefined&&$('sd-upscale'))$('sd-upscale').value=savedSdUpscale;
     if(change?.web_search&&$('web-search-enabled'))$('web-search-enabled').checked=savedWebSearch;
     if(change?.web_search_timeout&&$('web-search-timeout'))$('web-search-timeout').value=String(savedWebSearchTimeout);
     if(change?.search_scopes)applySearchScopeMask(savedSearchScopes);
@@ -880,7 +880,7 @@ function stageWorkspaceSettings(){
   const model=models.find(item=>item.id===(modelChooser.value||current?.model));
   if(model?.purpose==='text-to-image')Object.assign(settings,{sd_seed:Number($('sd-seed').value),
     sd_width:Number($('sd-size').value.split(',')[0]),sd_height:Number($('sd-size').value.split(',')[1]),
-    sd_upscale:$('sd-upscale').checked});
+    sd_upscale:Number($('sd-upscale').value)});
   if(model?.purpose==='text-to-speech'){
     if(String(model.id).includes('chatterbox'))Object.assign(settings,{chatterbox_voice:$('workspace-voice').value,
       chatterbox_language:$('workspace-language').value});
@@ -976,13 +976,13 @@ $('runtime-feedback').before(sdSizeLabel,sdSizeHint);
 sdSizeLabel.hidden=true;
 sdSizeHint.hidden=true;
 const sdUpscaleLabel=document.createElement('label');
-const sdUpscale=document.createElement('input');
+const sdUpscale=document.createElement('select');
 sdUpscale.id='sd-upscale';
-sdUpscale.type='checkbox';
-sdUpscaleLabel.append(sdUpscale,document.createTextNode(' Upscale image 4× with Real-ESRGAN'));
+for(const [value,label] of [['0','Off'],['2','2×'],['4','4×']]){const option=document.createElement('option');option.value=value;option.textContent=label;sdUpscale.append(option);}
+sdUpscaleLabel.append(document.createTextNode('Upscale image with Real-ESRGAN '),sdUpscale);
 const sdUpscaleHint=document.createElement('small');
 sdUpscaleHint.className='muted';
-sdUpscaleHint.textContent='Optional post-processing. Requires RealESRGAN_x4plus.pth in models/upscalers/. Runs after releasing the diffusion model from GPU memory.';
+sdUpscaleHint.textContent='Optional post-processing. Requires RealESRGAN_x4plus.pth in models/upscalers/. Runs after releasing the diffusion model from GPU memory. 2× is the 4× pass scaled back down.';
 $('runtime-feedback').before(sdUpscaleLabel,sdUpscaleHint);
 sdUpscaleLabel.hidden=true;
 sdUpscaleHint.hidden=true;

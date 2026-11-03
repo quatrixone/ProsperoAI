@@ -135,7 +135,7 @@ test('runtime settings restore the selected KV type and roll back a failed chang
                 context: '256k', kv: 'q4_0', output_limit: 0, thinking: false,
                 idle_unload_minutes: 5, audio_duration_sec: 0, audio_seed: 42,
                 audio_options: '', sd_seed: 42, sd_width: 0, sd_height: 0,
-                sd_upscale: false, web_search: false, web_search_timeout: 15,
+                sd_upscale: 0, web_search: false, web_search_timeout: 15,
                 search_scopes: 511, kokoro_voice: 'af_heart', chatterbox_voice: 'cemo',
                 chatterbox_language: 'en', chatterbox_languages: [], kokoro_voices: [],
                 chatterbox_voices: [],

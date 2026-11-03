@@ -325,21 +325,37 @@ class HttpApiTests(unittest.TestCase):
             self.assertTrue(json.loads(response)["done"])
             return json.loads(self.generate_calls_file.read_text().splitlines()[-1])
 
-        head, _ = self.request("/api/settings/runtime", {"sd_upscale": False}, method="POST",
+        head, _ = self.request("/api/settings/runtime", {"sd_upscale": 0}, method="POST",
                                environment=environment)
         self.assertIn("200 OK", head)
         text_to_image = {"workflow": "text_to_image"}
-        self.assertFalse(run(text_to_image)["upscale"])
-        self.assertTrue(run({**text_to_image, "upscale": True})["upscale"])
-        self.assertFalse(run({**text_to_image, "upscale": False})["upscale"])
+        self.assertEqual(run(text_to_image)["upscale"], 0)
+        self.assertEqual(run({**text_to_image, "upscale": 2})["upscale"], 2)
+        self.assertEqual(run({**text_to_image, "upscale": 4})["upscale"], 4)
+        self.assertEqual(run({**text_to_image, "upscale": 0})["upscale"], 0)
+        # A boolean is the pre-factor spelling and still means 4x.
+        self.assertEqual(run({**text_to_image, "upscale": True})["upscale"], 4)
+        self.assertEqual(run({**text_to_image, "upscale": False})["upscale"], 0)
+        for rejected in (1, 3, 8, "4"):
+            head, response = self.request("/api/generate",
+                                          {**base, "image_workflow":
+                                           {**text_to_image, "upscale": rejected}},
+                                          environment=environment)
+            self.assertIn("400 Bad Request", head, rejected)
+            self.assertIn("upscale must be 0, 2, or 4", json.loads(response)["error"])
 
-        # Without the field the request follows the saved Settings toggle.
+        # Without the field the request follows the saved Settings choice.
+        head, _ = self.request("/api/settings/runtime", {"sd_upscale": 2}, method="POST",
+                               environment=environment)
+        self.assertIn("200 OK", head)
+        self.assertEqual(run(text_to_image)["upscale"], 2)
+        self.assertEqual(run({**text_to_image, "upscale": 0})["upscale"], 0)
         head, _ = self.request("/api/settings/runtime", {"sd_upscale": True}, method="POST",
                                environment=environment)
         self.assertIn("200 OK", head)
-        self.assertTrue(run(text_to_image)["upscale"])
-        self.assertFalse(run({**text_to_image, "upscale": False})["upscale"])
-        head, _ = self.request("/api/settings/runtime", {"sd_upscale": False}, method="POST",
+        self.assertEqual(json.loads(self.request("/api/settings/runtime",
+                                                 environment=environment)[1])["sd_upscale"], 4)
+        head, _ = self.request("/api/settings/runtime", {"sd_upscale": 0}, method="POST",
                                environment=environment)
         self.assertIn("200 OK", head)
 
@@ -347,7 +363,7 @@ class HttpApiTests(unittest.TestCase):
                                       {**base, "image_workflow": {**text_to_image, "upscale": "yes"}},
                                       environment=environment)
         self.assertIn("400", head)
-        self.assertIn("upscale must be a boolean", response)
+        self.assertIn("upscale must be 0, 2, or 4", response)
 
     def test_image_workflow_rejects_bounds_capabilities_and_invalid_uploads_before_runtime(self):
         image_id, image_path = self.upload_image()
@@ -759,15 +775,15 @@ class HttpApiTests(unittest.TestCase):
     def test_runtime_settings_round_trip(self):
         config = Path(self.scratch.name) / 'runtime.cfg'
         config.write_text('version=2\nstyle=2\ntokens=192\ntheme=1\n')
-        header, body = self.request('/api/settings/runtime', body={'context':'32k', 'kv':'auto', 'thinking':True, 'sd_upscale':True, 'idle_unload_minutes':2, 'kokoro_voice':'af_bella', 'audio_duration_sec':30, 'audio_seed':123, 'sd_seed':456})
+        header, body = self.request('/api/settings/runtime', body={'context':'32k', 'kv':'auto', 'thinking':True, 'sd_upscale':2, 'idle_unload_minutes':2, 'kokoro_voice':'af_bella', 'audio_duration_sec':30, 'audio_seed':123, 'sd_seed':456})
         self.assertIn('200 OK', header)
         expected = json.loads(body)
         self.assertEqual({k:expected[k] for k in ('context','kv','thinking','sd_upscale','idle_unload_minutes','kokoro_voice','audio_duration_sec','audio_seed','sd_seed')},
-                         {'context':'32k','kv':'auto','thinking':True,'sd_upscale':True,'idle_unload_minutes':2,'kokoro_voice':'af_bella','audio_duration_sec':30,'audio_seed':123,'sd_seed':456})
+                         {'context':'32k','kv':'auto','thinking':True,'sd_upscale':2,'idle_unload_minutes':2,'kokoro_voice':'af_bella','audio_duration_sec':30,'audio_seed':123,'sd_seed':456})
         self.assertEqual(json.loads(body), expected)
         for line in ('style=2','tokens=192','theme=1'):
             self.assertIn(line,config.read_text().splitlines())
-        for line in ('audio_duration_sec=30','audio_seed=123','sd_seed=456','sd_upscale=1'):
+        for line in ('audio_duration_sec=30','audio_seed=123','sd_seed=456','sd_upscale=2'):
             self.assertIn(line,config.read_text().splitlines())
         self.assertEqual(json.loads(self.request('/api/settings/runtime')[1]), expected)
         header, body = self.request('/api/settings/runtime', body={'context':'256k', 'kv':'auto', 'thinking':True, 'idle_unload_minutes':5})
@@ -775,7 +791,7 @@ class HttpApiTests(unittest.TestCase):
         expected.update(context='256k',kv='auto',thinking=True,idle_unload_minutes=5,kokoro_voice='af_bella')
         self.assertEqual(json.loads(body), expected)
         self.assertEqual(json.loads(self.request('/api/settings/runtime')[1]), expected)
-        for invalid in ({'context':'2k'}, {'kv':'q2_0'}, {'thinking':'false'}, {'sd_upscale':1}, {'idle_unload_minutes':3}, {'kokoro_voice':'missing'}, {'audio_duration_sec':301}, {'audio_seed':-1}, {'audio_seed':4294967296}, {'sd_seed':-1}, {'sd_seed':4294967296}, {'unknown':1}, {'context':'16k','kv':'bad'}, []):
+        for invalid in ({'context':'2k'}, {'kv':'q2_0'}, {'thinking':'false'}, {'sd_upscale':1}, {'sd_upscale':3}, {'sd_upscale':'4'}, {'idle_unload_minutes':3}, {'kokoro_voice':'missing'}, {'audio_duration_sec':301}, {'audio_seed':-1}, {'audio_seed':4294967296}, {'sd_seed':-1}, {'sd_seed':4294967296}, {'unknown':1}, {'context':'16k','kv':'bad'}, []):
             self.assertIn('400 Bad Request', self.request('/api/settings/runtime', body=invalid)[0])
             self.assertEqual(json.loads(self.request('/api/settings/runtime')[1]), expected)
         self.assertIn('401 Unauthorized', self.request('/api/settings/runtime', key='secret')[0])

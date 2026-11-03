@@ -42,7 +42,7 @@
             ...(strategy === 'init_image_strength' && ['image_to_image', 'inpainting'].includes(mode)
                 ? {strength: values.strength ?? 0.75} : {}),
             ...(mode === 'controlnet' ? {control_strength: values.control_strength ?? 1, canny: values.canny ?? true} : {}),
-            upscale: values.upscale ?? false,
+            upscale: values.upscale ?? 0,
             showStrength: strategy === 'init_image_strength' && ['image_to_image', 'inpainting'].includes(mode),
             showControlStrength: mode === 'controlnet',
         };
@@ -85,7 +85,7 @@
         if (showControlStrength && (!Number.isFinite(options.control_strength) || options.control_strength < 0 || options.control_strength > 2))
             throw new Error('Control strength must be between 0 and 2.');
         const {upscale, ...generation} = options;
-        const image_workflow = {workflow, ...generation, upscale: Boolean(upscale),
+        const image_workflow = {workflow, ...generation, upscale: upscale === 2 || upscale === 4 ? upscale : 0,
                                 negative_prompt: String(values.negative_prompt || '')};
         if (showStrength) image_workflow.strength = options.strength;
         if (showControlStrength) {

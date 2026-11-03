@@ -73,7 +73,7 @@ test('model changes stage server defaults and hide incompatible workflow options
 
     assert.deepEqual({...imageSettings(sd, 'text_to_image')}, {
         width: 1024, height: 768, steps: 25, cfg_scale: 6, sampler: 'euler_a', scheduler: 'ays',
-        upscale: false, showStrength: false, showControlStrength: false,
+        upscale: 0, showStrength: false, showControlStrength: false,
     });
     assert.equal(imageSettings(sd, 'image_to_image').showStrength, true);
     assert.equal(imageSettings(sd, 'inpainting').showStrength, true);
@@ -126,7 +126,7 @@ test('image workflow requests contain only opaque upload IDs and staged model op
         output_message_index: 1,
         image_workflow: {
             workflow: 'image_to_image', width: 768, height: 768, steps: 20, cfg_scale: 5,
-            strength: 0.6, sampler: 'euler_a', scheduler: 'ays', upscale: false,
+            strength: 0.6, sampler: 'euler_a', scheduler: 'ays', upscale: 0,
             negative_prompt: 'blur', image_id: 'b'.repeat(32),
         },
     });
@@ -192,22 +192,21 @@ test('image output is retained in conversation history and refreshed in the exis
     assert.match(appSource, /retry/);
 });
 
-test('the upscale toggle is sent with every image request, on or off', () => {
+test('the upscale factor is sent with every image request, including off', () => {
     const {buildImageRequest} = workspaceApi();
     const base = {
         model: model('generic-image', ['text_to_image']),
         mode: 'text_to_image',
         prompt: 'A lighthouse',
     };
-    const off = buildImageRequest({...base, values: {upscale: false}});
-    const on = buildImageRequest({...base, values: {upscale: true}});
-    // Always sent: omitting it would fall back to the Settings toggle, so clearing the
-    // box in the Studio could not turn an upscale off.
-    assert.equal(off.image_workflow.upscale, false);
-    assert.equal(on.image_workflow.upscale, true);
-    assert.equal(buildImageRequest(base).image_workflow.upscale, false);
-    assert.match(appSource, /upscale:\$\('image-upscale'\)\.checked/);
-    assert.match(htmlSource, /id="image-upscale"/);
+    // Always sent: omitting it would fall back to the Settings choice, so picking Off
+    // in the Studio could not turn an upscale off.
+    assert.equal(buildImageRequest({...base, values: {upscale: 0}}).image_workflow.upscale, 0);
+    assert.equal(buildImageRequest({...base, values: {upscale: 2}}).image_workflow.upscale, 2);
+    assert.equal(buildImageRequest({...base, values: {upscale: 4}}).image_workflow.upscale, 4);
+    assert.equal(buildImageRequest(base).image_workflow.upscale, 0);
+    assert.match(appSource, /upscale:Number\(\$\('image-upscale'\)\.value\)/);
+    assert.match(htmlSource, /<select id="image-upscale">.*value="2".*value="4".*<\/select>/);
 });
 
 function topLevelFunction(source, signature) {

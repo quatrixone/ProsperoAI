@@ -17,7 +17,7 @@ namespace prospero_settings {
 // Search scope bit order: web, code, video, reference, qa, package, paper, music, image.
 inline constexpr unsigned kSearchScopeCount = 9;
 inline constexpr unsigned kAllSearchScopes = (1u << kSearchScopeCount) - 1u;
-struct Runtime { unsigned context = 0, output_limit = 0, kv = 0; bool thinking = false, sd_upscale = false, web_search = false; unsigned idle_unload_minutes = 5, web_search_timeout_seconds = 15; unsigned kokoro_voice = 0, chatterbox_voice = 0, chatterbox_language = 0; unsigned audio_duration_sec = 0, audio_seed = 42, sd_seed = 42, sd_width = 0, sd_height = 0; unsigned search_scopes = kAllSearchScopes; std::string audio_lyrics, audio_options; };
+struct Runtime { unsigned context = 0, output_limit = 0, kv = 0; bool thinking = false, web_search = false; unsigned sd_upscale = 0; unsigned idle_unload_minutes = 5, web_search_timeout_seconds = 15; unsigned kokoro_voice = 0, chatterbox_voice = 0, chatterbox_language = 0; unsigned audio_duration_sec = 0, audio_seed = 42, sd_seed = 42, sd_width = 0, sd_height = 0; unsigned search_scopes = kAllSearchScopes; std::string audio_lyrics, audio_options; };
 inline std::mutex mutex;
 inline bool valid_context(unsigned n) {
     return n == 0 || n == 4096 || n == 8192 || n == 16384 || n == 32768 || n == 65536 ||
@@ -30,6 +30,9 @@ inline bool valid_idle_unload_minutes(unsigned n) {
 inline bool valid_audio_duration_sec(unsigned n) { return n <= 300; }
 inline bool valid_seed(std::uint64_t n) { return n <= std::numeric_limits<unsigned>::max(); }
 inline bool valid_sd_dimensions(unsigned width, unsigned height) { if (width == 0 && height == 0) return true; return width >= 256 && width <= 768 && height >= 256 && height <= 768 && width % 64 == 0 && height % 64 == 0; }
+// 0 is off; 2 and 4 are the factors the Real-ESRGAN x4 model can produce (4 in one
+// pass, 2 by halving that pass). A stored 1 is the old on/off file, and means 4.
+inline bool valid_sd_upscale(unsigned n) { return n == 0 || n == 1 || n == 2 || n == 4; }
 inline bool valid_web_search_timeout(unsigned n) { return n >= 3 && n <= 30; }
 inline bool valid_search_scopes(unsigned n) { return n != 0 && n <= kAllSearchScopes; }
 inline constexpr std::size_t kMaxAudioLyricsBytes = 4096;
@@ -97,7 +100,7 @@ inline Runtime read_unlocked() {
             else if (std::sscanf(line, "sd_seed=%llu", &wide) == 1 && valid_seed(wide)) p.sd_seed = static_cast<unsigned>(wide);
             else if (std::sscanf(line, "sd_width=%u", &v) == 1 && v <= 768 && (v == 0 || (v >= 256 && v % 64 == 0))) p.sd_width = v;
             else if (std::sscanf(line, "sd_height=%u", &v) == 1 && v <= 768 && (v == 0 || (v >= 256 && v % 64 == 0))) p.sd_height = v;
-            else if (std::sscanf(line, "sd_upscale=%u", &v) == 1 && v <= 1) p.sd_upscale = v != 0;
+            else if (std::sscanf(line, "sd_upscale=%u", &v) == 1 && valid_sd_upscale(v)) p.sd_upscale = v == 1 ? 4U : v;
             else if (std::sscanf(line, "web_search=%u", &v) == 1) p.web_search = v != 0;
             else if (std::sscanf(line, "web_search_timeout=%u", &v) == 1 && valid_web_search_timeout(v)) p.web_search_timeout_seconds = v;
             else if (std::sscanf(line, "search_scopes=%u", &v) == 1 && valid_search_scopes(v)) p.search_scopes = v;
@@ -131,7 +134,7 @@ inline bool set_unlocked(Runtime p) {
         std::fclose(f);
     }
     if (!contents.empty() && contents.back() != '\n') contents += '\n';
-    char fields[512]; std::snprintf(fields, sizeof(fields), "context=%u\ntokens=%u\nkv=%u\nthinking=%u\nsd_upscale=%u\nidle_unload_minutes=%u\nkokoro_voice=%u\nchatterbox_voice=%u\nchatterbox_language=%u\naudio_duration_sec=%u\naudio_seed=%u\nsd_seed=%u\nsd_width=%u\nsd_height=%u\nweb_search=%u\nweb_search_timeout=%u\nsearch_scopes=%u\n", p.context, p.output_limit, p.kv, p.thinking ? 1U : 0U, p.sd_upscale ? 1U : 0U, p.idle_unload_minutes, p.kokoro_voice, p.chatterbox_voice, p.chatterbox_language, p.audio_duration_sec, p.audio_seed, p.sd_seed, p.sd_width, p.sd_height, p.web_search ? 1U : 0U, p.web_search_timeout_seconds, p.search_scopes);
+    char fields[512]; std::snprintf(fields, sizeof(fields), "context=%u\ntokens=%u\nkv=%u\nthinking=%u\nsd_upscale=%u\nidle_unload_minutes=%u\nkokoro_voice=%u\nchatterbox_voice=%u\nchatterbox_language=%u\naudio_duration_sec=%u\naudio_seed=%u\nsd_seed=%u\nsd_width=%u\nsd_height=%u\nweb_search=%u\nweb_search_timeout=%u\nsearch_scopes=%u\n", p.context, p.output_limit, p.kv, p.thinking ? 1U : 0U, p.sd_upscale, p.idle_unload_minutes, p.kokoro_voice, p.chatterbox_voice, p.chatterbox_language, p.audio_duration_sec, p.audio_seed, p.sd_seed, p.sd_width, p.sd_height, p.web_search ? 1U : 0U, p.web_search_timeout_seconds, p.search_scopes);
     contents += fields;
     if (!p.audio_lyrics.empty()) contents += "audio_lyrics_b64=" + base64_encode(p.audio_lyrics) + '\n';
     if (!p.audio_options.empty()) contents += "audio_options_b64=" + base64_encode(p.audio_options) + '\n';

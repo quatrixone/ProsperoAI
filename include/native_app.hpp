@@ -37,7 +37,8 @@ struct Preferences
     unsigned idle_unload_minutes = 5, kokoro_voice = 0, chatterbox_voice = 0, chatterbox_language = 0;
     unsigned audio_duration_sec = 0, audio_seed = 42, sd_seed = 42, sd_width = 0, sd_height = 0;
     bool thinking = false;
-    bool sd_upscale = false, web_search = false;
+    bool web_search = false;
+    unsigned sd_upscale = 0;
     unsigned theme = 0, accent = 0, volume = 35, text_size = 0;
     bool reduced_motion = false, high_contrast = false;
     std::string model_id;

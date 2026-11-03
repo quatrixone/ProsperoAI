@@ -119,6 +119,27 @@ void sd_progress(int step, int steps, float, void *)
     progress_callback(status);
 }
 
+// Box-average an image down to half its size, in place: the 4x pass is the only one
+// Real-ESRGAN produces, so a 2x request is that pass halved.
+bool halve_image(sd_image_t &image)
+{
+    if (!image.data || image.width < 2 || image.height < 2 || image.channel == 0)
+        return false;
+    const unsigned width = image.width / 2, height = image.height / 2,
+                   channels = image.channel, stride = image.width * channels;
+    for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x)
+            for (unsigned c = 0; c < channels; ++c)
+            {
+                const std::uint8_t *top = image.data + 2 * y * stride + 2 * x * channels + c;
+                const unsigned sum = top[0] + top[channels] + top[stride] + top[stride + channels];
+                image.data[(y * width + x) * channels + c] = static_cast<std::uint8_t>((sum + 2) / 4);
+            }
+    image.width = width;
+    image.height = height;
+    return true;
+}
+
 bool write_ppm(const char *path, const sd_image_t &image)
 {
     if (!image.data || image.width == 0 || image.height == 0 || image.channel < 3)
@@ -486,8 +507,9 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     const auto runtime_settings = prospero_settings::get();
     // The image workflow carries its own flag; the Settings toggle is its default and
     // still drives the native UI, which has no per-request options.
-    const bool upscale_requested = image_options ? image_options->upscale
-                                                 : runtime_settings.sd_upscale;
+    const unsigned upscale_factor = image_options ? image_options->upscale
+                                                  : runtime_settings.sd_upscale;
+    const bool upscale_requested = upscale_factor != 0;
     char upscaler_path[512]{};
     if (upscale_requested)
     {
@@ -596,7 +618,12 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     if (generated && image_count == 1 && images && upscale_requested)
     {
         if (progress_callback)
-            progress_callback("Upscaling image 4× with Real-ESRGAN");
+        {
+            char status[64];
+            std::snprintf(status, sizeof(status), "Upscaling image %u× with Real-ESRGAN",
+                          upscale_factor);
+            progress_callback(status);
+        }
         // Free the diffusion weights before loading ESRGAN to keep the Vulkan memory peak lower.
         release_context();
         upscaler_ctx_t *upscaler = new_upscaler_ctx(upscaler_path, false, 1, 128,
@@ -606,6 +633,10 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
             upscaled = upscale(upscaler, images[0], 4, &upscaled_images, &upscaled_count) &&
                        upscaled_count == 1 && upscaled_images && upscaled_images[0].data;
             free_upscaler_ctx(upscaler);
+            // The model's own scale is the only one it produces, so a 2x request is the
+            // 4x pass halved -- still the restored detail, at half the pixels.
+            if (upscaled && upscale_factor == 2 && !halve_image(upscaled_images[0]))
+                upscaled = false;
         }
         if (!upscaled)
             log_line("[prosperoai:sd] Real-ESRGAN failed; saving original image\n");
@@ -629,8 +660,12 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
         std::snprintf(response, response_capacity, "Image generation failed. Check the system log.");
         return 3;
     }
+    char upscaled_note[64];
+    std::snprintf(upscaled_note, sizeof(upscaled_note),
+                  "Image generated and upscaled %u× locally.\nPNG: %%s\nPreview: %%s",
+                  upscale_factor);
     std::snprintf(response, response_capacity,
-                  upscaled ? "Image generated and upscaled 4× locally.\nPNG: %s\nPreview: %s"
+                  upscaled ? upscaled_note
                   : upscale_requested
                       ? "Image generated locally; ESRGAN failed, saved original size.\nPNG: %s\nPreview: %s"
                       : "Image generated locally.\nPNG: %s\nPreview: %s",

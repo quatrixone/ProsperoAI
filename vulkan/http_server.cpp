@@ -1145,13 +1145,22 @@ bool parse_image_workflow(const nlohmann::json &request,
         error = "canny preprocessing is only valid for ControlNet.";
         return false;
     }
-    if (workflow.contains("upscale") && !workflow["upscale"].is_boolean())
+    // The factor, or 0 for off. A boolean is the pre-factor spelling: true means 4x.
+    if (workflow.contains("upscale"))
     {
-        error = "upscale must be a boolean.";
-        return false;
+        const auto &requested = workflow["upscale"];
+        const unsigned factor = requested.is_boolean() ? (requested.get<bool>() ? 4U : 0U)
+                                : requested.is_number_unsigned() ? requested.get<unsigned>()
+                                                                 : 1U;
+        if (factor == 1U || !prospero_settings::valid_sd_upscale(factor))
+        {
+            error = "upscale must be 0, 2, or 4.";
+            return false;
+        }
+        result->options.upscale = factor;
     }
-    // Per request, defaulting to the Settings toggle so existing clients are unchanged.
-    result->options.upscale = workflow.value("upscale", prospero_settings::get().sd_upscale);
+    else
+        result->options.upscale = prospero_settings::get().sd_upscale;
 
     std::string image_id, mask_id, guide_id;
     if (!image_upload_id_field(workflow, "image_id", image_id, error) ||
@@ -2425,10 +2434,17 @@ void handle_runtime_settings(const NetApi &api, int sock, const char *body = nul
                 p.thinking = it.value().get<bool>();
                 valid = true;
             }
-            else if (it.key() == "sd_upscale" && it.value().is_boolean())
+            else if (it.key() == "sd_upscale" &&
+                     (it.value().is_boolean() || it.value().is_number_unsigned()))
             {
-                p.sd_upscale = it.value().get<bool>();
-                valid = true;
+                const unsigned factor = it.value().is_boolean()
+                                            ? (it.value().get<bool>() ? 4U : 0U)
+                                            : it.value().get<unsigned>();
+                if (factor != 1U && prospero_settings::valid_sd_upscale(factor))
+                {
+                    p.sd_upscale = factor;
+                    valid = true;
+                }
             }
             else if (it.key() == "kokoro_voice" && it.value().is_string())
             {

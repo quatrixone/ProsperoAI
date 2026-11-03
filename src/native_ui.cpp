@@ -2217,9 +2217,13 @@ void NativeUI::Impl::build_generation_form()
         image_size_field.description = "Larger images need more memory and take longer. "
                                        "Unsupported sizes use the model default.";
         auto &upscale_field =
-            form_.add_choice(32, "Image upscaler", {"Off", "Real-ESRGAN 4x"}, p.sd_upscale ? 1 : 0);
+            form_.add_choice(32, "Image upscaler", {"Off", "Real-ESRGAN 2x", "Real-ESRGAN 4x"},
+                             p.sd_upscale == 4   ? 2
+                             : p.sd_upscale == 2 ? 1
+                                                 : 0);
         upscale_field.description =
-            "Optional 4x enlargement. It needs the upscaler weights and additional memory.";
+            "Optional enlargement. It needs the upscaler weights and additional memory; "
+            "2x is the same pass as 4x, scaled back down.";
         if (p.sd_upscale)
             form_.add_value(33, "Upscaler model path", "models/upscalers/RealESRGAN_x4plus.pth");
     }
@@ -2316,7 +2320,8 @@ void NativeUI::Impl::apply_generation_form()
             p.sd_width = widths[selected_size];
             p.sd_height = heights[selected_size];
         }
-        p.sd_upscale = form_.choice_index(32) == 1;
+        const int upscale_choice = form_.choice_index(32);
+        p.sd_upscale = upscale_choice == 2 ? 4U : upscale_choice == 1 ? 2U : 0U;
     }
     p.web_search = form_.choice_index(22) == 1;
     if (!app_.stage_preferences(std::move(p)))
