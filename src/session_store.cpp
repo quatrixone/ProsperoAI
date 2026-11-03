@@ -470,7 +470,9 @@ bool remove_archived_media(const char *id, unsigned index, const char *path)
     make_path(reference, sizeof(reference), id, leaf);
     if (std::remove(reference) != 0)
         return false;
-    if (std::remove(path) == 0)
+    // A file that is already gone is the state the caller asked for. Refusing left any
+    // entry whose file had been removed behind our back listed in Media for good.
+    if (std::remove(path) == 0 || errno == ENOENT)
         return true;
     (void)write_output_reference(id, index, path);
     return false;

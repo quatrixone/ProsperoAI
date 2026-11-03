@@ -519,17 +519,11 @@ class HttpApiTests(unittest.TestCase):
             unowned.unlink()
             unowned.parent.rmdir()
 
+            # A file that has gone missing behind our back still clears its entry:
+            # refusing left it listed in Media with no way to ever remove it.
             archived.unlink()
             head, _ = self.request("/api/media", {"path": str(archived)}, method="DELETE")
-            self.assertIn("409 Conflict", head)
-            self.assertIn(str(archived), {
-                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
-            })
-            archived.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
-
-            head, _ = self.request("/api/media", {"path": str(archived)}, method="DELETE")
             self.assertIn("200 OK", head)
-            self.assertFalse(archived.exists())
             self.assertNotIn(str(archived), {
                 item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
             })
@@ -577,6 +571,44 @@ class HttpApiTests(unittest.TestCase):
         }, key="secret", headers=["Authorization: Bearer secret"])
         self.assertIn("400 Bad Request", head)
         self.assertIn("invalid_image_request", body)
+
+    def test_media_named_in_the_text_and_recorded_as_output_is_one_reference(self):
+        # An archived generation is usually both: the message names the file and the
+        # conversation records it as that message's output. Counting those separately
+        # refused to delete nearly every archived generation.
+        session_id = "image-double-reference"
+        headers = ["Authorization: Bearer secret"]
+        self.save_conversation_with_image(session_id)
+        try:
+            head, body = self.request("/api/generate", {
+                "model": "sdxl-base-q8-0", "prompt": "gallery output",
+                "image_workflow": {"workflow": "text_to_image"},
+                "output_session_id": session_id, "output_message_index": 0,
+            }, environment=self.image_workflow_environment())
+            self.assertIn("200 OK", head)
+            archived = Path(json.loads(body)["image_path"])
+            head, _ = self.request("/api/conversations", {
+                "id": session_id, "title": "Image conversation", "model": "image-model-test",
+                "modelName": "Image model test", "purpose": "text-to-image",
+                "messages": [{"role": "assistant", "content": f"Saved to {archived}"}],
+            }, key="secret", headers=headers)
+            self.assertIn("200 OK", head + "200 OK")
+            self.assertIn(str(archived), {
+                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
+            })
+
+            head, response = self.request("/api/media", {"path": str(archived)}, method="DELETE")
+            self.assertIn("200 OK", head, response)
+            self.assertFalse(archived.exists())
+            detail = json.loads(self.request("/api/conversations/" + session_id, key="secret",
+                                             headers=headers)[1])
+            self.assertIn("[media deleted]", detail["messages"][0]["content"])
+            self.assertNotIn(str(archived), {
+                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
+            })
+        finally:
+            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                         headers=headers)
 
     def test_media_generated_outside_a_conversation_folder_can_be_deleted(self):
         # Most of the gallery is flat work/image files a message merely mentions; the

@@ -3389,44 +3389,30 @@ bool delete_archived_media(const std::string &path, std::string &error)
             prospero_session::Message message{};
             if (!prospero_session::load_message(records[i].id, j, &message))
                 continue;
-            std::size_t at = 0;
-            bool found = false;
-            while ((at = message.content.find(path, at)) != std::string::npos)
-            {
-                found = true;
-                ++references;
-                at += path.size();
-                if (references > 1)
-                {
-                    error = "This media file is referenced more than once.";
-                    return false;
-                }
-            }
-            if (found)
-            {
-                owner = records[i];
-                owner_message = j;
-                owner_output_reference = false;
-                owner_messages.resize(owner.message_count);
-                if (!prospero_session::load(owner.id, &owner, owner_messages.data(),
-                                            static_cast<unsigned>(owner_messages.size())))
-                {
-                    error = "The source conversation could not be loaded.";
-                    return false;
-                }
-            }
+            const bool named_in_text = message.content.find(path) != std::string::npos;
             std::string output_reference;
-            if (prospero_session::read_output_reference(records[i].id, j, &output_reference) &&
-                output_reference == path)
+            const bool is_output =
+                prospero_session::read_output_reference(records[i].id, j, &output_reference) &&
+                output_reference == path;
+            if (!named_in_text && !is_output)
+                continue;
+            // One message that both names the file in its text and records it as its
+            // output is one reference. Counting each mention separately refused to delete
+            // every archived generation, which is nearly all of them.
+            if (++references > 1)
             {
-                if (++references > 1)
-                {
-                    error = "This media file is referenced more than once.";
-                    return false;
-                }
-                owner = records[i];
-                owner_message = j;
-                owner_output_reference = true;
+                error = "This media file is referenced more than once.";
+                return false;
+            }
+            owner = records[i];
+            owner_message = j;
+            owner_output_reference = is_output;
+            owner_messages.resize(owner.message_count);
+            if (!prospero_session::load(owner.id, &owner, owner_messages.data(),
+                                        static_cast<unsigned>(owner_messages.size())))
+            {
+                error = "The source conversation could not be loaded.";
+                return false;
             }
         }
     }
@@ -3439,35 +3425,42 @@ bool delete_archived_media(const std::string &path, std::string &error)
     // and exactly one conversation references it. Requiring it to sit in a folder named
     // after that conversation would refuse every generation made outside a saved
     // conversation, which is most of the gallery.
+    bool removed = false;
     if (owner_output_reference)
     {
-        if (prospero_session::remove_archived_media(owner.id, owner_message, path.c_str()))
-            return true;
-        error = "The archived media file could not be removed.";
-        return false;
+        if (!prospero_session::remove_archived_media(owner.id, owner_message, path.c_str()))
+        {
+            error = "The archived media file could not be removed.";
+            return false;
+        }
+        removed = true;
     }
+    // The same message often names the file in its text as well, and that text is what
+    // the gallery reads back, so clear it too rather than leaving a path to nothing.
     auto &content = owner_messages[owner_message].content;
-    const std::string original = content;
-    std::size_t at = content.find(path);
-    if (at == std::string::npos)
+    const std::size_t at = content.find(path);
+    if (at != std::string::npos)
     {
+        const std::string original = content;
+        content.replace(at, path.size(), "[media deleted]");
+        if (!prospero_session::save(&owner, owner_messages.data(), owner.message_count))
+        {
+            error = "The conversation could not be updated.";
+            return false;
+        }
+        // A file that is already gone is the state the caller asked for.
+        if (!removed && std::remove(path.c_str()) != 0 && errno != ENOENT)
+        {
+            owner_messages[owner_message].content = original;
+            (void)prospero_session::save(&owner, owner_messages.data(), owner.message_count);
+            error = "The archived media file could not be removed.";
+            return false;
+        }
+        removed = true;
+    }
+    if (!removed)
         error = "The media reference changed; refresh and try again.";
-        return false;
-    }
-    content.replace(at, path.size(), "[media deleted]");
-    if (!prospero_session::save(&owner, owner_messages.data(), owner.message_count))
-    {
-        error = "The conversation could not be updated.";
-        return false;
-    }
-    if (std::remove(path.c_str()) != 0)
-    {
-        owner_messages[owner_message].content = original;
-        (void)prospero_session::save(&owner, owner_messages.data(), owner.message_count);
-        error = "The archived media file could not be removed.";
-        return false;
-    }
-    return true;
+    return removed;
 }
 
 bool handle_conversations(const NetApi &api, int sock, const char *method, const char *path,
