@@ -409,20 +409,32 @@ bool ensure_context(const char *root)
     // the default, the unassigned ControlNet ran a 512x512 guide in 705 s.
     // Large VAE decodes are tiled on the device, see kVaeTileSize.
     parameters.backend = "Vulkan0";
-    // Everything else is left to the library's auto-fit, which keeps weights resident
-    // while they fit. Naming a params backend turns auto-fit off, so it is named only
-    // where auto-fit cannot get it right.
+    // Parameter placement is left to the library's auto-fit, which keeps a module's
+    // weights on the device while they fit and sends only the overflow to disk. Naming a
+    // params backend would turn auto-fit off and pin everything: the model manager can
+    // only evict a tensor whose parameters live off its compute backend, so pinning left
+    // it nothing to release and FLUX.2 Klein died on its first double block with 220 MB
+    // of an 11.7 GiB heap free. Naming "disk" instead goes too far the other way -- the
+    // whole graph becomes one segment, and Z-Image then asked for 4.88 GiB at once.
     //
-    // The split-file presets compute on the GPU and stream their weights from the SSD.
-    // Their 6.6 GiB of weights plus the ~2.4 GiB attention workspace do not leave the
-    // device enough room for the sampling pass, and no budget fits every one of them:
-    // 6 GiB carried FLUX.2 Klein 4B and 9B on a fresh heap, yet Z-Image failed by 175 MB
-    // when it followed the 9B and found the heap down to 10.88 of 11.7 GiB with its
-    // largest block at 7.6. Disk residency takes the guess out: each segment is read as
-    // it is needed, and because the parameters then live off the compute backend the
-    // model manager can finally evict them. It costs load time, not correctness.
-    if (flux2_klein)
-        parameters.params_backend = "disk";
+    // Auto-fit still needs to be told how much of the heap is really ours. Left alone it
+    // reads the heap as nearly empty and keeps everything resident, with nothing left for
+    // the sampling pass. The budget is what the heap has now, less the room that pass
+    // needs beside the weights: measured here, 6 GiB works with 11.33 GiB free and fails
+    // with 10.88 GiB free, so the pass wants a little over 5 GiB for its workspace, the
+    // allocator's own blocks and whatever the previous model left behind. A constant
+    // cannot track that, which is why Z-Image failed by 175 MB after following the 9B.
+    char weight_budget[16]{};
+    std::uint64_t free_bytes = 0, total_bytes = 0;
+    constexpr std::uint64_t kSamplingReserveBytes = 5632ull << 20;
+    constexpr std::uint64_t kSmallestUsefulBudgetBytes = 2048ull << 20;
+    if (flux2_klein && gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
+        free_bytes > kSamplingReserveBytes + kSmallestUsefulBudgetBytes &&
+        std::snprintf(weight_budget, sizeof(weight_budget), "%.2f",
+                      static_cast<double>(free_bytes - kSamplingReserveBytes) /
+                          static_cast<double>(1ull << 30)) <
+            static_cast<int>(sizeof(weight_budget)))
+        parameters.max_vram = weight_budget;
     context = new_sd_ctx(&parameters);
     prospero_runtime::set_model_resident(context != nullptr);
     if (!context || !sd_ctx_supports_image_generation(context))
