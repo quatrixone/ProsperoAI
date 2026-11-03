@@ -1,68 +1,112 @@
-# PS5SD Image Studio — handoff state
+# PR #43 Image Studio — handoff state
 
 Last updated: 2026-11-03
 
-## Goal and approved scope
+## Where the work is
 
-Continue the approved plan in
-`docs/superpowers/plans/2026-11-02-ps5sd-verified-image-models.md` and its approved design spec
-in `docs/superpowers/specs/2026-11-01-ps5sd-verified-image-models-design.md`: remove Qwen Image as a
-product model, add the curated PS5SD image presets, support model-capability-driven text-to-image,
-image-to-image, inpainting and ControlNet workflows, and provide the Image Studio on web only.
-Native UI remains unchanged. The owner also explicitly requested new presets for the added models;
-those were included in Task 1.
+- Checkout: `/home/dietpi/Projects/console/ProsperoAI`
+- Branch: `codex/five-improvements-plan`, pushed to `origin` (PR #43). HEAD `0a1135d`.
+- Test title: `PPSA99023` only. The current build is deployed and running there; the web
+  assets under `/data/homebrew/PPSA99023/assets/web/` match the checkout.
 
-## Completed implementation
+## Done in this round
 
-- Tasks 1–4 are implemented and committed on branch `fix/pr43-must-fix`, currently at
-  `9bd6f81` (`fix(web): address image workflow review findings`). The commits add curated preset
-  metadata and defaults, remove Qwen Image product support while preserving safe deletion of old
-  installs, add generic typed image workflows/API handling, and build the web Image Studio.
-- Review reports and task evidence are in
-  `.superpowers/sdd/2026-11-02-ps5sd-verified-image-models/`. Reviews for Tasks 1–4 were reported
-  clean after their documented fixes. Existing host and browser checks for those tasks are
-  recorded in the task reports; do not treat them as Task 5 or console evidence.
-- The web picker is driven by server metadata and covers the current 14 image presets. New PS5SD
-  models are still marked experimental until ProsperoAI behavior is demonstrated on the console.
-- No push, deployment, GitHub issue closure, or console generation run is recorded as completed.
+Each item below was verified; where the evidence is a console run it says so.
 
-## Current checkout and work to preserve
+- **Media delete** (`e41bdd8`). The server only allowed deleting an archived copy stored in a
+  folder named after its conversation, so the Delete button returned 409 for the flat
+  `work/image` and `work/audio` files that make up most of the gallery. The folder-name rule is
+  gone; `media_path_allowed` plus the single-reference check still bound what can be removed.
+  Covered by a new case in `tests/test_http_api.py`.
+- **FLUX.2 Klein** (`58fdabc`). Two defects. The adapter forced `prediction = FLOW_PRED`, which
+  disables the library's own detection and builds a `DiscreteFlowDenoiser`; FLUX needs
+  `FLUX_FLOW_PRED`, and the output was structured noise. Prediction, VAE format and scheduler are
+  now left on auto. Separately, naming a params backend turns auto-fit off and pins every weight,
+  and the model manager can only evict a tensor whose parameters live off its compute backend — so
+  it had nothing to release and sampling died with 220 MB of an 11.7 GiB heap free. Auto-fit alone
+  was not enough either; `max_vram = "6"` for the split-file presets moves the 2.4 GiB text
+  encoder to disk. The same commit stops the split-file layout flag from demanding the FLUX.2
+  edit strategy on plain text-to-image requests.
+  Console evidence: 1024x1024 in 186 s, correct image; SDXL 94 s and the ControlNet guide 134 s,
+  both ~20% faster than with the pinned placement.
+- **FLUX.3 removed** (`9aa01bf`). See the blocker below.
+- **Upscale factor** (`fcc9865`). Off / 2x / 4x in the web Studio, web Settings and native
+  Settings, carried by the `upscale` request field and the `sd_upscale` setting. Real-ESRGAN x4
+  only produces its own scale — the library ignores `upscale_factor` — so 2x is that pass
+  box-averaged back down by `halve_image`. A boolean `upscale` and a stored `sd_upscale=1` still
+  mean 4x. **Not yet exercised on the console.**
+- **UI freeze during generation** (`0a1135d`). The once-a-second Vulkan memory poll took the
+  runtime lock that generation holds for its whole run, and one worker serves every job, so no
+  other action could start — the trace shows `refresh Vulkan memory: 243.01 s` after an ACE-Step
+  run. The poll now tries the lock and keeps the previous figures. The regression test in
+  `tests/native_controller_test.cpp` was confirmed to fail without the fix
+  ("worker did not complete") and pass with it.
 
-- Checkout: `/home/dietpi/Projects/console/ProsperoAI-pr43`
-- Branch: `fix/pr43-must-fix`; HEAD: `9bd6f81`; it tracks `origin/pr43` and was 24 commits ahead
-  at the last local status check. Do not push blindly: an earlier remote check reported PR #43
-  merged, so refresh the PR/branch status and ask the owner whether a new PR is needed before
-  attempting delivery.
-- Preserve the existing uncommitted changes: `tests/http_api_harness.cpp`,
-  `tests/vulkan_router_test.cpp`, and the approved plan/spec files under `docs/superpowers/`.
-  They were present before this handoff request; do not discard or silently fold them into an
-  unrelated change.
-- Do not assume the final suite or current diff is verified based on the earlier task reports.
+Host checks after each change: `make test` 134 tests OK (1 skipped), `make lint` clean,
+PS5 app build OK.
 
-## Pending work
+## Image presets verified on PPSA99023
 
-Task 5 in the approved plan has not been completed:
+All at their preset defaults, seed 42, prompt "a red apple on a wooden table, photo":
 
-1. When resumed, run the plan's format/lint/full host checks and image/web regressions; build the
-   PS5 app and inspect ELF NEEDED entries/program headers before any deployment.
-2. Only use test title `PPSA99023`. The last known console snapshot reported unrelated title
-   `PPSA03671` running (PID 483, about 9.6 GiB); this may be stale, so recheck `agent procs` and
-   `shadow info PPSA99023` before any launch or deployment. Never stop an unrelated title, reboot,
-   or modify `PPSA99004` without separate approval.
-3. Test the presets/workflows on-console only after the host build and ELF checks pass. Record
-   model, workflow/settings, generated output, switching behavior, and memory/errors; mark a model
-   ProsperoAI-verified only with successful console evidence. Otherwise keep it experimental or
-   blocked.
-4. Recheck current PR #43 comments and issues #42/#47 before acting. Earlier review found #42
-   relevant to image workflows and #47 unrelated (Bonsai KV-cache); close neither without fresh
-   status and verified acceptance evidence. No issue was closed in this work.
-5. Update `docs/SUPPORTED_MODELS.md` and the plan/progress evidence only from actual verification
-   results. Follow repository rules: commit only when requested, push only when requested, and
-   never treat a linked build as proof it runs on PS5.
+| preset | size | steps | time |
+| --- | --- | --- | --- |
+| sd-turbo-fp16 | 512 | 1 | 29 s |
+| realistic-vision-v51-fp16 | 512 | 20 | 34 s |
+| sdxs-512-q8-0 | 512 | 1 | 8 s |
+| sdxl-base-q8-0 | 1024 | 10 | 94 s |
+| raehoshi-illustxl-1-1-q8-0 | 1024 | 28 | 166 s |
+| ilustmix-v11-1-q8-0 | 832x1216 | 10 | 111 s |
+| sdxl-inpainting-q8-0 | 1024 | 25 | 134 s |
+| sd15-inpainting-q8-0 | 512 | 25 | 33 s |
+| sdxl-canny-q8-0 | 1024 | 25 | 134 s |
+| flux2-klein-4b-q8-0 | 1024 | 4 | 186 s |
 
-## Owner instructions and verification boundary
+Not yet run: `flux2-klein-9b-q4-0` and `z-image-turbo-q4-k`. Both finished downloading during
+this session and are installed; neither has been generated once.
 
-The owner first asked to defer testing and write this handoff for the next agent, then asked to
-commit these documentation changes on the PR #43 branch. No tests, builds, or console actions were
-run for these documentation requests. Task 5 remains pending; the deferral does not claim tests
-passed or cancel the previously approved verification scope.
+The verification script is `tools`-free and lives only in the session scratchpad; rewrite it from
+the table above (POST `/api/generate` with the preset's `image_defaults` as `image_workflow`, then
+GET the returned `image_path`). Look at the PNG — a run that reports `done` can still be noise,
+which is exactly how the FLUX bug hid.
+
+## Blocker: FLUX.3
+
+The pinned stable-diffusion.cpp (`b13a482`, `tools/deps.json`) has no `VERSION_FLUX3`, so both
+FLUX.3 Image Klein presets fail version detection at load with
+`get sd version from file failed`. The presets were removed from `model-tools/presets.json`
+rather than left as models that cannot run. PS5SD runs a newer revision that does support it.
+
+Restoring them means moving the dependency pin forward, which also moves the ggml ABI the text
+runtime shares (`static_assert(GGML_MAX_NAME == 160)`) and risks every preset that now works.
+That is a dependency upgrade, not a bugfix — get the owner's decision before starting it.
+
+The 6.3 GB `flux3-image-klein-q4-k` install is still on the console, orphaned now that the preset
+is gone. It was deliberately left in place in case the pin moves; delete it with the owner's say-so.
+
+## Next
+
+1. Generate once with `flux2-klein-9b-q4-0` and once with `z-image-turbo-q4-k` and look at both
+   PNGs. Z-Image uses the same split-file layout as FLUX but a different denoiser, so it is the
+   case most likely to expose a wrong family inference; `max_vram = "6"` also applies to it and
+   may be the wrong budget for a 9B model.
+2. Exercise the upscale factor on the console: 2x and 4x on a small model (sdxs is 8 s), and
+   check the output dimensions are what the factor promises. `halve_image` in
+   `inference/adapters/media/stable_diffusion_ps5.cpp` is new and has no direct test.
+3. Click Delete in the web Media page against the running title. The fix is covered by a host
+   test but has not been exercised through the browser.
+4. Still open from the owner's earlier list, not started: Enhance and prompt templates for the
+   Image Studio, mirroring `enhance(field)` and `TPL_BUILTIN` in `assets/web/music.js`.
+5. Still open: TTS voice selection in the web client. The server round-trips `kokoro_voice`
+   correctly and the unit test passes, so the fault is on the client — most likely
+   `applyRuntimeSettings` re-running `populateWorkspaceVoicePicker` and discarding the selection.
+6. The native UI has never been seen in this work: `P5_SESSION` is unset, so no screenshots. The
+   Media tab layout and the new three-way upscaler choice are unverified visually.
+
+## Standing notes
+
+- `max_vram = "6"` is tuned for FLUX.2 Klein 4B at 1024x1024. Treat it as a measured constant,
+  not a principle; a different model size may need a different budget.
+- Turn `sd_log`'s threshold down to `SD_LOG_INFO` in the adapter when debugging a load or memory
+  failure. The auto-fit plan and the per-module memory breakdown only appear at INFO, and they
+  are what made the FLUX diagnosis possible. Put it back to `SD_LOG_WARN` afterwards.
