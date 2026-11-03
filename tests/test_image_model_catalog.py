@@ -22,8 +22,6 @@ class ImageModelCatalogTests(unittest.TestCase):
             "sdxl-canny-q8-0": "2ef973152d2fbe27e37e4fd5ec3569dec1f828ee279975e60acc12bc78c9f981",
             "flux2-klein-4b-q8-0": "0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28",
             "flux2-klein-9b-q4-0": "a7e77afa96871d16679ff7b949bd25f20c8179f219c4b662cac91e81ed99b944",
-            "flux3-image-klein-q4-k": "19ddbfbed61da4bb16ebf169aaf48e9e5db43aba557be1ee537e9f00f586092e",
-            "flux3-image-klein-q6-k": "a1ba881f2940a58a3f6090d357516ee611bcc29215256bbf46731c0350b9e6d4",
             "z-image-turbo-q4-k": "14b375ab4f226bc5378f68f37e899ef3c2242b8541e61e2bc1aff40976086fbd",
         }
         required_asset_checks = {
@@ -178,34 +176,6 @@ class ImageModelCatalogTests(unittest.TestCase):
                 "reference_image",
                 "Non-Commercial",
             ),
-            "flux3-image-klein-q4-k": (
-                "FLUX.3 Image Klein (Q4_K)",
-                "Q4_K",
-                "leejet/flux-3-image-klein-GGUF",
-                "1c2ad2f9b9247ccca6506a23bdb033fdb0873321",
-                "flux3-image-klein-Q4_K.gguf",
-                3514023104,
-                ["diffusion_models/flux3-image-klein-Q4_K.gguf",
-                 "text_encoders/Qwen3VL-4B-Instruct-Q4_K_M.gguf", "vae/flux2-vae.safetensors"],
-                (1024, 1024, 16, 1, "euler", ""),
-                ["text_to_image"],
-                None,
-                "FLUX Kommunity License v.1.0",
-            ),
-            "flux3-image-klein-q6-k": (
-                "FLUX.3 Image Klein (Q6_K)",
-                "Q6_K",
-                "leejet/flux-3-image-klein-GGUF",
-                "1c2ad2f9b9247ccca6506a23bdb033fdb0873321",
-                "flux3-image-klein-Q6_K.gguf",
-                4874083520,
-                ["diffusion_models/flux3-image-klein-Q6_K.gguf",
-                 "text_encoders/Qwen3VL-4B-Instruct-Q4_K_M.gguf", "vae/flux2-vae.safetensors"],
-                (896, 896, 16, 1, "euler", ""),
-                ["text_to_image"],
-                None,
-                "FLUX Kommunity License v.1.0",
-            ),
             "z-image-turbo-q4-k": (
                 "Z-Image Turbo (Q4_K)",
                 "Q4_K",
@@ -274,7 +244,6 @@ class ImageModelCatalogTests(unittest.TestCase):
         self.assertEqual(by_id["ilustmix-v11-1-q8-0"]["upstream_url"],
                          "https://civitai.com/models/1110783?modelVersionId=2807896")
         self.assertIn("FLUX.2-dev non-commercial license", by_id["flux2-klein-4b-q8-0"]["license"])
-        self.assertIn("FLUX.2-dev non-commercial license", by_id["flux3-image-klein-q4-k"]["license"])
         generated = (ROOT / "include/model_presets.hpp").read_text()
         for field in ("image_capabilities", "image_edit_strategy", "image_defaults"):
             self.assertIn(field, generated)

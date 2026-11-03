@@ -93,7 +93,7 @@ class MiniCPM5Tests(unittest.TestCase):
             'sdxs-512-q8-0', 'sdxl-base-q8-0', 'raehoshi-illustxl-1-1-q8-0',
             'ilustmix-v11-1-q8-0', 'sdxl-inpainting-q8-0', 'sd15-inpainting-q8-0',
             'sdxl-canny-q8-0', 'flux2-klein-4b-q8-0', 'flux2-klein-9b-q4-0',
-            'flux3-image-klein-q4-k', 'flux3-image-klein-q6-k', 'z-image-turbo-q4-k',
+            'z-image-turbo-q4-k',
         }
         existing_models = [model for model in models if model['id'] not in curated_images]
         self.assertEqual([m['id'] for m in existing_models[:5]], [
