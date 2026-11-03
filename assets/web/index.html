@@ -44,10 +44,13 @@
           <button type="button" data-image-destination="gallery">Gallery</button>
         </nav>
         <section id="image-studio" aria-label="Create image">
-          <div class="image-studio-heading"><div><h1>Image Studio</h1><p class="muted">Create from a prompt, refine an image, paint a mask, or follow a guide.</p></div></div>
-          <div class="image-studio-layout">
-            <section class="glass image-create-panel" aria-label="Image generation form">
+          <div class="audio-heading">
+            <div><h1>Image Studio</h1><p class="muted">Create from a prompt, refine an image, paint a mask, or follow a guide.</p></div>
+          </div>
+          <div class="audio-layout image-studio-layout">
+            <section class="glass audio-create image-create-panel" aria-label="Image generation form">
               <label for="image-model">Image model<select id="image-model" aria-label="Choose an image model"></select></label>
+              <p id="image-model-defaults" class="muted"></p>
               <p id="image-model-empty" class="audio-empty-models" role="status" hidden>No image models are installed. Open Models to choose an image preset.</p>
               <p id="image-capability-note" class="muted" role="status"></p>
               <div class="image-mode-tabs" role="tablist" aria-label="Image mode">
@@ -102,7 +105,10 @@
                 <div id="image-result" class="image-result" aria-live="polite"></div>
               </form>
             </section>
-            <aside class="glass image-settings-note"><h2>Model settings</h2><p>Each model starts with its server-provided defaults. Choose a different image model to update these settings.</p><p id="image-model-defaults" class="muted"></p></aside>
+            <section id="image-library-panel" class="glass audio-library-panel" aria-label="Generated images">
+              <div class="audio-library-heading"><h2>Library</h2><button id="image-library-refresh" type="button" title="Refresh library" aria-label="Refresh library">⟳</button></div>
+              <div id="image-library" class="audio-library"></div>
+            </section>
           </div>
         </section>
       </section>

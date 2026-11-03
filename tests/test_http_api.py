@@ -511,12 +511,13 @@ class HttpApiTests(unittest.TestCase):
                 item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
             })
 
+            # A file in the work tree that no conversation points at can still be
+            # removed; there is just nothing to rewrite.
             unowned.parent.mkdir(parents=True, exist_ok=True)
             unowned.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
             head, _ = self.request("/api/media", {"path": str(unowned)}, method="DELETE")
-            self.assertIn("409 Conflict", head)
-            self.assertTrue(unowned.is_file())
-            unowned.unlink()
+            self.assertIn("200 OK", head)
+            self.assertFalse(unowned.exists())
             unowned.parent.rmdir()
 
             # A file that has gone missing behind our back still clears its entry:
@@ -609,6 +610,32 @@ class HttpApiTests(unittest.TestCase):
         finally:
             self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
                          headers=headers)
+
+    def test_media_lists_work_folder_files_with_no_conversation(self):
+        # Music Studio writes straight to the audio folder and never saves a
+        # conversation, so its tracks were missing from Media entirely.
+        track = self.audio_dir / "studio-track.wav"
+        picture = self.image_dir / "studio-picture.png"
+        track.write_bytes(b"RIFF0000WAVEfmt ")
+        picture.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
+        try:
+            listed = {item["path"]: item for item in
+                      json.loads(self.request("/api/media")[1])["data"]}
+            self.assertIn(str(track), listed)
+            self.assertIn(str(picture), listed)
+            self.assertEqual(listed[str(track)]["kind"], "audio")
+            self.assertEqual(listed[str(picture)]["kind"], "image")
+            self.assertEqual(listed[str(track)]["conversation_id"], "")
+
+            head, _ = self.request("/api/media", {"path": str(track)}, method="DELETE")
+            self.assertIn("200 OK", head)
+            self.assertFalse(track.exists())
+            self.assertNotIn(str(track), {
+                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
+            })
+        finally:
+            track.unlink(missing_ok=True)
+            picture.unlink(missing_ok=True)
 
     def test_media_generated_outside_a_conversation_folder_can_be_deleted(self):
         # Most of the gallery is flat work/image files a message merely mentions; the

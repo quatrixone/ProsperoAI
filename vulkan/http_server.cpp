@@ -73,6 +73,9 @@
 #ifndef PROSPERO_IMAGE_DIR
 #define PROSPERO_IMAGE_DIR "/download0/ProsperoAI/work/image/"
 #endif
+#ifndef PROSPERO_VOICE_DIR
+#define PROSPERO_VOICE_DIR "/download0/ProsperoAI/work/voice/"
+#endif
 
 extern "C"
 {
@@ -3124,6 +3127,9 @@ bool media_path_allowed(const std::string &path)
     static const char *prefixes[] = {
         "/download0/ProsperoAI/work/sessions/", "/download0/ProsperoAI/sessions/",
         "/download0/ProsperoAI/work/text/",
+        // The same constants the generators and the Media listing use, so a build that
+        // moves a work folder does not leave its own output unreachable.
+        PROSPERO_IMAGE_DIR, PROSPERO_AUDIO_DIR, PROSPERO_VOICE_DIR,
         "/download0/ProsperoAI/work/image/", "/download0/ProsperoAI/work/audio/",
         "/download0/ProsperoAI/work/voice/"};
     for (const char *prefix : prefixes)
@@ -3353,6 +3359,28 @@ nlohmann::json list_saved_media()
                 add_path(output_path, record);
         }
     }
+    // Conversations are not the only place a generation lands: Music Studio writes
+    // straight to the audio folder and never saves a conversation, so its tracks were
+    // missing from Media entirely. List what is on disk too, and let the conversation
+    // entries above keep their richer title and model.
+    static const struct { const char *root; const char *kind; } libraries[] = {
+        {PROSPERO_IMAGE_DIR, "image"}, {PROSPERO_AUDIO_DIR, "audio"},
+        {PROSPERO_VOICE_DIR, "audio"}};
+    for (const auto &library : libraries)
+        for (const auto &entry : prospero::audio_workflows::list_media_library(library.root))
+        {
+            const std::string path = std::string(library.root) + entry.name;
+            if (!media_path_allowed(path))
+                continue;
+            const bool image = path.size() >= 4 &&
+                               (path.compare(path.size() - 4, 4, ".png") == 0 ||
+                                path.compare(path.size() - 4, 4, ".tga") == 0);
+            const bool audio = path.size() >= 4 && path.compare(path.size() - 4, 4, ".wav") == 0;
+            if (image || audio)
+                media.emplace(path, nlohmann::json{{"path", path},
+                    {"kind", image ? "image" : "audio"}, {"conversation_id", ""},
+                    {"title", entry.name}, {"model", ""}, {"modelName", ""}});
+        }
     nlohmann::json data = nlohmann::json::array();
     for (auto &item : media)
         data.push_back(std::move(item.second));
@@ -3416,9 +3444,19 @@ bool delete_archived_media(const std::string &path, std::string &error)
             }
         }
     }
-    if (references != 1)
+    if (references > 1)
     {
-        error = "Only media linked to a saved conversation can be deleted here.";
+        error = "This media file is referenced more than once.";
+        return false;
+    }
+    if (references == 0)
+    {
+        // A library file no conversation points at -- a Music Studio track, or a
+        // generation made outside a saved conversation. Nothing to rewrite, just remove
+        // it; media_path_allowed has already confined the path to the work tree.
+        if (std::remove(path.c_str()) == 0 || errno == ENOENT)
+            return true;
+        error = "The media file could not be removed.";
         return false;
     }
     // media_path_allowed has already confined the path to the work/ and sessions/ trees,

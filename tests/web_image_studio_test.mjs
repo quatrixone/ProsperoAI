@@ -188,11 +188,15 @@ test('Image Gallery decodes the media API response before filtering its entries'
     assert.match(appSource, /api\('\/api\/media'\)\.then\(response=>response\.json\(\)\)/);
 });
 
-test('image output is retained in conversation history and refreshed in the existing image Gallery', () => {
+test('image output is retained in conversation history and lands in the Studio library', () => {
     assert.match(appSource, /buildImageRequest/);
     assert.match(workspaceSource, /output_session_id/);
     assert.match(appSource, /waitForImageJob/);
-    assert.match(appSource, /renderMediaLibrary\(true\)/);
+    // The Studio has a library beside the form, as Music Studio does, and a finished
+    // generation shows up there without a trip to the Gallery page.
+    assert.match(appSource, /await renderImageLibrary\(\)/);
+    assert.match(htmlSource, /id="image-library"/);
+    assert.match(htmlSource, /id="image-library-refresh"/);
     assert.match(appSource, /conversation\.messages\.push/);
     assert.match(appSource, /retry/);
 });
@@ -253,6 +257,7 @@ function imageSubmitHarness(jobResults) {
         imageModel: () => model, imageInputValues: () => ({}),
         selectWorkspaceModel: async () => {}, prepareWorkspaceModel: async () => {},
         save() {}, renderMessages() {}, renderHistory() {}, renderMediaLibrary: async () => {},
+        renderImageLibrary: async () => {},
         appendMedia() {},
         persistConversation: async conversation => persisted.push(JSON.parse(JSON.stringify(conversation))),
         crypto: {randomUUID: () => 'conversation-71'},

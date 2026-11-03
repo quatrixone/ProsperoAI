@@ -260,9 +260,44 @@ function askConfirm(message,{title='Are you sure?',action='Confirm'}={}){
     });
 }
 function emptyMediaNote(){
-    if(mediaKind==='image')return 'No generated images are linked to saved conversations yet.';
-    if(mediaKind==='audio')return 'No generated audio is linked to saved conversations yet.';
-    return 'Generated images and audio linked to saved conversations will appear here.';
+    if(mediaKind==='image')return 'No generated images yet.';
+    if(mediaKind==='audio')return 'No generated audio yet.';
+    return 'Generated images and audio appear here.';
+}
+// The Studio's own library, beside the form as in Music Studio: a generation lands here
+// the moment it finishes, without a trip to the Gallery page.
+async function renderImageLibrary(){
+    const root=$('image-library');
+    if(!root)return;
+    root.replaceChildren();
+    const loading=document.createElement('p');loading.className='muted';loading.textContent='Loading\u2026';root.append(loading);
+    try{
+        const payload=await api('/api/media').then(response=>response.json());
+        const files=(payload.data||[]).filter(file=>file.kind==='image');
+        root.replaceChildren();
+        if(!files.length){const note=document.createElement('p');note.className='muted';note.textContent='Images you generate appear here.';root.append(note);return;}
+        for(const file of files){
+            const card=document.createElement('article');card.className='audio-library-item';
+            const heading=document.createElement('strong');heading.textContent=file.path.split('/').at(-1)||'Generated image';
+            const preview=document.createElement('div');preview.className='media-library-preview';
+            const actions=document.createElement('div');actions.className='image-actions';
+            const edit=document.createElement('button');edit.className='secondary';edit.type='button';edit.textContent='Edit';
+            edit.onclick=()=>void stageGalleryImage(file,'image_to_image');
+            const guide=document.createElement('button');guide.className='secondary';guide.type='button';guide.textContent='Guide';
+            guide.onclick=()=>void stageGalleryImage(file,'controlnet');
+            const remove=document.createElement('button');remove.className='secondary';remove.type='button';remove.textContent='Delete';
+            remove.onclick=async()=>{
+                if(!await askConfirm(`Delete \u201c${heading.textContent}\u201d? The file is removed from your console.`,{title:'Delete image?',action:'Delete'}))return;
+                remove.disabled=true;
+                try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});await renderImageLibrary();}
+                catch(error){$('image-status').textContent=error.message;remove.disabled=false;}
+            };
+            actions.append(edit,guide,remove);
+            card.append(heading,preview,actions);
+            appendMedia(preview,{path:file.path,kind:'image'},'','Generated image');
+            root.append(card);
+        }
+    }catch(error){root.replaceChildren();const note=document.createElement('p');note.className='muted';note.textContent=`Could not load the library: ${error.message}`;root.append(note);}
 }
 async function renderMediaLibrary(kind=mediaKind){
     // Accepts the old boolean so the image Gallery entry keeps working.
@@ -283,7 +318,10 @@ async function renderMediaLibrary(kind=mediaKind){
             const preview=document.createElement('div');preview.className='media-library-preview';
             const remove=document.createElement('button');remove.className='secondary';remove.type='button';remove.textContent='Delete archived copy';remove.title='Deletes only the archived copy stored with this conversation';
             remove.onclick=async()=>{if(!await askConfirm(`Delete “${heading.textContent}”? The file is removed from your console.`,{title:"Delete media?",action:"Delete"}))return;remove.disabled=true;try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});card.remove();if(!root.children.length){const note=document.createElement('p');note.className='muted';note.textContent=emptyMediaNote();root.append(note);}}catch(error){$('feedback').textContent=error.message;remove.disabled=false;}};
-            card.append(heading,source,model,preview);
+            card.append(heading);
+            // A Music Studio track or a loose generation has no conversation to open.
+            if(file.conversation_id)card.append(source);
+            card.append(model,preview);
             if(file.kind==='image'){
                 const edit=document.createElement('button');edit.className='secondary';edit.type='button';edit.textContent='Stage image for editing';edit.onclick=()=>void stageGalleryImage(file,'image_to_image');
                 const guide=document.createElement('button');guide.className='secondary';guide.type='button';guide.textContent='Use as ControlNet guide';guide.onclick=()=>void stageGalleryImage(file,'controlnet');
@@ -362,7 +400,7 @@ async function submitImageGeneration(){
         $('image-status').textContent=archiveWarning?'Image created but could not be archived. Your selected inputs are still staged.':`Image created with ${model.name||model.id}.`;
         $('image-result').replaceChildren();
         if(result.image_path)appendMedia($('image-result'),{path:result.image_path,kind:'image'},'','Generated image');
-        await persistConversation(conversation);await renderMediaLibrary(true);
+        await persistConversation(conversation);await renderImageLibrary();
         $('image-retry').textContent='Retry generation';
         $('image-retry').hidden=!archiveWarning;
     }catch(error){
@@ -399,12 +437,13 @@ document.querySelectorAll('[data-image-mode]').forEach(button=>button.onclick=()
 document.querySelectorAll('[data-image-destination]').forEach(button=>button.onclick=()=>{
     const destination=button.dataset.imageDestination;
     document.querySelectorAll('[data-image-destination]').forEach(item=>{const active=item===button;item.classList.toggle('selected',active);item.setAttribute('aria-current',active?'page':'false');});
-    if(destination==='create'){page('workspace');setWorkspaceMode('image');return;}
+    if(destination==='create'){page('workspace');setWorkspaceMode('image');void renderImageLibrary();return;}
     page('media');renderMediaLibrary('image');
 });
 document.querySelector('[data-page="workspace"]').addEventListener('click',()=>{
     if(workspaceModeName==='image')document.querySelector('[data-image-destination="create"]').click();
 });
+if($('image-library-refresh'))$('image-library-refresh').onclick=()=>void renderImageLibrary();
 document.querySelectorAll('[data-media-filter]').forEach(button=>button.onclick=()=>{
     mediaKind=button.dataset.mediaFilter;
     document.querySelectorAll('[data-media-filter]').forEach(item=>{const active=item===button;item.classList.toggle('selected',active);item.setAttribute('aria-pressed',String(active));});
