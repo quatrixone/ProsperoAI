@@ -377,7 +377,7 @@ int main()
     const char *strategy = nullptr;
     assert(gpt_runtime_model_image_metadata(curated_index, &capabilities, &defaults, &strategy));
     assert(capabilities == (GPT_IMAGE_CAP_TEXT_TO_IMAGE | GPT_IMAGE_CAP_IMAGE_TO_IMAGE));
-    assert(defaults.width == 1024 && defaults.height == 1024 && defaults.steps == 10);
+    assert(defaults.width == 512 && defaults.height == 512 && defaults.steps == 10);
     assert(defaults.cfg_scale == 6 && std::strcmp(defaults.sampler, "dpm++2m") == 0);
     assert(std::strcmp(defaults.scheduler, "ays") == 0);
     assert(strategy && std::strcmp(strategy, "init_image_strength") == 0);

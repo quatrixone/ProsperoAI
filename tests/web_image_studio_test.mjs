@@ -48,7 +48,7 @@ test('every server-listed image model, including new catalog IDs, remains reacha
     assert.deepEqual(Array.from(filterModels(catalog, 'image'), item => item.id), ['new-sd-model', 'new-flux-model']);
 });
 
-test('all curated image presets are reachable and open at 512x512', () => {
+test('all curated image presets are reachable and open at their 512x512 default', () => {
     const {filterModels, imageSettings} = workspaceApi();
     const presets = presetCatalog.filter(preset => preset.kind === 1);
     const serverModels = presets.map(preset => model(preset.id, preset.image_capabilities,
@@ -58,12 +58,11 @@ test('all curated image presets are reachable and open at 512x512', () => {
     assert.deepEqual(Array.from(pickerModels, item => item.id), Array.from(presets, item => item.id));
     for (const preset of presets) {
         const settings = imageSettings(serverModels.find(item => item.id === preset.id), 'text_to_image');
-        // The Studio opens every model at the size the console renders quickest; the rest
-        // of the preset's defaults are still the model's own.
+        for (const key of ['width', 'height', 'steps', 'cfg_scale', 'sampler', 'scheduler'])
+            assert.equal(settings[key], preset.image_defaults[key], `${preset.id} ${key}`);
+        // Every curated preset renders at 512x512 unless the person asks for more.
         assert.equal(settings.width, 512, `${preset.id} width`);
         assert.equal(settings.height, 512, `${preset.id} height`);
-        for (const key of ['steps', 'cfg_scale', 'sampler', 'scheduler'])
-            assert.equal(settings[key], preset.image_defaults[key], `${preset.id} ${key}`);
     }
 });
 
@@ -76,11 +75,11 @@ test('model changes stage server defaults and hide incompatible workflow options
     const control = model('new-control', ['text_to_image', 'controlnet']);
 
     assert.deepEqual({...imageSettings(sd, 'text_to_image')}, {
-        width: 512, height: 512, steps: 25, cfg_scale: 6, sampler: 'euler_a', scheduler: 'ays',
+        width: 1024, height: 768, steps: 25, cfg_scale: 6, sampler: 'euler_a', scheduler: 'ays',
         upscale: 0, showStrength: false, showControlStrength: false,
     });
-    // A size the person typed beats the 512x512 start.
-    assert.equal(imageSettings(sd, 'text_to_image', {width: 1024}).width, 1024);
+    // A size the person typed beats the model's own.
+    assert.equal(imageSettings(sd, 'text_to_image', {width: 512}).width, 512);
     assert.equal(imageSettings(sd, 'image_to_image').showStrength, true);
     assert.equal(imageSettings(sd, 'inpainting').showStrength, true);
     assert.equal(imageSettings(flux, 'image_to_image').showStrength, false);

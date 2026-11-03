@@ -556,11 +556,14 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
                                      ? image_options->negative_prompt : "";
     parameters.ref_images = nullptr;
     parameters.ref_images_count = 0;
-    const unsigned default_size = (sd3 || flux2_klein) ? 768 : 512;
+    // 512x512 for every family, on the console as in the web Studio: it is the size the
+    // GPU renders quickest, and the upscaler takes it further when asked. Settings still
+    // override it, and the web sends its own size with each request.
+    constexpr unsigned kDefaultSize = 512;
     parameters.width = image_options ? static_cast<int>(image_options->width)
-                        : runtime_settings.sd_width ? runtime_settings.sd_width : default_size;
+                        : runtime_settings.sd_width ? runtime_settings.sd_width : kDefaultSize;
     parameters.height = image_options ? static_cast<int>(image_options->height)
-                         : runtime_settings.sd_height ? runtime_settings.sd_height : default_size;
+                         : runtime_settings.sd_height ? runtime_settings.sd_height : kDefaultSize;
     parameters.seed = image_options ? image_options->seed
                         : runtime_settings.sd_seed == 0 ? -1
                                                         : static_cast<std::int64_t>(runtime_settings.sd_seed);

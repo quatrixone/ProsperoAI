@@ -109,7 +109,7 @@
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image", "image_to_image"],
   "image_edit_strategy": "init_image_strength",
-  "image_defaults": {"width": 1024, "height": 1024, "steps": 10, "cfg_scale": 6, "sampler": "dpm++2m", "scheduler": "ays"},
+  "image_defaults": {"width": 512, "height": 512, "steps": 10, "cfg_scale": 6, "sampler": "dpm++2m", "scheduler": "ays"},
   "files": [
    {"source": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "path": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "size": 5040957760, "sha256": "2ef973152d2fbe27e37e4fd5ec3569dec1f828ee279975e60acc12bc78c9f981"},
    {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
@@ -127,7 +127,7 @@
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image", "image_to_image"],
   "image_edit_strategy": "init_image_strength",
-  "image_defaults": {"width": 1024, "height": 1024, "steps": 28, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
+  "image_defaults": {"width": 512, "height": 512, "steps": 28, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
   "files": [
    {"source": "raehoshi-illust-xl-11.safetensors", "path": "raehoshiIllustXL_v110.safetensors", "size": 6938063182, "sha256": "0753c9ddcb82f4d47d98ca2f65b0e5944a8e4528b848d0741654be0740973e64"},
    {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
@@ -146,7 +146,7 @@
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image", "image_to_image"],
   "image_edit_strategy": "init_image_strength",
-  "image_defaults": {"width": 832, "height": 1216, "steps": 10, "cfg_scale": 6, "sampler": "dpm++2m", "scheduler": "ays"},
+  "image_defaults": {"width": 512, "height": 512, "steps": 10, "cfg_scale": 6, "sampler": "dpm++2m", "scheduler": "ays"},
   "files": [
    {"source": "ilustmix_v111.safetensors", "path": "ilustmix_v111.safetensors", "size": 7105357284, "sha256": "038dad76321eb847a115eab813ed6ff68c603d4bc0e9eb7c3e1be756dabf3dc2"},
    {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
@@ -164,7 +164,7 @@
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image", "image_to_image", "inpainting"],
   "image_edit_strategy": "init_image_strength",
-  "image_defaults": {"width": 1024, "height": 1024, "steps": 25, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
+  "image_defaults": {"width": 512, "height": 512, "steps": 25, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
   "files": [
    {"source": "stable-diffusion-xl-inpainting-1.0-Q8_0.gguf", "path": "stable-diffusion-xl-inpainting-1.0-Q8_0.gguf", "size": 4873718560, "sha256": "4a08b13f91933e06625a7026c787408100e2116326aeda961c9a428e61c2d9c0"},
    {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"}
@@ -199,7 +199,7 @@
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image", "image_to_image", "controlnet"],
   "image_edit_strategy": "init_image_strength",
-  "image_defaults": {"width": 1024, "height": 1024, "steps": 25, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
+  "image_defaults": {"width": 512, "height": 512, "steps": 25, "cfg_scale": 6, "sampler": "euler_a", "scheduler": ""},
   "files": [
    {"source": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "path": "stable-diffusion-xl-base-1.0-Q8_0.gguf", "size": 5040957760, "sha256": "2ef973152d2fbe27e37e4fd5ec3569dec1f828ee279975e60acc12bc78c9f981"},
    {"source": "sdxl_vae.safetensors", "path": "vae/sdxl_vae_fp16_fix.safetensors", "size": 334641162, "sha256": "235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1", "repository": "madebyollin/sdxl-vae-fp16-fix", "revision": "207b116dae70ace3637169f1ddd2434b91b3a8cd"},
@@ -218,7 +218,7 @@
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image", "image_to_image"],
   "image_edit_strategy": "reference_image",
-  "image_defaults": {"width": 1024, "height": 1024, "steps": 4, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
+  "image_defaults": {"width": 512, "height": 512, "steps": 4, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
   "files": [
    {"source": "flux-2-klein-4b-Q8_0.gguf", "path": "diffusion_models/flux-2-klein-4b-Q8_0.gguf", "size": 4300629440, "sha256": "0bba6951258ec8f92d51114a8fa13e66828297bfff58a738f52729b3ef66fa28"},
    {"source": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "path": "text_encoders/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "size": 2497281120, "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597", "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF", "revision": "a06e946bb6b655725eafa393f4a9745d460374c9"},
@@ -237,7 +237,7 @@
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image", "image_to_image"],
   "image_edit_strategy": "reference_image",
-  "image_defaults": {"width": 1024, "height": 1024, "steps": 8, "cfg_scale": 1, "sampler": "dpm2", "scheduler": ""},
+  "image_defaults": {"width": 512, "height": 512, "steps": 8, "cfg_scale": 1, "sampler": "dpm2", "scheduler": ""},
   "files": [
    {"source": "flux-2-klein-9b-Q4_0.gguf", "path": "diffusion_models/flux-2-klein-9b-Q4_0.gguf", "size": 5616208032, "sha256": "a7e77afa96871d16679ff7b949bd25f20c8179f219c4b662cac91e81ed99b944"},
    {"source": "Qwen3-8B-Q4_K_M.gguf", "path": "text_encoders/Qwen3-8B-Q4_K_M.gguf", "size": 5027784512, "sha256": "120307ba529eb2439d6c430d94104dabd578497bc7bfe7e322b5d9933b449bd4", "repository": "unsloth/Qwen3-8B-GGUF", "revision": "a6adef130ffb23ddaf1a62fec9dced968c9bc482"},
@@ -255,7 +255,7 @@
   "provenance": {"verified_by": "PS5SD", "repository": "Darkatek7/PS5SD", "revision": "0654534bc7042d9164167835fba67e74215f1617", "evidence": "docs/CONSOLE.md; ps5/app/catalog.hpp"},
   "runtime_status": "experimental",
   "image_capabilities": ["text_to_image"],
-  "image_defaults": {"width": 1024, "height": 1024, "steps": 8, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
+  "image_defaults": {"width": 512, "height": 512, "steps": 8, "cfg_scale": 1, "sampler": "euler", "scheduler": ""},
   "files": [
    {"source": "z_image_turbo-Q4_K.gguf", "path": "diffusion_models/z_image_turbo-Q4_K.gguf", "size": 3864250304, "sha256": "14b375ab4f226bc5378f68f37e899ef3c2242b8541e61e2bc1aff40976086fbd"},
    {"source": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "path": "text_encoders/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "size": 2497281120, "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597", "repository": "unsloth/Qwen3-4B-Instruct-2507-GGUF", "revision": "a06e946bb6b655725eafa393f4a9745d460374c9"},
