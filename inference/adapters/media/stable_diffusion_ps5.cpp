@@ -409,17 +409,20 @@ bool ensure_context(const char *root)
     // the default, the unassigned ControlNet ran a 512x512 guide in 705 s.
     // Large VAE decodes are tiled on the device, see kVaeTileSize.
     parameters.backend = "Vulkan0";
-    // Leave the parameter placement to the library's auto-fit, constrained to the GPU by
-    // the compute backend above. Naming a params backend turns auto-fit off and pins every
-    // weight: the model manager can only evict a tensor whose parameters live somewhere
-    // other than its compute backend, so pinning left it nothing to release, and FLUX.2
-    // Klein died on its first double block with 220 MB of an 11.7 GiB heap free.
-    // Auto-fit reads the heap as nearly empty and keeps everything resident, but the
-    // sampling pass needs a ~1.9 GiB attention workspace on top of the 6.6 GiB of
-    // weights. Capping the split-file presets pushes their 2.4 GiB text encoder off the
-    // device, which is where it belongs: it is read once, before the first step.
+    // Everything else is left to the library's auto-fit, which keeps weights resident
+    // while they fit. Naming a params backend turns auto-fit off, so it is named only
+    // where auto-fit cannot get it right.
+    //
+    // The split-file presets compute on the GPU and stream their weights from the SSD.
+    // Their 6.6 GiB of weights plus the ~2.4 GiB attention workspace do not leave the
+    // device enough room for the sampling pass, and no budget fits every one of them:
+    // 6 GiB carried FLUX.2 Klein 4B and 9B on a fresh heap, yet Z-Image failed by 175 MB
+    // when it followed the 9B and found the heap down to 10.88 of 11.7 GiB with its
+    // largest block at 7.6. Disk residency takes the guess out: each segment is read as
+    // it is needed, and because the parameters then live off the compute backend the
+    // model manager can finally evict them. It costs load time, not correctness.
     if (flux2_klein)
-        parameters.max_vram = "6";
+        parameters.params_backend = "disk";
     context = new_sd_ctx(&parameters);
     prospero_runtime::set_model_resident(context != nullptr);
     if (!context || !sd_ctx_supports_image_generation(context))
