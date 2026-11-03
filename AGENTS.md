@@ -153,6 +153,14 @@ port 2323), process list, launch and screenshots.
 - Commit only on the WIP branch unless the user asks otherwise. Push only when asked.
 - Do not add `Co-Authored-By` or "Generated with Claude Code" lines to commits or PR text.
 
+## Active PS5SD image-model handoff
+
+- Before resuming the PS5SD Image Studio work for PR #43, read the root `state.md` for completed
+  tasks, uncommitted files to preserve, pending checks, and the last known console/PR state.
+- Keep project progress and volatile blockers in `state.md`; do not turn task-specific status into
+  permanent console policy here. The owner deferred tests for the handoff/documentation work; honor
+  the current request's scope and do not run tests or console checks for documentation-only tasks.
+
 
 ## Debugging a title that does not start (lessons from PPSA99014-19)
 
