@@ -328,8 +328,7 @@ int main()
     assert(released == 2);
     const auto flux_root = std::filesystem::path(prospero::model_root()) / "custom-flux2-klein";
     std::filesystem::create_directories(flux_root);
-    std::ofstream(flux_root / "model_index.json")
-        << "{\"_class_name\":\"Flux2KleinPipeline\"}";
+    std::ofstream(flux_root / "model_index.json") << "{\"_class_name\":\"Flux2KleinPipeline\"}";
     std::ofstream(flux_root / "qwen3-4b-q2-k.gguf") << "shared Qwen3 encoder fixture";
     gpt_runtime_refresh_models();
     unsigned flux_index = gpt_runtime_model_count();

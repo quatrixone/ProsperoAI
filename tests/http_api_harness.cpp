@@ -97,8 +97,7 @@ extern "C" int __wrap_remove(const char *path)
         const std::string release = std::string(gate) + ".release";
         std::ofstream(entered).put('1');
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-        while (access(release.c_str(), F_OK) != 0 &&
-               std::chrono::steady_clock::now() < deadline)
+        while (access(release.c_str(), F_OK) != 0 && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return __real_remove(path);
@@ -249,13 +248,14 @@ bool gpt_runtime_model_image_metadata(unsigned index, std::uint32_t *capabilitie
         return false;
     if (capabilities)
         *capabilities = GPT_IMAGE_CAP_TEXT_TO_IMAGE | GPT_IMAGE_CAP_IMAGE_TO_IMAGE |
-            (std::getenv("PROSPERO_TEST_IMAGE_WORKFLOWS")
-                 ? GPT_IMAGE_CAP_INPAINTING | GPT_IMAGE_CAP_CONTROLNET : 0);
+                        (std::getenv("PROSPERO_TEST_IMAGE_WORKFLOWS")
+                             ? GPT_IMAGE_CAP_INPAINTING | GPT_IMAGE_CAP_CONTROLNET
+                             : 0);
     if (defaults)
         *defaults = {1024, 1024, 10, 6.0f, "dpm++2m", "ays"};
     if (edit_strategy)
-        *edit_strategy = std::getenv("PROSPERO_TEST_REFERENCE_IMAGE")
-                             ? "reference_image" : "init_image_strength";
+        *edit_strategy = std::getenv("PROSPERO_TEST_REFERENCE_IMAGE") ? "reference_image"
+                                                                      : "init_image_strength";
     return true;
 }
 bool gpt_runtime_loaded_model(char *id, std::size_t ic, char *name, std::size_t nc)
@@ -307,26 +307,33 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                                     {"control_strength", image_options->control_strength},
                                     {"canny", image_options->canny},
                                     {"negative_prompt", image_options->negative_prompt
-                                        ? image_options->negative_prompt : ""},
-                                    {"sampler", image_options->sampler ? image_options->sampler : ""},
-                                    {"scheduler", image_options->scheduler ? image_options->scheduler : ""},
-                                    {"image_path", image_options->image_path ? image_options->image_path : ""},
-                                    {"mask_path", image_options->mask_path ? image_options->mask_path : ""},
+                                                            ? image_options->negative_prompt
+                                                            : ""},
+                                    {"sampler",
+                                     image_options->sampler ? image_options->sampler : ""},
+                                    {"scheduler",
+                                     image_options->scheduler ? image_options->scheduler : ""},
+                                    {"image_path",
+                                     image_options->image_path ? image_options->image_path : ""},
+                                    {"mask_path",
+                                     image_options->mask_path ? image_options->mask_path : ""},
                                     {"control_image_path", image_options->control_image_path
-                                        ? image_options->control_image_path : ""},
+                                                               ? image_options->control_image_path
+                                                               : ""},
                                     {"strategy", image_options->image_edit_strategy
-                                        ? image_options->image_edit_strategy : ""}}.dump()
-                   << '\n';
+                                                     ? image_options->image_edit_strategy
+                                                     : ""}}
+                         .dump()
+                  << '\n';
         else
             calls << "text\n";
     }
     if (generation_hook)
         generation_hook();
     if (settings.model_id)
-        current_model = std::strcmp(settings.model_id, "sheetsage-test") == 0
-                            ? 2
-                        : std::strcmp(settings.model_id, "second.gguf") == 0 ? 1
-                                                                             : 0;
+        current_model = std::strcmp(settings.model_id, "sheetsage-test") == 0 ? 2
+                        : std::strcmp(settings.model_id, "second.gguf") == 0  ? 1
+                                                                              : 0;
     std::string last = messages[count - 1].content;
     if (const char *calls_file = std::getenv("PROSPERO_TEST_AUDIO_CALLS_FILE"))
     {
@@ -339,7 +346,7 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         {
             std::ifstream source(fixture, std::ios::binary);
             std::ofstream generated(std::string(PROSPERO_IMAGE_DIR) + "generated-image.png",
-                                   std::ios::binary);
+                                    std::ios::binary);
             generated << source.rdbuf();
         }
         if (std::getenv("PROSPERO_TEST_IMAGE_GENERATE_FAIL"))
@@ -422,8 +429,9 @@ int main(int argc, char **argv)
         api.socket_close = fake_close;
         auto request = [&](const char *method, const char *route, const std::string &body)
         {
-            input = std::string(method) + " " + route + " HTTP/1.1\r\nHost: test\r\nContent-Length: " +
-                    std::to_string(body.size()) + "\r\n\r\n" + body;
+            input = std::string(method) + " " + route +
+                    " HTTP/1.1\r\nHost: test\r\nContent-Length: " + std::to_string(body.size()) +
+                    "\r\n\r\n" + body;
             position = 0;
             wire.clear();
             handle_connection(api, 1);
@@ -437,11 +445,12 @@ int main(int argc, char **argv)
             return 3;
         const std::string previous_path = first["image_path"].get<std::string>();
         std::string delete_response;
-        std::thread deleter([&]
-        {
-            delete_response = request("DELETE", "/api/media",
-                                      nlohmann::json{{"path", previous_path}}.dump());
-        });
+        std::thread deleter(
+            [&]
+            {
+                delete_response =
+                    request("DELETE", "/api/media", nlohmann::json{{"path", previous_path}}.dump());
+            });
 
         const std::string entered = std::string(gate) + ".entered";
         const std::string release = std::string(gate) + ".release";
@@ -460,8 +469,11 @@ int main(int argc, char **argv)
         std::string archive_response;
         const std::string newer_body =
             R"({"model":"sdxl-base-q8-0","prompt":"newer output","image_workflow":{"workflow":"text_to_image"},"output_session_id":"image-output-race","output_message_index":0})";
-        std::thread archiver([&] { archive_response = request("POST", "/api/generate", newer_body); });
-        struct stat source_info{};
+        std::thread archiver([&]
+                             { archive_response = request("POST", "/api/generate", newer_body); });
+        struct stat source_info
+        {
+        };
         if (stat(source, &source_info) != 0)
         {
             std::ofstream(release).put('1');
@@ -483,7 +495,9 @@ int main(int argc, char **argv)
                     if (entry->d_name[0] == '.')
                         continue;
                     const std::string candidate = output_directory + "/" + entry->d_name;
-                    struct stat info{};
+                    struct stat info
+                    {
+                    };
                     if (candidate != previous_path && candidate.ends_with(".png") &&
                         stat(candidate.c_str(), &info) == 0 && info.st_size == source_info.st_size)
                     {
@@ -503,8 +517,8 @@ int main(int argc, char **argv)
 
         const auto newer = nlohmann::json::parse(http_body(archive_response), nullptr, false);
         if (!newer_file_ready || delete_response.find("HTTP/1.1 200 OK") != 0 ||
-            archive_response.find("HTTP/1.1 200 OK") != 0 ||
-            !newer.is_object() || !newer.contains("image_path"))
+            archive_response.find("HTTP/1.1 200 OK") != 0 || !newer.is_object() ||
+            !newer.contains("image_path"))
         {
             std::cerr << "concurrent delete/archive requests did not both complete successfully\n";
             return 6;
