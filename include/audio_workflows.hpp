@@ -34,8 +34,9 @@ struct Result
 using ProgressCallback = std::function<void(std::string_view)>;
 
 std::vector<LibraryEntry> list_library(const std::string &root);
-// Generated pictures in the same work folders, newest first.
-std::vector<LibraryEntry> list_image_library(const std::string &root);
+// Generated pictures and audio in a work folder and its per-conversation
+// subfolders, newest first.
+std::vector<LibraryEntry> list_media_library(const std::string &root);
 bool read_library_text(const std::string &root, const std::string &name, std::string &contents);
 bool save_abc(const std::string &root, const std::string &name, const std::string &contents);
 bool supports_music_model(std::string_view model_id);

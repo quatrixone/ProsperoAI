@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -275,6 +276,30 @@ int main(int argc, char **argv)
     assert(entries.size() == 2);
     assert(entries[0].name == "one.wav" || entries[1].name == "one.wav");
     assert(entries[0].size == 3 || entries[1].size == 3);
+
+    // The gallery lists pictures beside the audio, and reaches the per-conversation
+    // folders that a generation started from a conversation writes into.
+    std::ofstream(root / "shot.png", std::ios::binary) << "png";
+    std::filesystem::create_directory(root / "chat-01");
+    std::ofstream(root / "chat-01" / "001-nested.png", std::ios::binary) << "deep";
+    std::ofstream(root / "chat-01" / "002-nested.wav", std::ios::binary) << "deeper";
+    std::ofstream(root / "chat-01" / "notes.txt") << "not media";
+    std::filesystem::create_directory(root / "chat-01" / "deeper");
+    std::ofstream(root / "chat-01" / "deeper" / "003-too-deep.png", std::ios::binary) << "x";
+    std::set<std::string> gallery;
+    for (const auto &entry : prospero::audio_workflows::list_media_library(root.string()))
+        gallery.insert(entry.name);
+    assert(gallery.count("shot.png") == 1);
+    assert(gallery.count("one.wav") == 1);
+    assert(gallery.count("chat-01/001-nested.png") == 1);
+    assert(gallery.count("chat-01/002-nested.wav") == 1);
+    // Scores, other file types and a second level stay out of the gallery.
+    assert(gallery.count("two.abc") == 0);
+    assert(gallery.count("notes.txt") == 0);
+    for (const auto &name : gallery)
+        assert(name.find("too-deep") == std::string::npos);
+    // The audio picker keeps its own, flat view.
+    assert(prospero::audio_workflows::list_library(root.string()).size() == 2);
 
     std::string text;
     assert(prospero::audio_workflows::read_library_text(root.string(), "two.abc", text));

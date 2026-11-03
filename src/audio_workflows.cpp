@@ -517,19 +517,48 @@ std::vector<LibraryEntry> list_library(const std::string &root)
     return scan_library(root, valid_basename);
 }
 
-std::vector<LibraryEntry> list_image_library(const std::string &root)
+bool gallery_name(const std::string &name)
 {
-    return scan_library(root,
-                        [](const std::string &name)
-                        {
-                            const std::size_t dot = name.rfind('.');
-                            if (dot == std::string::npos)
-                                return false;
-                            const std::string extension = name.substr(dot);
-                            return (extension == ".png" || extension == ".jpg" ||
-                                    extension == ".jpeg") &&
-                                   safe_name_characters(name);
-                        });
+    const std::size_t dot = name.rfind('.');
+    if (dot == std::string::npos || !safe_name_characters(name))
+        return false;
+    const std::string extension = name.substr(dot);
+    return extension == ".png" || extension == ".jpg" || extension == ".jpeg" ||
+           extension == ".wav" || extension == ".mp3";
+}
+
+// Generations started from a conversation are written to a folder of their own, so the
+// gallery looks one level down as well. Entry names stay relative to the root.
+std::vector<LibraryEntry> list_media_library(const std::string &root)
+{
+    std::vector<LibraryEntry> entries = scan_library(root, gallery_name);
+    DIR *directory = opendir(root.c_str());
+    if (!directory)
+        return entries;
+    while (dirent *entry = readdir(directory))
+    {
+        const std::string folder(entry->d_name);
+        if (folder == "." || folder == ".." || !safe_name_characters(folder + ".d"))
+            continue;
+        struct stat info
+        {
+        };
+        const std::string child = path_for(root, folder);
+        if (stat(child.c_str(), &info) != 0 || !S_ISDIR(info.st_mode))
+            continue;
+        for (auto &nested : scan_library(child + "/", gallery_name))
+        {
+            nested.name = folder + "/" + nested.name;
+            entries.push_back(std::move(nested));
+        }
+    }
+    closedir(directory);
+    std::sort(entries.begin(), entries.end(),
+              [](const LibraryEntry &left, const LibraryEntry &right)
+              { return left.modified > right.modified; });
+    if (entries.size() > kMaxLibraryEntries)
+        entries.resize(kMaxLibraryEntries);
+    return entries;
 }
 
 bool read_library_text(const std::string &root, const std::string &name, std::string &contents)

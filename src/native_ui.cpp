@@ -328,9 +328,9 @@ void NativeUI::Impl::refresh_media()
             media_paths_.push_back(std::string(root) + entry.name);
         }
     };
-    add(kImageLibraryRoot, "Image", audio_workflows::list_image_library(kImageLibraryRoot));
-    add(kAudioLibraryRoot, "Audio", audio_workflows::list_library(kAudioLibraryRoot));
-    add(kVoiceLibraryRoot, "Voice", audio_workflows::list_library(kVoiceLibraryRoot));
+    add(kImageLibraryRoot, "Image", audio_workflows::list_media_library(kImageLibraryRoot));
+    add(kAudioLibraryRoot, "Audio", audio_workflows::list_media_library(kAudioLibraryRoot));
+    add(kVoiceLibraryRoot, "Voice", audio_workflows::list_media_library(kVoiceLibraryRoot));
     if (rows.empty())
         rows.push_back({"Nothing generated yet", "Images and audio you create appear here"});
     media_.set_items(std::move(rows));
