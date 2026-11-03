@@ -264,7 +264,11 @@ bool valid_image_options(const gpt_runtime_image_options_t *options, bool flux2_
         return false;
     if (std::strcmp(options->image_edit_strategy, "reference_image") == 0 && !flux2_klein)
         return false;
-    if (flux2_klein && std::strcmp(options->image_edit_strategy, "reference_image") != 0)
+    // FLUX.2 Klein edits by reference image, never by denoising an init image. The rule
+    // only binds when there is an input image: a text-to-image request carries no edit
+    // strategy at all, and demanding one here rejected every FLUX.3 and Z-Image prompt.
+    if (flux2_klein && image_to_image &&
+        std::strcmp(options->image_edit_strategy, "reference_image") != 0)
         return false;
     if (options->control_strength != -1 &&
         (!std::isfinite(options->control_strength) || options->control_strength < 0 ||
@@ -349,7 +353,6 @@ bool ensure_context(const char *root)
         parameters.diffusion_model_path = layout.found ? layout.model : diffusion_model_path;
         parameters.llm_path = layout.found ? layout.llm : llm_path;
         parameters.vae_path = layout.found ? layout.vae : vae_path;
-        parameters.vae_format = SD_VAE_FORMAT_FLUX2;
     }
     else if (layout.found)
     {
@@ -366,9 +369,11 @@ bool ensure_context(const char *root)
     // for the Q8_0 GGUF presets it doubles resident weights and exhausts the heap.
     parameters.wtype = SD_TYPE_COUNT;
     parameters.rng_type = CUDA_RNG;
-    parameters.prediction = (is_sd3_model(root) || flux2_klein)
-                                ? FLOW_PRED
-                                : EPS_PRED;
+    // Leave prediction, vae format and scheduler on auto. The library reads the family
+    // from the tensors: FLUX wants FLUX_FLOW_PRED and its own flow shift, and forcing
+    // plain FLOW_PRED built a DiscreteFlowDenoiser that returned noise instead of an
+    // image. The split-file layout below is shared by FLUX.2, FLUX.3 and Z-Image, which
+    // do not share a denoiser, so the family must not be inferred from it.
     parameters.enable_mmap = false;
     parameters.eager_load = false;
     parameters.diffusion_conv_direct = false;
@@ -383,10 +388,17 @@ bool ensure_context(const char *root)
     // the default, the unassigned ControlNet ran a 512x512 guide in 705 s.
     // Large VAE decodes are tiled on the device, see kVaeTileSize.
     parameters.backend = "Vulkan0";
-    // Weights stay on the device. Streaming FLUX.2 Klein's 2.5 GB text encoder from the
-    // SSD ("te=disk") does free the VRAM its double blocks need, but the run then returns
-    // noise instead of an image, so a reported success would be worse than the failure.
-    parameters.params_backend = "Vulkan0";
+    // Leave the parameter placement to the library's auto-fit, constrained to the GPU by
+    // the compute backend above. Naming a params backend turns auto-fit off and pins every
+    // weight: the model manager can only evict a tensor whose parameters live somewhere
+    // other than its compute backend, so pinning left it nothing to release, and FLUX.2
+    // Klein died on its first double block with 220 MB of an 11.7 GiB heap free.
+    // Auto-fit reads the heap as nearly empty and keeps everything resident, but the
+    // sampling pass needs a ~1.9 GiB attention workspace on top of the 6.6 GiB of
+    // weights. Capping the split-file presets pushes their 2.4 GiB text encoder off the
+    // device, which is where it belongs: it is read once, before the first step.
+    if (flux2_klein)
+        parameters.max_vram = "6";
     context = new_sd_ctx(&parameters);
     prospero_runtime::set_model_resident(context != nullptr);
     if (!context || !sd_ctx_supports_image_generation(context))
@@ -538,8 +550,6 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
                                                  : EULER_A_SAMPLE_METHOD;
     if (image_options && image_options->scheduler && *image_options->scheduler)
         parameters.sample_params.scheduler = str_to_scheduler(image_options->scheduler);
-    else if (flux2_klein)
-        parameters.sample_params.scheduler = FLUX2_SCHEDULER;
     if (flux2_klein)
         parameters.sample_params.guidance.distilled_guidance =
             image_options ? image_options->cfg_scale : 1.0f;
