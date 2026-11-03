@@ -139,7 +139,7 @@ jobs:
         run: make lint
 
       - name: Fetch pinned runtime test headers
-        run: python3 tools/deps.py fetch llama-cpp llama-prism
+        run: python3 tools/deps.py fetch llama-cpp llama-prism stable-diffusion-vulkan
 
       - name: Run host regression tests
         run: make test
