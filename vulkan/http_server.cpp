@@ -3309,20 +3309,28 @@ nlohmann::json list_saved_media()
             if (!prospero_session::load_message(record.id, message_index, &message))
                 continue;
             const std::string &content = message.content;
-            std::size_t at = 0;
-            while ((at = content.find("/download0/", at)) != std::string::npos)
+            static const char *markers[] = {
+                "/download0/",
+#if defined(PROSPERO_SESSION_TEST)
+                "/tmp/prosperoai-session-test/",
+#endif
+            };
+            for (const char *marker : markers)
             {
-                std::size_t end = at;
-                while (end < content.size() &&
-                       !std::isspace(static_cast<unsigned char>(content[end])) &&
-                       content[end] != '<' && content[end] != '>' && content[end] != '"')
-                    ++end;
-                while (end > at && (content[end - 1] == ')' || content[end - 1] == ',' ||
-                                    content[end - 1] == '.' || content[end - 1] == ';'))
-                    --end;
-                const std::string path = content.substr(at, end - at);
-                add_path(path, record);
-                at = std::max(end, at + 1);
+                std::size_t at = 0;
+                while ((at = content.find(marker, at)) != std::string::npos)
+                {
+                    std::size_t end = at;
+                    while (end < content.size() &&
+                           !std::isspace(static_cast<unsigned char>(content[end])) &&
+                           content[end] != '<' && content[end] != '>' && content[end] != '"')
+                        ++end;
+                    while (end > at && (content[end - 1] == ')' || content[end - 1] == ',' ||
+                                        content[end - 1] == '.' || content[end - 1] == ';'))
+                        --end;
+                    add_path(content.substr(at, end - at), record);
+                    at = std::max(end, at + 1);
+                }
             }
             std::string output_path;
             if (prospero_session::read_output_reference(record.id, message_index, &output_path))
@@ -3411,30 +3419,10 @@ bool delete_archived_media(const std::string &path, std::string &error)
         error = "Only media linked to a saved conversation can be deleted here.";
         return false;
     }
-    char owned_prefix[160];
-    bool owned_copy = false;
-    static const char *media_kinds[] = {"image", "audio", "voice"};
-    for (const char *kind : media_kinds)
-    {
-#if defined(PROSPERO_SESSION_TEST)
-        std::snprintf(owned_prefix, sizeof(owned_prefix),
-                      "/tmp/prosperoai-session-test/work/%s/%s/", kind, owner.id);
-#else
-        std::snprintf(owned_prefix, sizeof(owned_prefix),
-                      "/download0/ProsperoAI/work/%s/%s/", kind, owner.id);
-#endif
-        if (path.compare(0, std::strlen(owned_prefix), owned_prefix) == 0 &&
-            path.find('/', std::strlen(owned_prefix)) == std::string::npos)
-        {
-            owned_copy = true;
-            break;
-        }
-    }
-    if (!owned_copy)
-    {
-        error = "Only an archived output copy stored with its conversation can be deleted.";
-        return false;
-    }
+    // media_path_allowed has already confined the path to the work/ and sessions/ trees,
+    // and exactly one conversation references it. Requiring it to sit in a folder named
+    // after that conversation would refuse every generation made outside a saved
+    // conversation, which is most of the gallery.
     if (owner_output_reference)
     {
         if (prospero_session::remove_archived_media(owner.id, owner_message, path.c_str()))

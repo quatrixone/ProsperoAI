@@ -547,6 +547,37 @@ class HttpApiTests(unittest.TestCase):
         self.assertIn("400 Bad Request", head)
         self.assertIn("invalid_image_request", body)
 
+    def test_media_generated_outside_a_conversation_folder_can_be_deleted(self):
+        # Most of the gallery is flat work/image files a message merely mentions; the
+        # delete button has to reach those too, not only per-conversation archive copies.
+        session_id = "flat-media-delete"
+        flat = Path("/tmp/prosperoai-session-test/work/image/prosperoai-image-flat-1.png")
+        headers = ["Authorization: Bearer secret"]
+        self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                     headers=headers)
+        flat.parent.mkdir(parents=True, exist_ok=True)
+        flat.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
+        try:
+            head, _ = self.request("/api/conversations", {
+                "id": session_id, "title": "Flat media", "model": "image-model-test",
+                "modelName": "Image model test", "purpose": "text-to-image",
+                "messages": [{"role": "assistant", "content": f"Saved to {flat}"}],
+            }, key="secret", headers=headers)
+            self.assertIn("201 Created", head)
+            self.assertIn(str(flat), {
+                item["path"] for item in json.loads(self.request("/api/media")[1])["data"]
+            })
+            head, body = self.request("/api/media", {"path": str(flat)}, method="DELETE")
+            self.assertIn("200 OK", head, body)
+            self.assertFalse(flat.exists())
+            detail = json.loads(self.request("/api/conversations/" + session_id, key="secret",
+                                             headers=headers)[1])
+            self.assertIn("[media deleted]", detail["messages"][0]["content"])
+        finally:
+            flat.unlink(missing_ok=True)
+            self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
+                         headers=headers)
+
     def save_conversation_with_image(self, session_id, purpose="text-to-image", image=None):
         headers = ["Authorization: Bearer secret"]
         self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
