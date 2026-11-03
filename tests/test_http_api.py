@@ -241,6 +241,21 @@ class HttpApiTests(unittest.TestCase):
         self.assertIn("400 Bad Request", missing)
         self.assertEqual({path.name for path in self.image_dir.iterdir()}, {sentinel.name})
 
+    def test_memory_readout_does_not_wait_for_a_running_generation(self):
+        # Generation holds the runtime lock for its whole run, which is exactly when a
+        # caller wants to know which model is resident. Taking it here used to deadlock
+        # the readout for the length of the generation.
+        head, body = self.request("/api/models/memory", environment={
+            "PROSPERO_TEST_VULKAN_MEMORY": "valid",
+            "PROSPERO_TEST_MODEL_LOADED": "1",
+            "PROSPERO_TEST_RUNTIME_BUSY": "1",
+        })
+        self.assertIn("200 OK", head)
+        payload = json.loads(body)
+        self.assertTrue(payload["loaded"])
+        self.assertEqual(payload["name"], "SheetSage test fixture")
+        self.assertEqual(payload["vulkan_free_bytes"], 6 * 1024**3)
+
     def test_image_upload_expiry_skips_active_leases(self):
         result = subprocess.run([str(self.binary), "--test-image-upload-lifecycle"],
                                 check=True, capture_output=True, text=True)

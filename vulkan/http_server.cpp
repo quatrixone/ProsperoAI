@@ -4588,7 +4588,10 @@ void handle_connection(const NetApi &api, int sock)
     }
     else if (std::strcmp(method, "GET") == 0 && std::strcmp(path, "/api/models/memory") == 0)
     {
-        std::lock_guard<std::mutex> runtime_lock(prospero::model_manager::runtime_mutex());
+        // No runtime lock: the router locks its own model identity and the heap query
+        // reads the device, while generation holds the runtime lock for its whole run.
+        // Taking it here stalled the readout for the length of every generation, which is
+        // exactly when a caller wants to see which model is resident.
         char id[256]{}, name[256]{};
         const bool loaded=gpt_runtime_loaded_model(id,sizeof(id),name,sizeof(name));
         std::uint64_t free_bytes = 0, total_bytes = 0;
