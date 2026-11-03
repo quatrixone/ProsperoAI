@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <mutex>
 #include <thread>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -120,6 +121,23 @@ void test_native_vulkan_memory_snapshot()
     assert(!app.state().loaded_model);
     assert(app.state().vulkan_memory_available);
     assert(app.state().vulkan_allocated_bytes == (4ull << 30));
+
+    // Generation holds the runtime lock for its whole run, and one worker serves every
+    // job: a memory poll that waited for it froze the interface for minutes.
+    {
+        std::lock_guard<std::mutex> busy_runtime(prospero::model_manager::runtime_mutex());
+        fixture_vulkan_free_bytes = 1ull << 30;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        const auto began = std::chrono::steady_clock::now();
+        app.poll();
+        settle(app);
+        assert(std::chrono::steady_clock::now() - began < std::chrono::seconds(2));
+        assert(app.state().vulkan_free_bytes == (6ull << 30));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    app.poll();
+    settle(app);
+    assert(app.state().vulkan_free_bytes == (1ull << 30));
     app.shutdown();
     fixture_model_loaded = false;
     assert(prospero::debug::set_enabled(false));

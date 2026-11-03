@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <pthread.h>
 #include <sys/time.h>
 #include <nlohmann/json.hpp>
@@ -1159,7 +1160,12 @@ void App::work()
     {
         char id[256]{}, name[256]{};
         std::uint64_t free_bytes = 0, total_bytes = 0;
-        std::lock_guard<std::mutex> runtime_lock(model_manager::runtime_mutex());
+        // A memory reading is worth no wait at all. Generation holds this lock for the
+        // whole run -- four minutes for a song -- and one worker serves every job, so
+        // blocking here on a once-a-second poll froze the interface until it finished.
+        std::unique_lock<std::mutex> runtime_lock(model_manager::runtime_mutex(), std::try_to_lock);
+        if (!runtime_lock.owns_lock())
+            break;
         result_.loaded_model = gpt_runtime_loaded_model(id, sizeof(id), name, sizeof(name));
         result_.loaded_model_id = result_.loaded_model ? id : "";
         result_.loaded_model_name = result_.loaded_model ? (name[0] ? name : id) : "";
