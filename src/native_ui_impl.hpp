@@ -30,20 +30,37 @@
 
 namespace prospero
 {
+// The header tabs, in the order they are shown. Comparisons use these names so the
+// row can be reordered without hunting through every screen.
+enum Tab
+{
+    kWorkspaceTab = 0,
+    kMediaTab,
+    kModelsTab,
+    kSettingsTab,
+    kMobileTab,
+    kTabCount
+};
 enum class WorkspaceMode : std::uint8_t
 {
     Text,
+    Image,
     Audio,
-    SD,
     TTS
 };
+// The conversation list follows the workspace mode: Text shows text conversations,
+// Image shows image ones, and so on. Index 0 of each list is the "all" entry.
+static constexpr unsigned session_category_for(WorkspaceMode mode)
+{
+    return static_cast<unsigned>(mode) + 1;
+}
 static constexpr Capability capability_for(WorkspaceMode mode)
 {
     switch (mode)
     {
     case WorkspaceMode::Audio:
         return Capability::Audio;
-    case WorkspaceMode::SD:
+    case WorkspaceMode::Image:
         return Capability::Image;
     case WorkspaceMode::TTS:
         return Capability::Voice;
@@ -108,6 +125,7 @@ struct NativeUI::Impl
     void refresh_models();
     void refresh_sessions();
     void refresh_mobile_link();
+    void refresh_media();
     void begin_model_selection();
     void build_form();
     void build_generation_form();
@@ -149,6 +167,7 @@ struct NativeUI::Impl
                         float phase, float focus) const;
     void draw_settings(ui::Canvas &canvas) const;
     void draw_mobile(ui::Canvas &canvas) const;
+    void draw_media(ui::Canvas &canvas) const;
 
     // ---- native_ui_style.cpp: small drawing helpers ----
     float text(gfx::DrawList &list, std::string_view value, float x, float y, float size,
@@ -187,7 +206,7 @@ struct NativeUI::Impl
     ui::SpringColor cloud_a_, cloud_b_, page_top_, page_bottom_;
 
     ui::TabBar tabs_, filters_;
-    ui::ListView sessions_, categories_;
+    ui::ListView sessions_, categories_, media_;
     ui::GridView models_;
     ui::SearchField search_, session_search_;
     std::vector<unsigned> visible_sessions_;
@@ -195,6 +214,7 @@ struct NativeUI::Impl
     std::vector<std::uint8_t> mobile_qr_modules_;
     int mobile_qr_size_ = 0;
     std::string mobile_url_;
+    std::vector<std::string> media_paths_;
     int workspace_voice_row_ = -1;
     int workspace_language_row_ = -1;
     int workspace_new_conversation_row_ = -1;
@@ -203,7 +223,6 @@ struct NativeUI::Impl
     int workspace_music_row_ = -1, workspace_cover_row_ = -1, workspace_stems_row_ = -1,
         workspace_queue_row_ = -1, workspace_abc_row_ = -1, workspace_queue_entry_start_row_ = -1,
         workspace_queue_clear_row_ = -1, workspace_artifact_start_row_ = -1;
-    unsigned session_category_ = 0;
     std::string session_query_;
     std::string workspace_model_query_;
     int workspace_model_filter_ = -1; // -1 = all capabilities; otherwise Capability ordinal.

@@ -41,9 +41,11 @@ std::string logs_folder_text()
 namespace
 {
 constexpr float kBootSeconds = 1.6f; // the opening is never shorter than its chime
-constexpr const char *kTabs[] = {"Workspace", "Models", "Settings", "Mobile"};
-constexpr const char *kWorkspaceModes[] = {"Text", "Audio", "SD", "TTS"};
+constexpr const char *kTabs[] = {"Workspace", "Media", "Models", "Settings", "Mobile"};
+constexpr const char *kWorkspaceModes[] = {"Text", "Image", "Audio", "TTS"};
 constexpr const char *kAudioLibraryRoot = "/download0/ProsperoAI/work/audio/";
+constexpr const char *kImageLibraryRoot = "/download0/ProsperoAI/work/image/";
+constexpr const char *kVoiceLibraryRoot = "/download0/ProsperoAI/work/voice/";
 constexpr const char *kCategories[] = {"Appearance", "Sound", "Accessibility", "Diagnostics",
                                        "About"};
 enum DialogAction
@@ -92,7 +94,7 @@ NativeUI::Impl::Impl(NativeUI &owner, App &app, FontSet &font_set, gfx::Renderer
     tabs_.style.height = 62;
     std::vector<ui::TabItem> tabs;
     tabs_width_ = 0;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < kTabCount; ++i)
     {
         tabs.push_back({kTabs[i], 0, false, i});
         tabs_width_ += fonts_.semibold.measure(kTabs[i], 25) + 16 + (i ? 38.0f : 0.0f);
@@ -111,6 +113,11 @@ NativeUI::Impl::Impl(NativeUI &owner, App &app, FontSet &font_set, gfx::Renderer
     sessions_.style.highlight.kind = ui::HighlightKind::bar;
     sessions_.set_bounds({110, 322, 334, 598});
     sessions_.set_active(false);
+
+    // The gallery is a wide list across the page, not the narrow conversation rail.
+    media_.style = sessions_.style;
+    media_.set_bounds({130, 400, 1660, 540});
+    media_.set_active(false);
 
     models_.style.columns = 3;
     models_.style.cell_height = 196;
@@ -157,7 +164,7 @@ NativeUI::Impl::Impl(NativeUI &owner, App &app, FontSet &font_set, gfx::Renderer
     {
         if (chat_keyboard_open_)
             composer_.insert(value);
-        else if (tabs_.active() == 0)
+        else if (tabs_.active() == kWorkspaceTab)
         {
             if (selecting_model_)
                 workspace_model_query_ += value;
@@ -178,7 +185,7 @@ NativeUI::Impl::Impl(NativeUI &owner, App &app, FontSet &font_set, gfx::Renderer
     {
         if (chat_keyboard_open_)
             composer_.backspace();
-        else if (tabs_.active() == 0)
+        else if (tabs_.active() == kWorkspaceTab)
         {
             if (selecting_model_)
             {
@@ -277,12 +284,12 @@ void NativeUI::Impl::apply_theme()
 
 void NativeUI::Impl::change_page(int page)
 {
-    if (page != 0 && workspace_generation_open_)
+    if (page != kWorkspaceTab && workspace_generation_open_)
     {
         workspace_generation_open_ = false;
         build_form();
     }
-    if (page != 0)
+    if (page != kWorkspaceTab)
     {
         workspace_mode_open_ = false;
         workspace_queue_open_ = false;
@@ -290,15 +297,44 @@ void NativeUI::Impl::change_page(int page)
         choosing_audio_library_ = false;
     }
     tabs_.set_active(page);
-    if (page == 2)
+    if (page == kSettingsTab)
         build_form();
-    if (page == 3)
+    if (page == kMobileTab)
         refresh_mobile_link();
+    if (page == kMediaTab)
+        refresh_media();
     page_age_ = 0;
     hero_age_ = 0;
     models_.enter();
     form_.enter();
     sessions_.enter();
+}
+
+// The gallery lists what the console itself generated, newest first within each kind.
+void NativeUI::Impl::refresh_media()
+{
+    std::vector<ui::ListItem> rows;
+    media_paths_.clear();
+    const auto add = [&](const char *root, const char *kind,
+                         const std::vector<audio_workflows::LibraryEntry> &entries)
+    {
+        for (const auto &entry : entries)
+        {
+            ui::ListItem item;
+            item.title = entry.name;
+            item.subtitle = std::string(kind) + " · " + std::to_string(entry.size / 1024) + " KiB";
+            font_set_.note(item.title);
+            rows.push_back(std::move(item));
+            media_paths_.push_back(std::string(root) + entry.name);
+        }
+    };
+    add(kImageLibraryRoot, "Image", audio_workflows::list_image_library(kImageLibraryRoot));
+    add(kAudioLibraryRoot, "Audio", audio_workflows::list_library(kAudioLibraryRoot));
+    add(kVoiceLibraryRoot, "Voice", audio_workflows::list_library(kVoiceLibraryRoot));
+    if (rows.empty())
+        rows.push_back({"Nothing generated yet", "Images and audio you create appear here"});
+    media_.set_items(std::move(rows));
+    media_.set_focus(0);
 }
 
 void NativeUI::Impl::refresh_mobile_link()
@@ -333,7 +369,7 @@ void NativeUI::Impl::announce(ui::Feedback &feedback)
     for (const Notice notice : app_.take_notices())
     {
         const auto &state = app_.state();
-        const bool watching = tabs_.active() == 0 && conversation_;
+        const bool watching = tabs_.active() == kWorkspaceTab && conversation_;
         switch (notice)
         {
         case Notice::ModelReady:
@@ -341,14 +377,14 @@ void NativeUI::Impl::announce(ui::Feedback &feedback)
             selecting_model_ = false;
             conversation_ = true;
             rail_ = false;
-            change_page(0);
+            change_page(kWorkspaceTab);
             refresh_sessions();
             toasts_.push(ui::StatusKind::success, std::string(current_name()) + " is ready",
                          "A new conversation starts with this model.");
             break;
         case Notice::ModelFailed:
             pending_model_ = -1;
-            if (tabs_.active() == 0)
+            if (tabs_.active() == kWorkspaceTab)
                 begin_model_selection();
             toasts_.push(ui::StatusKind::danger, "The model could not be prepared",
                          "Choose it again in Your Space to retry.", 6);
@@ -458,7 +494,7 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
     // The backdrop takes the accent and the colour of what is in focus.
     const auto &state = app_.state();
     Capability hue = Capability::Text;
-    if (tabs_.active() == 1 && !visible_models_.empty())
+    if (tabs_.active() == kModelsTab && !visible_models_.empty())
     {
         const int index = visible_models_[static_cast<std::size_t>(models_.focus())];
         hue = index >= 0
@@ -755,11 +791,13 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
                  ui::Event::changed)
             change_page(tabs_.active());
     }
-    else if (tabs_.active() == 1)
+    else if (tabs_.active() == kModelsTab)
         handle_models(input, feedback);
-    else if (tabs_.active() == 2)
+    else if (tabs_.active() == kSettingsTab)
         handle_settings(input, feedback);
-    else if (tabs_.active() == 3)
+    else if (tabs_.active() == kMediaTab)
+        media_.handle(input, feedback);
+    else if (tabs_.active() == kMobileTab)
     {
         // The mobile page is informational; the R1/L1 tabs remain its only controls.
     }
@@ -769,7 +807,7 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
     update_audio_queue();
 
     // The model under the focus leads the Models page; a new one arrives with a short fade.
-    const int hero = tabs_.active() == 1 && !visible_models_.empty()
+    const int hero = tabs_.active() == kModelsTab && !visible_models_.empty()
                          ? visible_models_[static_cast<std::size_t>(models_.focus())]
                          : -1;
     if (hero != hero_model_)
@@ -778,14 +816,16 @@ void NativeUI::Impl::update(const InputFrame &input, float dt, ui::Feedback &fee
         hero_age_ = 0;
     }
 
+    media_.set_active(tabs_.active() == kMediaTab);
     sessions_.set_active(rail_);
     categories_.set_active(category_focus_);
     form_.set_active(workspace_generation_open_ || workspace_mode_open_ || workspace_queue_open_ ||
-                     (tabs_.active() == 2 && !category_focus_));
+                     (tabs_.active() == kSettingsTab && !category_focus_));
     composer_.set_active(!rail_ && !app_.busy());
     composer_.set_disabled(app_.busy());
     tabs_.update(dt);
     sessions_.update(dt);
+    media_.update(dt);
     categories_.update(dt);
     models_.update(dt);
     filters_.update(dt);
@@ -1145,17 +1185,23 @@ void NativeUI::Impl::handle_workspace(const InputFrame &input, ui::Feedback &fee
 {
     if (workspace_mode_open_)
     {
+        // Move through the modes with the stick or the d-pad, then confirm with Cross.
+        // Circle leaves the picker without changing the mode.
         if (input.is_pressed(Action::back))
         {
             workspace_mode_open_ = false;
             build_form();
         }
-        else if (form_.handle(input, feedback) == ui::Event::changed)
+        else if (input.is_pressed(Action::confirm))
         {
             workspace_mode_ = static_cast<WorkspaceMode>(std::clamp(form_.choice_index(100), 0, 3));
             workspace_model_filter_ = static_cast<int>(capability_for(workspace_mode_));
+            workspace_mode_open_ = false;
+            build_form();
             refresh_sessions();
         }
+        else
+            form_.handle(input, feedback);
         return;
     }
     if (workspace_queue_open_)
@@ -1373,7 +1419,7 @@ void NativeUI::Impl::handle_workspace(const InputFrame &input, ui::Feedback &fee
                 form_.clear();
                 form_.set_bounds({536, 362, 912, 360});
                 form_.add_header("Workspace mode");
-                form_.add_choice(100, "Mode", {"Text", "Audio", "SD", "TTS"},
+                form_.add_choice(100, "Mode", {"Text", "Image", "Audio", "TTS"},
                                  static_cast<int>(workspace_mode_));
                 form_.enter();
             }
@@ -1816,7 +1862,7 @@ void NativeUI::Impl::refresh_sessions()
     for (unsigned i = 0; i < state.sessions.size(); ++i)
     {
         const auto &session = state.sessions[i];
-        if (!prospero_session::matches(session, kinds[session_category_], ""))
+        if (!prospero_session::matches(session, kinds[session_category_for(workspace_mode_)], ""))
             continue;
         bool found = prospero_session::matches(session, "all", session_query_.c_str());
         if (!found && i < state.session_search.size() && state.session_search[i].text)
@@ -1876,7 +1922,7 @@ void NativeUI::Impl::type(char character, ui::Feedback &feedback)
         keyboard_.set_length(static_cast<int>(audio_keyboard_text_.size()));
         return;
     }
-    if (tabs_.active() == 0 && search_open_)
+    if (tabs_.active() == kWorkspaceTab && search_open_)
     {
         if (selecting_model_)
         {
@@ -1890,12 +1936,12 @@ void NativeUI::Impl::type(char character, ui::Feedback &feedback)
         }
         refresh_sessions();
     }
-    else if (tabs_.active() == 1)
+    else if (tabs_.active() == kModelsTab)
     {
         search_.insert(character, feedback);
         refresh_models();
     }
-    else if (tabs_.active() == 0 && !app_.busy())
+    else if (tabs_.active() == kWorkspaceTab && !app_.busy())
     {
         if (!conversation_)
             page_age_ = 0;
@@ -1916,7 +1962,7 @@ void NativeUI::Impl::backspace(ui::Feedback &feedback)
         keyboard_.set_length(static_cast<int>(audio_keyboard_text_.size()));
         return;
     }
-    if (tabs_.active() == 0 && search_open_)
+    if (tabs_.active() == kWorkspaceTab && search_open_)
     {
         if (selecting_model_)
         {
@@ -1930,12 +1976,12 @@ void NativeUI::Impl::backspace(ui::Feedback &feedback)
         }
         refresh_sessions();
     }
-    else if (tabs_.active() == 1)
+    else if (tabs_.active() == kModelsTab)
     {
         search_.backspace(feedback);
         refresh_models();
     }
-    else if (tabs_.active() == 0 && !app_.busy())
+    else if (tabs_.active() == kWorkspaceTab && !app_.busy())
         composer_.backspace(feedback);
 }
 
@@ -1953,7 +1999,7 @@ void NativeUI::Impl::submit(ui::Feedback &feedback)
         feedback.play(audio::Cue::modal_close);
         return;
     }
-    if (tabs_.active() != 0 || dialog_.is_open() || update_ui_ != UpdateUi::hidden ||
+    if (tabs_.active() != kWorkspaceTab || dialog_.is_open() || update_ui_ != UpdateUi::hidden ||
         keyboard_pending_ || boot_ > 0.6f)
         return;
     if (app_.busy())
@@ -2421,7 +2467,7 @@ void NativeUI::Impl::sync()
 
 void NativeUI::Impl::upload_visible_image()
 {
-    if (tabs_.active() != 0 || !conversation_)
+    if (tabs_.active() != kWorkspaceTab || !conversation_)
         return;
     // Keep at most four app-owned image textures resident. Conversation images are
     // retained as decoded data by the app; GPU copies outside the viewport are LRU.
@@ -2529,11 +2575,13 @@ void NativeUI::Impl::draw(UiFrame &frame) const
     const float entrance = arrival(0);
     list.push_transform(1, 0, 0, 0, (1 - entrance) * 18);
     list.push_opacity(entrance);
-    if (tabs_.active() == 1)
+    if (tabs_.active() == kModelsTab)
         draw_models(canvas);
-    else if (tabs_.active() == 2)
+    else if (tabs_.active() == kSettingsTab)
         draw_settings(canvas);
-    else if (tabs_.active() == 3)
+    else if (tabs_.active() == kMediaTab)
+        draw_media(canvas);
+    else if (tabs_.active() == kMobileTab)
         draw_mobile(canvas);
     else if (conversation_)
         draw_conversation(canvas);
@@ -2793,7 +2841,7 @@ void NativeUI::Impl::draw_footer(gfx::DrawList &list) const
         hints[count++] = {ui::Button::r2, chat_keyboard_open_ ? "Send" : "Done"};
         hints[count++] = {ui::Button::circle, "Back"};
     }
-    else if (tabs_.active() == 1)
+    else if (tabs_.active() == kModelsTab)
     {
         const bool downloading =
             prospero_model_download::state() == prospero_model_download::State::Downloading;
@@ -2834,12 +2882,12 @@ void NativeUI::Impl::draw_footer(gfx::DrawList &list) const
             hints[count++] = {ui::Button::square, "Search"};
         }
     }
-    else if (tabs_.active() == 3)
+    else if (tabs_.active() == kMobileTab)
     {
         hints[count++] = {ui::Button::l1, "Settings"};
         hints[count++] = {ui::Button::r1, "Workspace"};
     }
-    else if (tabs_.active() == 2)
+    else if (tabs_.active() == kSettingsTab)
     {
         hints[count++] = {ui::Button::cross, category_focus_ ? "Open" : "Adjust"};
         if (!category_focus_)
@@ -2880,7 +2928,7 @@ void NativeUI::Impl::draw_footer(gfx::DrawList &list) const
     if (!dialog_.is_open() && !search_open_ && !chat_keyboard_open_ && !audio_keyboard_open_ &&
         update_ui_ == UpdateUi::hidden)
     {
-        if (tabs_.active() == 1)
+        if (tabs_.active() == kModelsTab)
             hints[count++] = {ui::Button::left_stick, "L3  Delete model"};
         else if (conversation_ && rail_ && selecting_model_ && !workspace_model_indices_.empty())
             hints[count++] = {ui::Button::left_stick, "L3  Delete model"};
@@ -3009,14 +3057,14 @@ void NativeUI::Impl::draw_search(ui::Canvas &canvas) const
     overlay.bordered_rect(sheet, 26, palette_.panel.with_alpha(1.0f / palette_.panel.a), 1,
                           palette_.line);
     label(overlay,
-          chat_keyboard_open_      ? "WRITE A MESSAGE"
-          : tabs_.active() == 0    ? "SEARCH CONVERSATIONS"
-          : filters_.active() == 0 ? "FIND A MODEL TO DOWNLOAD"
-                                   : "SEARCH YOUR MODELS",
+          chat_keyboard_open_               ? "WRITE A MESSAGE"
+          : tabs_.active() == kWorkspaceTab ? "SEARCH CONVERSATIONS"
+          : filters_.active() == 0          ? "FIND A MODEL TO DOWNLOAD"
+                                            : "SEARCH YOUR MODELS",
           364, 492, palette_.accent);
-    const std::string &value = chat_keyboard_open_   ? composer_.text()
-                               : tabs_.active() == 0 ? session_search_.text()
-                                                     : search_.text();
+    const std::string &value = chat_keyboard_open_               ? composer_.text()
+                               : tabs_.active() == kWorkspaceTab ? session_search_.text()
+                                                                 : search_.text();
     const bool empty = value.empty();
     text(overlay,
          empty ? (chat_keyboard_open_ ? "Type your message..." : "Type to search...")
@@ -3024,8 +3072,9 @@ void NativeUI::Impl::draw_search(ui::Canvas &canvas) const
          364, 548, 32, empty ? palette_.muted : palette_.ink, !empty);
     char found[64];
     std::snprintf(found, sizeof(found), "%zu found",
-                  tabs_.active() == 0 ? visible_sessions_.size() : visible_models_.size());
-    if (!chat_keyboard_open_ && (tabs_.active() == 0 || filters_.active() != 0))
+                  tabs_.active() == kWorkspaceTab ? visible_sessions_.size()
+                                                  : visible_models_.size());
+    if (!chat_keyboard_open_ && (tabs_.active() == kWorkspaceTab || filters_.active() != 0))
         text(overlay, found, sheet.x + sheet.w - 40, 548, 22, palette_.muted, false,
              gfx::Align::right);
     keyboard_.draw(canvas);

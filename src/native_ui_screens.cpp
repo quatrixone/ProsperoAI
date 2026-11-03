@@ -180,8 +180,11 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
                  std::string(model_filters[workspace_model_filter_ + 1]) +
                  (workspace_model_query_.empty() ? "" : " · " + workspace_model_query_) +
                  " · L1/R1 type";
-             text(list, fit(selecting_model_ ? model_title : titles[session_category_], 31, 310),
-                  122, 292, 31, palette_.ink, true);
+             text(
+                 list,
+                 fit(selecting_model_ ? model_title : titles[session_category_for(workspace_mode_)],
+                     31, 310),
+                 122, 292, 31, palette_.ink, true);
              sessions_.draw(canvas);
          });
 
@@ -717,6 +720,17 @@ void NativeUI::Impl::draw_settings(ui::Canvas &canvas) const
              }
              list.pop_clip();
          });
+}
+
+void NativeUI::Impl::draw_media(ui::Canvas &canvas) const
+{
+    auto &list = canvas.list;
+    label(list, "YOUR CREATIONS", 120, 238, palette_.accent);
+    text(list, "Media library", 120, 286, 43, palette_.ink, true);
+    text(list, "Images and audio generated on this console. Files stay on your PS5.", 120, 332, 24,
+         palette_.muted);
+    panel(list, {110, 380, 1700, 580}, 24, 0.3f);
+    media_.draw(canvas);
 }
 
 void NativeUI::Impl::draw_mobile(ui::Canvas &canvas) const

@@ -62,15 +62,20 @@ bool allowed_extension(const std::string &name)
     return extension == ".wav" || extension == ".mp3" || extension == ".abc";
 }
 
-bool valid_basename(const std::string &name)
+bool safe_name_characters(const std::string &name)
 {
     if (name.size() < 5 || name.size() > kMaxNameBytes || name == "." || name == ".." ||
-        name.find("..") != std::string::npos || !allowed_extension(name))
+        name.find("..") != std::string::npos)
         return false;
     for (const unsigned char c : name)
         if (!(ascii_alnum(c) || c == '.' || c == '_' || c == '-'))
             return false;
     return true;
+}
+
+bool valid_basename(const std::string &name)
+{
+    return allowed_extension(name) && safe_name_characters(name);
 }
 
 bool valid_artifact_name(const std::string &name)
@@ -474,7 +479,10 @@ bool supports_music_model(std::string_view model_id)
            lowered.find("htdemucs") == std::string::npos;
 }
 
-std::vector<LibraryEntry> list_library(const std::string &root)
+// The gallery lists generated pictures from the same folders, so the scan takes the
+// names it accepts rather than assuming the audio ones.
+std::vector<LibraryEntry> scan_library(const std::string &root,
+                                       bool (*accepted)(const std::string &))
 {
     std::vector<LibraryEntry> entries;
     if (root.empty())
@@ -485,7 +493,7 @@ std::vector<LibraryEntry> list_library(const std::string &root)
     while (dirent *entry = readdir(directory))
     {
         const std::string name(entry->d_name);
-        if (!valid_basename(name))
+        if (!accepted(name))
             continue;
         struct stat info
         {
@@ -502,6 +510,26 @@ std::vector<LibraryEntry> list_library(const std::string &root)
     if (entries.size() > kMaxLibraryEntries)
         entries.resize(kMaxLibraryEntries);
     return entries;
+}
+
+std::vector<LibraryEntry> list_library(const std::string &root)
+{
+    return scan_library(root, valid_basename);
+}
+
+std::vector<LibraryEntry> list_image_library(const std::string &root)
+{
+    return scan_library(root,
+                        [](const std::string &name)
+                        {
+                            const std::size_t dot = name.rfind('.');
+                            if (dot == std::string::npos)
+                                return false;
+                            const std::string extension = name.substr(dot);
+                            return (extension == ".png" || extension == ".jpg" ||
+                                    extension == ".jpeg") &&
+                                   safe_name_characters(name);
+                        });
 }
 
 bool read_library_text(const std::string &root, const std::string &name, std::string &contents)
