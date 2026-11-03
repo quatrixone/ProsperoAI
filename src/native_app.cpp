@@ -1160,12 +1160,11 @@ void App::work()
     {
         char id[256]{}, name[256]{};
         std::uint64_t free_bytes = 0, total_bytes = 0;
-        // A memory reading is worth no wait at all. Generation holds this lock for the
-        // whole run -- four minutes for a song -- and one worker serves every job, so
-        // blocking here on a once-a-second poll froze the interface until it finished.
-        std::unique_lock<std::mutex> runtime_lock(model_manager::runtime_mutex(), std::try_to_lock);
-        if (!runtime_lock.owns_lock())
-            break;
+        // No runtime lock here. Neither call needs it -- the router takes its own short
+        // lock for the model identity, and the heap query reads the device directly --
+        // while generation holds the runtime lock for its whole run and one worker serves
+        // every job, so taking it froze the interface for minutes. Reading without it is
+        // also what shows the model that is generating, instead of the one before it.
         result_.loaded_model = gpt_runtime_loaded_model(id, sizeof(id), name, sizeof(name));
         result_.loaded_model_id = result_.loaded_model ? id : "";
         result_.loaded_model_name = result_.loaded_model ? (name[0] ? name : id) : "";
