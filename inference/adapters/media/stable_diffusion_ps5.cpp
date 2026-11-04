@@ -349,11 +349,27 @@ void release_context()
     log_line("[prosperoai] sd_context_released=1\n");
 }
 
+// What a sampling pass needs beside the resident weights. Measured here: SDXL Inpainting
+// and the SDXL Canny guide rendered once and then failed their second request on the spot
+// -- "unet segment 1/1 failed during allocated capacity check" in 0.14 s -- with the first
+// render's weights still holding the device.
+constexpr std::uint64_t kReusableHeadroomBytes = 1536ull << 20;
+
 bool ensure_context(const char *root)
 {
     const std::string desired_identity = "model:" + std::string(root);
     if (context && context_identity == desired_identity)
-        return true;
+    {
+        // Keeping the model loaded is what takes a second render from 62 s to 9 s, so
+        // give it up only when the heap can no longer hold a pass beside it. Reloading
+        // costs a minute; streaming the weights instead would cost twenty.
+        std::uint64_t free_bytes = 0, total_bytes = 0;
+        if (!gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) ||
+            free_bytes >= kReusableHeadroomBytes)
+            return true;
+        log_line("[prosperoai] sd_reload_for_headroom=1 free=%llu MiB\n",
+                 static_cast<unsigned long long>(free_bytes >> 20));
+    }
     release_context();
     if (!backend_registered)
     {
@@ -454,15 +470,14 @@ bool ensure_context(const char *root)
     // allocator's own blocks and whatever the previous model left behind. A constant
     // cannot track that, which is why Z-Image failed by 175 MB after following the 9B.
     //
-    // Every image model gets the budget, not only the split-file ones: the heap is what
-    // runs out, and the family has nothing to do with it. Without it SDXL Inpainting and
-    // the SDXL Canny guide rendered once and then failed their second request on the
-    // spot, their first render's weights still holding the device.
+    // Only the split-file presets get it. The reserve below is measured at 1024x1024 and
+    // is far too generous for a model that fits comfortably: applied to every image model
+    // it sent SDXL Inpainting's weights to disk and took one render from 77 s to 1643 s.
     char weight_budget[16]{};
     std::uint64_t free_bytes = 0, total_bytes = 0;
     constexpr std::uint64_t kSamplingReserveBytes = 5632ull << 20;
     constexpr std::uint64_t kSmallestUsefulBudgetBytes = 2048ull << 20;
-    if (gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
+    if (flux2_klein && gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
         free_bytes > kSamplingReserveBytes + kSmallestUsefulBudgetBytes &&
         std::snprintf(weight_budget, sizeof(weight_budget), "%.2f",
                       static_cast<double>(free_bytes - kSamplingReserveBytes) /
