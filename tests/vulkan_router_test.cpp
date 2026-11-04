@@ -18,6 +18,8 @@
 namespace
 {
 unsigned text_selected = 0, released = 0, stopped = 0, generated = 0, ace_generated = 0;
+bool image_options_forwarded = false;
+std::string deleted_model_id;
 std::atomic<bool> block_voice{false}, voice_entered{false}, voice_release{false};
 } // namespace
 namespace prospero_vulkan
@@ -45,6 +47,10 @@ bool gpt_runtime_context_full()
 std::uint64_t gpt_runtime_vulkan_heap_bytes()
 {
     return 0;
+}
+bool gpt_runtime_vulkan_memory(std::uint64_t *, std::uint64_t *)
+{
+    return false;
 }
 bool gpt_runtime_select_model(unsigned i)
 {
@@ -78,8 +84,9 @@ int gpt_runtime_generate(const gpt_runtime_message_t *, unsigned,
 } // namespace prospero_vulkan
 namespace prospero_model_download
 {
-bool delete_model_files(const char *)
+bool delete_model_files(const char *id)
 {
+    deleted_model_id = id ? id : "";
     return true;
 }
 } // namespace prospero_model_download
@@ -147,10 +154,50 @@ extern "C"
         std::snprintf(out, n, "ace-step.wav");
         return 0;
     }
-    int ps5_sd_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
-                        gpt_runtime_progress_fn)
+    void ps5_yue2_release()
+    {
+    }
+    int ps5_yue2_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                          gpt_runtime_progress_fn)
     {
         return 1;
+    }
+    void ps5_sheetsage_release()
+    {
+    }
+    int ps5_sheetsage_transcribe(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                                 gpt_runtime_progress_fn)
+    {
+        return 1;
+    }
+    void ps5_stems_release()
+    {
+    }
+    int ps5_stems_separate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                           gpt_runtime_progress_fn)
+    {
+        return 1;
+    }
+    int ps5_sd_upscale(const char *source, unsigned factor, char *out, std::size_t n)
+    {
+        if (factor != 2 && factor != 4)
+        {
+            std::snprintf(out, n, "Upscale factor must be 2 or 4.");
+            return 1;
+        }
+        std::snprintf(out, n, "upscaled-%s-x%u.png", source, factor);
+        return 0;
+    }
+    int ps5_sd_generate(const char *, const char *, char *out, std::size_t n,
+                        std::uint64_t *elapsed, const gpt_runtime_image_options_t *options,
+                        gpt_runtime_progress_fn)
+    {
+        image_options_forwarded = options && options->workflow &&
+                                  std::strcmp(options->workflow, "text_to_image") == 0 &&
+                                  options->width == 1024 && options->seed == 42;
+        *elapsed = 789;
+        std::snprintf(out, n, "generated-image.png");
+        return 0;
     }
     int ps5_stable_audio_generate(const char *, char *, std::size_t, std::uint64_t *,
                                   gpt_runtime_progress_fn)
@@ -219,10 +266,21 @@ int main()
         std::filesystem::create_directories(path.parent_path());
         std::ofstream(path) << "fixture";
     }
+    const auto qwen_root = std::filesystem::path(prospero::model_root()) / "legacy-qwen-image";
+    std::filesystem::create_directories(qwen_root);
+    std::ofstream(qwen_root / "model_index.json") << "{\"_class_name\":\"QwenImage21Pipeline\"}";
+    std::ofstream(qwen_root / "qwen_image_2.1-Q2_K.gguf") << "fixture";
+    std::ofstream(qwen_root / "Qwen3VL-8B-Instruct-Q4_K_M.gguf") << "fixture";
+    std::ofstream(qwen_root / "qwen_image_2.1_vae_bf16.safetensors") << "fixture";
     gpt_runtime_refresh_models();
     assert(gpt_runtime_model_count() == 3 && gpt_runtime_selected_model() == 1);
     assert(std::strcmp(gpt_runtime_model_purpose(2), "text-to-speech") == 0);
-    assert(!gpt_runtime_select_model(3));
+    assert(std::filesystem::exists(qwen_root / "qwen_image_2.1-Q2_K.gguf"));
+    assert(std::filesystem::exists(qwen_root / "Qwen3VL-8B-Instruct-Q4_K_M.gguf"));
+    assert(std::filesystem::exists(qwen_root / "qwen_image_2.1_vae_bf16.safetensors"));
+    for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
+        assert(std::strcmp(gpt_runtime_model_id(i), "legacy-qwen-image") != 0);
+    assert(!gpt_runtime_select_model(4));
     assert(gpt_runtime_select_model(2) && released == 1);
     assert(gpt_runtime_prepare() == 0 && !gpt_runtime_context_full());
     const gpt_runtime_message_t messages[] = {{"user", "Hello"}};
@@ -278,4 +336,84 @@ int main()
     assert(gpt_runtime_select_model(0));
     gpt_runtime_check_idle_unload(0);
     assert(released == 2);
+    const auto flux_root = std::filesystem::path(prospero::model_root()) / "custom-flux2-klein";
+    std::filesystem::create_directories(flux_root);
+    std::ofstream(flux_root / "model_index.json") << "{\"_class_name\":\"Flux2KleinPipeline\"}";
+    std::ofstream(flux_root / "qwen3-4b-q2-k.gguf") << "shared Qwen3 encoder fixture";
+    gpt_runtime_refresh_models();
+    unsigned flux_index = gpt_runtime_model_count();
+    for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
+        if (std::strcmp(gpt_runtime_model_id(i), "custom-flux2-klein") == 0)
+            flux_index = i;
+    assert(flux_index < gpt_runtime_model_count());
+    assert(std::strcmp(gpt_runtime_model_purpose(flux_index), "text-to-image") == 0);
+    assert(std::filesystem::exists(flux_root / "qwen3-4b-q2-k.gguf"));
+
+    const auto image_preset = std::find_if(
+        std::begin(prospero_model_download::presets), std::end(prospero_model_download::presets),
+        [](const auto &preset) { return std::strcmp(preset.id, "sdxl-base-q8-0") == 0; });
+    assert(image_preset != std::end(prospero_model_download::presets));
+    const auto image_root = std::filesystem::path(prospero::model_root()) / image_preset->id;
+    for (std::size_t i = 0; i < image_preset->count; ++i)
+    {
+        const auto path = image_root / image_preset->files[i].path;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream(path) << "fixture";
+    }
+    const auto custom_root = std::filesystem::path(prospero::model_root()) / "custom-sdxl";
+    std::filesystem::create_directories(custom_root);
+    std::ofstream(custom_root / "model_index.json")
+        << "{\"_class_name\":\"StableDiffusionXLPipeline\"}";
+    const auto custom_sd3_root = std::filesystem::path(prospero::model_root()) / "custom-sd3";
+    std::filesystem::create_directories(custom_sd3_root);
+    std::ofstream(custom_sd3_root / "model_index.json")
+        << "{\"_class_name\":\"StableDiffusion3Pipeline\"}";
+    gpt_runtime_refresh_models();
+    unsigned curated_index = gpt_runtime_model_count(), custom_index = gpt_runtime_model_count();
+    unsigned custom_sd3_index = gpt_runtime_model_count();
+    for (unsigned i = 0; i < gpt_runtime_model_count(); ++i)
+    {
+        if (std::strcmp(gpt_runtime_model_id(i), image_preset->id) == 0)
+            curated_index = i;
+        if (std::strcmp(gpt_runtime_model_id(i), "custom-sdxl") == 0)
+            custom_index = i;
+        if (std::strcmp(gpt_runtime_model_id(i), "custom-sd3") == 0)
+            custom_sd3_index = i;
+    }
+    assert(curated_index < gpt_runtime_model_count() && custom_index < gpt_runtime_model_count() &&
+           custom_sd3_index < gpt_runtime_model_count());
+    std::uint32_t capabilities = 0;
+    gpt_runtime_image_defaults_t defaults{};
+    const char *strategy = nullptr;
+    assert(gpt_runtime_model_image_metadata(curated_index, &capabilities, &defaults, &strategy));
+    assert(capabilities == (GPT_IMAGE_CAP_TEXT_TO_IMAGE | GPT_IMAGE_CAP_IMAGE_TO_IMAGE));
+    assert(defaults.width == 512 && defaults.height == 512 && defaults.steps == 10);
+    assert(defaults.cfg_scale == 6 && std::strcmp(defaults.sampler, "dpm++2m") == 0);
+    assert(std::strcmp(defaults.scheduler, "ays") == 0);
+    assert(strategy && std::strcmp(strategy, "init_image_strength") == 0);
+    capabilities = 0;
+    strategy = "sentinel";
+    assert(gpt_runtime_model_image_metadata(custom_index, &capabilities, &defaults, &strategy));
+    assert(capabilities == GPT_IMAGE_CAP_TEXT_TO_IMAGE && strategy == nullptr);
+    assert(defaults.width == 512 && defaults.height == 512 && defaults.steps == 10);
+    assert(defaults.cfg_scale == 5 && std::strcmp(defaults.sampler, "euler") == 0);
+    assert(gpt_runtime_model_image_metadata(custom_sd3_index, &capabilities, &defaults, &strategy));
+    assert(capabilities == GPT_IMAGE_CAP_TEXT_TO_IMAGE && strategy == nullptr);
+    assert(defaults.width == 768 && defaults.height == 768 && defaults.steps == 28);
+    assert(defaults.cfg_scale == 4.5f && std::strcmp(defaults.sampler, "euler") == 0);
+    assert(gpt_runtime_select_model(curated_index));
+    gpt_runtime_image_options_t image_options{};
+    image_options.workflow = "text_to_image";
+    image_options.width = 1024;
+    image_options.height = 1024;
+    image_options.steps = 10;
+    image_options.seed = 42;
+    image_options.cfg_scale = 6.0f;
+    image_options.image_edit_strategy = "init_image_strength";
+    assert(gpt_runtime_generate(messages, 1, {}, out, sizeof(out), &stats, nullptr,
+                                &image_options) == 0);
+    assert(image_options_forwarded);
+    assert(gpt_runtime_delete_model("legacy-qwen-image"));
+    assert(deleted_model_id == "legacy-qwen-image");
+    assert(std::filesystem::exists(qwen_root / "qwen_image_2.1-Q2_K.gguf"));
 }

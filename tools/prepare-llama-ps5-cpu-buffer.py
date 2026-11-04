@@ -3,6 +3,7 @@
 """Bound PS5 CPU backend buffers so Chatterbox weights can use smaller blocks."""
 
 from pathlib import Path
+from prepare_build import write_text_if_changed
 import argparse
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -36,7 +37,7 @@ if replacement not in text:
     if text.count(default) < 1:
         raise SystemExit(f"{path}: expected a default CPU max-size hook")
     text = text.replace(default, replacement, 1)
-path.write_text(text)
+write_text_if_changed(path, text)
 print(f"{path}: CPU buffer allocation blocks capped at 192 MiB")
 
 allocator = ggml_source / "src/ggml.c"
@@ -66,4 +67,4 @@ if map_marker in text:
     free(ptr);
 #endif"""
     text = text.replace(mmap_free, "#else\n    free(ptr);\n#endif", 1)
-    allocator.write_text(text)
+    write_text_if_changed(allocator, text)

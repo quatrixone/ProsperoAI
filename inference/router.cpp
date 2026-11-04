@@ -102,6 +102,12 @@ bool supported_diffusers_directory(const std::string &path, std::string &family)
         return false;
     return count > 0;
 }
+bool legacy_qwen_image_directory_for_deletion(const std::string &path)
+{
+    return exists(path + "/qwen_image_2.1-Q2_K.gguf") &&
+           exists(path + "/Qwen3VL-8B-Instruct-Q4_K_M.gguf") &&
+           exists(path + "/qwen_image_2.1_vae_bf16.safetensors");
+}
 void scan()
 {
     if (scanned)
@@ -264,6 +270,48 @@ const char *gpt_runtime_model_purpose(unsigned i)
     scan();
     return i < models.size() ? modality_name(models[i].modality) : "unknown";
 }
+bool gpt_runtime_model_image_metadata(unsigned i, std::uint32_t *capabilities,
+                                      gpt_runtime_image_defaults_t *defaults,
+                                      const char **edit_strategy)
+{
+    std::lock_guard<std::mutex> lock(mutex);
+    scan();
+    if (i >= models.size() || models[i].modality != Modality::Image)
+        return false;
+
+    std::uint32_t image_capabilities = GPT_IMAGE_CAP_TEXT_TO_IMAGE;
+    gpt_runtime_image_defaults_t image_defaults{512, 512, 1, 1.0f, "euler_a", ""};
+    const char *strategy = nullptr;
+    const auto preset = std::find_if(std::begin(prospero_model_download::presets),
+                                     std::end(prospero_model_download::presets),
+                                     [&](const auto &entry) { return models[i].id == entry.id; });
+    if (preset != std::end(prospero_model_download::presets) && preset->kind == 1)
+    {
+        image_capabilities = preset->image_capabilities;
+        image_defaults = {preset->image_defaults.width, preset->image_defaults.height,
+                          preset->image_defaults.steps, preset->image_defaults.cfg_scale,
+                          preset->image_defaults.sampler, preset->image_defaults.scheduler};
+        strategy = preset->image_edit_strategy;
+    }
+    else
+    {
+        std::string family;
+        if (supported_diffusers_directory(models[i].root, family))
+        {
+            if (family == "SDXL")
+                image_defaults = {512, 512, 10, 5.0f, "euler", ""};
+            else if (family == "SD3")
+                image_defaults = {768, 768, 28, 4.5f, "euler", ""};
+        }
+    }
+    if (capabilities)
+        *capabilities = image_capabilities;
+    if (defaults)
+        *defaults = image_defaults;
+    if (edit_strategy)
+        *edit_strategy = strategy;
+    return true;
+}
 const char *gpt_runtime_name()
 {
     return gpt_runtime_model_name(gpt_runtime_selected_model());
@@ -295,6 +343,10 @@ bool gpt_runtime_context_full()
 std::uint64_t gpt_runtime_vulkan_heap_bytes()
 {
     return prospero_vulkan::gpt_runtime_vulkan_heap_bytes();
+}
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes)
+{
+    return prospero_vulkan::gpt_runtime_vulkan_memory(free_bytes, total_bytes);
 }
 namespace
 {
@@ -357,7 +409,12 @@ bool gpt_runtime_delete_model(const char *raw_id)
     const std::string id(raw_id);
     const auto found = std::find_if(models.begin(), models.end(),
                                     [&](const Model &model) { return model.id == id; });
-    if (found == models.end() || (selected < models.size() && models[selected].id == id))
+    const bool legacy_qwen_image = found == models.end() && id.size() <= 128 &&
+        id.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.") ==
+            std::string::npos && !id.empty() && id.front() != '.' &&
+        legacy_qwen_image_directory_for_deletion(std::string(prospero::model_root()) + "/" + id);
+    if ((found == models.end() && !legacy_qwen_image) ||
+        (found != models.end() && selected < models.size() && models[selected].id == id))
         return false;
     if (!prospero_model_download::delete_model_files(id.c_str()))
         return false;
@@ -459,7 +516,8 @@ int gpt_runtime_prepare()
 }
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *output, std::size_t capacity,
-                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress)
+                         gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,
+                         const gpt_runtime_image_options_t *image_options)
 {
     if (!messages || !count || !output || !capacity)
         return 1;
@@ -500,7 +558,32 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
         ~GenerationCounterGuard() { active_generations.fetch_sub(1, std::memory_order_acq_rel); }
     } generation_guard;
     const int result = adapter->generate(
-        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress});
+        GenerationRequest{model, messages, count, settings, output, capacity, stats, progress,
+                          image_options});
+    note_inference_activity();
+    return result;
+}
+
+int gpt_runtime_upscale_image(const char *source_path, unsigned factor, char *output,
+                              std::size_t capacity)
+{
+    if (!output || capacity == 0)
+        return 1;
+    if (!source_path || !*source_path)
+    {
+        std::snprintf(output, capacity, "No image was given to upscale.");
+        return 1;
+    }
+    // Real-ESRGAN is not a catalog model and needs no selection, but it does need the
+    // device to itself, so it waits for a running generation like any other inference.
+    std::unique_lock<std::mutex> inference(inference_mutex, std::try_to_lock);
+    if (!inference.owns_lock())
+    {
+        std::snprintf(output, capacity,
+                      "The runtime is busy. Try again when the current generation finishes.");
+        return 1;
+    }
+    const int result = prospero::inference::upscale_image(source_path, factor, output, capacity);
     note_inference_activity();
     return result;
 }

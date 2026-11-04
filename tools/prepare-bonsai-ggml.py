@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from prepare_build import write_text_if_changed
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -19,7 +20,7 @@ def replace_once(path: Path, old: str, new: str) -> None:
     count = text.count(old)
     if count != 1:
         raise SystemExit(f"{path}: expected one patch anchor, got {count}: {old[:90]!r}")
-    path.write_text(text.replace(old, new, 1))
+    write_text_if_changed(path, text.replace(old, new, 1))
 
 
 def extract_function(source: Path, signature: str) -> str:
@@ -47,7 +48,7 @@ def add_before(path: Path, anchor: str, addition: str) -> None:
         return
     if text.count(anchor) != 1:
         raise SystemExit(f"{path}: expected one insertion point {anchor!r}")
-    path.write_text(text.replace(anchor, addition + "\n\n" + anchor, 1))
+    write_text_if_changed(path, text.replace(anchor, addition + "\n\n" + anchor, 1))
 
 
 def add_case_to_function(path: Path, signature: str, anchor: str, case: str) -> None:
@@ -70,7 +71,7 @@ def add_line_after_prefix(path: Path, prefix: str, line: str) -> None:
     if len(matches) != 1:
         raise SystemExit(f"{path}: expected one line containing {prefix!r}, got {len(matches)}")
     lines.insert(matches[0] + 1, line + "\n")
-    path.write_text("".join(lines))
+    write_text_if_changed(path, "".join(lines))
 
 
 def prepare_ptq1_vulkan(ggml: Path, prism: Path) -> None:
@@ -84,7 +85,7 @@ def prepare_ptq1_vulkan(ggml: Path, prism: Path) -> None:
         target = shader_dir / name
         source = prism_shader_dir / name
         if not target.exists():
-            target.write_text(source.read_text())
+            write_text_if_changed(target, source.read_text())
 
     types = shader_dir / "types.glsl"
     add_before(types, "#define QUANT_K_Q2_0 64", """
@@ -197,7 +198,7 @@ def main() -> None:
     if "#define QK_PQ2_0 128" not in text:
         if text.count(anchor) != 1:
             raise SystemExit(f"{common}: upstream Q4_0 block anchor changed")
-        common.write_text(text.replace(anchor, private_blocks + "\n" + anchor, 1))
+        write_text_if_changed(common, text.replace(anchor, private_blocks + "\n" + anchor, 1))
 
     # Preserve upstream's generic tensor API while adding the exact codec entry
     # points and layouts used by the model file.
@@ -312,7 +313,7 @@ void ggml_vec_dot_ptq1_0_q8_0(int, float * GGML_RESTRICT, size_t, const void * G
         if text.count(old) < 1:
             raise SystemExit(f"{ops}: no Q2_0 operation cases")
         text = text.replace(old, old + "        case GGML_TYPE_PQ2_0:\n        case GGML_TYPE_PTQ1_0:\n")
-        ops.write_text(text)
+        write_text_if_changed(ops, text)
     prepare_ptq1_vulkan(ggml, prism)
     print(f"{ggml}: added Bonsai private quant format metadata and codecs")
 

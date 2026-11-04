@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "native_ui.hpp"
+#include "native_audio_queue.hpp"
 #include "model_downloader_ps5.hpp"
 #include "update.hpp"
 #include "voice_recorder.hpp"
@@ -29,6 +30,44 @@
 
 namespace prospero
 {
+// The header tabs, in the order they are shown. Comparisons use these names so the
+// row can be reordered without hunting through every screen.
+enum Tab
+{
+    kWorkspaceTab = 0,
+    kMediaTab,
+    kModelsTab,
+    kSettingsTab,
+    kMobileTab,
+    kTabCount
+};
+enum class WorkspaceMode : std::uint8_t
+{
+    Text,
+    Image,
+    Audio,
+    TTS
+};
+// The conversation list follows the workspace mode: Text shows text conversations,
+// Image shows image ones, and so on. Index 0 of each list is the "all" entry.
+static constexpr unsigned session_category_for(WorkspaceMode mode)
+{
+    return static_cast<unsigned>(mode) + 1;
+}
+static constexpr Capability capability_for(WorkspaceMode mode)
+{
+    switch (mode)
+    {
+    case WorkspaceMode::Audio:
+        return Capability::Audio;
+    case WorkspaceMode::Image:
+        return Capability::Image;
+    case WorkspaceMode::TTS:
+        return Capability::Voice;
+    default:
+        return Capability::Text;
+    }
+}
 // The Settings categories that are more than a form.
 constexpr int kDiagnostics = 3, kAbout = 4;
 // Where the debug log is written, as the console names the folder.
@@ -74,6 +113,10 @@ struct NativeUI::Impl
     void apply_theme();
     void announce(ui::Feedback &feedback);
     void handle_workspace(const InputFrame &input, ui::Feedback &feedback);
+    void update_audio_queue();
+    void begin_audio_library_selection(bool abc, int action);
+    void begin_audio_keyboard(int field);
+    void finish_audio_keyboard();
     void handle_models(const InputFrame &input, ui::Feedback &feedback);
     void handle_settings(const InputFrame &input, ui::Feedback &feedback);
     void open_dialog(int action, int index, std::string title, std::string body, const char *button,
@@ -82,6 +125,7 @@ struct NativeUI::Impl
     void refresh_models();
     void refresh_sessions();
     void refresh_mobile_link();
+    void refresh_media();
     void begin_model_selection();
     void build_form();
     void build_generation_form();
@@ -91,6 +135,7 @@ struct NativeUI::Impl
     void backspace(ui::Feedback &feedback);
     void submit(ui::Feedback &feedback);
     void keyboard_result(const char *value);
+    int workspace_model_index() const;
     void upload_visible_image();
     int selected_audio_row() const;
     void release();
@@ -122,6 +167,7 @@ struct NativeUI::Impl
                         float phase, float focus) const;
     void draw_settings(ui::Canvas &canvas) const;
     void draw_mobile(ui::Canvas &canvas) const;
+    void draw_media(ui::Canvas &canvas) const;
 
     // ---- native_ui_style.cpp: small drawing helpers ----
     float text(gfx::DrawList &list, std::string_view value, float x, float y, float size,
@@ -160,7 +206,7 @@ struct NativeUI::Impl
     ui::SpringColor cloud_a_, cloud_b_, page_top_, page_bottom_;
 
     ui::TabBar tabs_, filters_;
-    ui::ListView sessions_, categories_;
+    ui::ListView sessions_, categories_, media_;
     ui::GridView models_;
     ui::SearchField search_, session_search_;
     std::vector<unsigned> visible_sessions_;
@@ -168,12 +214,45 @@ struct NativeUI::Impl
     std::vector<std::uint8_t> mobile_qr_modules_;
     int mobile_qr_size_ = 0;
     std::string mobile_url_;
+    std::vector<std::string> media_paths_;
     int workspace_voice_row_ = -1;
     int workspace_language_row_ = -1;
     int workspace_new_conversation_row_ = -1;
     int workspace_sessions_row_ = 3;
-    unsigned session_category_ = 0;
+    int workspace_mode_row_ = 0, workspace_model_row_ = 1, workspace_settings_row_ = 2;
+    int workspace_music_row_ = -1, workspace_cover_row_ = -1, workspace_stems_row_ = -1,
+        workspace_queue_row_ = -1, workspace_abc_row_ = -1, workspace_queue_entry_start_row_ = -1,
+        workspace_queue_clear_row_ = -1, workspace_artifact_start_row_ = -1;
     std::string session_query_;
+    std::string workspace_model_query_;
+    int workspace_model_filter_ = -1; // -1 = all capabilities; otherwise Capability ordinal.
+    WorkspaceMode workspace_mode_ = WorkspaceMode::Text;
+    std::vector<audio_workflows::LibraryEntry> workspace_audio_entries_;
+    bool workspace_mode_open_ = false, workspace_queue_open_ = false, audio_keyboard_open_ = false,
+         choosing_audio_library_ = false, choosing_abc_ = false, queue_stop_requested_ = false,
+         queue_active_ = false, queue_after_music_prompt_ = false;
+    enum class AudioPanelAction : std::uint8_t
+    {
+        none,
+        cover,
+        stems,
+        abc
+    };
+    AudioPanelAction audio_panel_action_ = AudioPanelAction::none;
+    int audio_keyboard_field_ = 0; // 1 style, 2 lyrics, 3 ABC text
+    int audio_library_action_ = 0; // 1 cover, 2 stems, 3 choose ABC
+    std::string audio_keyboard_text_;
+    std::string last_audio_status_seen_;
+    audio_workflows::MusicRequest music_request_;
+    struct QueueEntry
+    {
+        audio_workflows::MusicRequest request;
+        std::string status = "pending";
+        std::string result;
+    };
+    std::vector<QueueEntry> audio_queue_;
+    int active_queue_item_ = -1;
+    unsigned queue_variants_ = 3;
     ui::Keyboard keyboard_;
     ui::Form form_;
     ui::Dialog dialog_;
@@ -211,6 +290,7 @@ struct NativeUI::Impl
     {
         std::uint32_t id;
         float aspect;
+        float last_used;
     };
     std::map<std::string, Texture> images_;
     std::vector<ChatRow> chat_rows_;

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Add guarded, runtime-configurable PS5/PS5 Pro Vulkan tuning hooks."""
 from pathlib import Path
+from prepare_build import write_text_if_changed
 import argparse
 
 
@@ -17,10 +18,10 @@ chunk_256 = "            device->suballocation_block_size = 256*1024*1024; // PS
 chunk_ps5 = "            device->suballocation_block_size = 128*1024*1024; // PS5: keep weight buffers below large-allocation failures"
 if chunk_256 in text:
     text = text.replace(chunk_256, chunk_ps5, 1)
-    path.write_text(text)
+    write_text_if_changed(path, text)
 elif chunk_default in text:
     text = text.replace(chunk_default, chunk_ps5, 1)
-    path.write_text(text)
+    write_text_if_changed(path, text)
 elif chunk_ps5 not in text:
     raise SystemExit(f"{path}: expected Vulkan suballocation block size default")
 if marker in text:
@@ -137,5 +138,5 @@ replace(
     "    uint64_t flops_per_submit = prospero_vk_submit_flops(std::min(flops_cap, ctx->last_total_flops / 40u));\n",
 )
 
-path.write_text(text)
+write_text_if_changed(path, text)
 print(f"{path}: PS5 Vulkan profile hooks applied")

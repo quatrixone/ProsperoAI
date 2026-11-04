@@ -376,6 +376,7 @@ to suggest another.
 - Vision models: let a text model look at a picture.
 - Image-to-image, and variations of a generated picture.
 - More image models beside SD-Turbo, with size and step settings.
+- Qwen-Image 2.1 text-to-image using the PS5-sized GGUF diffusion and text-encoder weights.
 - Speech to text: dictate a prompt through the DualSense microphone.
 - Spoken answers: read a text answer aloud, with a choice of voices.
 - Personas and system prompts, saved per conversation.

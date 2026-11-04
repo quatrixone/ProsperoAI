@@ -9,7 +9,8 @@
 extern "C"
 {
 int ps5_sd_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
-                    gpt_runtime_progress_fn);
+                    const gpt_runtime_image_options_t *, gpt_runtime_progress_fn);
+int ps5_sd_upscale(const char *, unsigned, char *, std::size_t);
 int ps5_stable_audio_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
                               gpt_runtime_progress_fn);
 int ps5_kokoro_tts_generate(const char *, const char *, const char *, char *, std::size_t, std::uint64_t *,
@@ -18,10 +19,19 @@ int ps5_chatterbox_tts_generate(const char *, const char *, const char *, const 
                                 std::uint64_t *, gpt_runtime_progress_fn);
 int ps5_ace_step_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
                           gpt_runtime_progress_fn);
+int ps5_yue2_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                      gpt_runtime_progress_fn);
+int ps5_sheetsage_transcribe(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                             gpt_runtime_progress_fn);
+int ps5_stems_separate(const char *, const char *, char *, std::size_t, std::uint64_t *,
+                       gpt_runtime_progress_fn);
 void ps5_media_stop();
 void ps5_sd_shutdown();
 void ps5_stable_audio_release();
 void ps5_ace_step_release();
+void ps5_yue2_release();
+void ps5_sheetsage_release();
+void ps5_stems_release();
 void ps5_chatterbox_release();
 }
 
@@ -63,13 +73,26 @@ int generate_media(const GenerationRequest &request)
     {
     case Modality::Image:
         result = ps5_sd_generate(request.model.root.c_str(), prompt, request.output,
-                                 request.output_capacity, &elapsed, request.progress);
+                                 request.output_capacity, &elapsed, request.image_options,
+                                 request.progress);
         break;
     case Modality::Audio:
         if (request.model.id.find("ace-step-1.5") != std::string::npos)
             result = ps5_ace_step_generate(request.model.root.c_str(), prompt,
                                            request.output, request.output_capacity,
                                            &elapsed, request.progress);
+        else if (request.model.id.find("yue2") != std::string::npos)
+            result = ps5_yue2_generate(request.model.root.c_str(), prompt,
+                                       request.output, request.output_capacity,
+                                       &elapsed, request.progress);
+        else if (request.model.id.find("sheetsage") != std::string::npos)
+            result = ps5_sheetsage_transcribe(request.model.root.c_str(), prompt,
+                                              request.output, request.output_capacity,
+                                              &elapsed, request.progress);
+        else if (request.model.id.find("htdemucs") != std::string::npos)
+            result = ps5_stems_separate(request.model.root.c_str(), prompt,
+                                        request.output, request.output_capacity,
+                                        &elapsed, request.progress);
         else
             result = ps5_stable_audio_generate(request.model.root.c_str(), prompt,
                                                request.output, request.output_capacity,
@@ -116,6 +139,9 @@ void release_media()
 {
     ps5_stable_audio_release();
     ps5_ace_step_release();
+    ps5_yue2_release();
+    ps5_sheetsage_release();
+    ps5_stems_release();
     ps5_chatterbox_release();
     ps5_media_stop();
     ps5_sd_shutdown();
@@ -151,6 +177,12 @@ const char *modality_name(Modality modality)
         return "text-to-speech";
     }
     return "unknown";
+}
+
+int upscale_image(const char *source_path, unsigned factor, char *output,
+                  std::size_t output_capacity)
+{
+    return ps5_sd_upscale(source_path, factor, output, output_capacity);
 }
 
 bool is_media(Modality modality)

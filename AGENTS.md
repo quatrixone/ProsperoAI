@@ -30,6 +30,16 @@ Your task is whatever the user's prompt asks. `VK_ACTIVE.md`'s "Next" list is ba
 where things stand, not a queue to work through unprompted — say so if the prompt and that list
 disagree about what to do next.
 
+## Codebase graph
+
+- For architecture and code-flow questions, use the Graphify skill and query
+  `graphify-out/graph.json` first when it exists.
+- Build the project graph with `graphify .` when no graph exists. After changing code or docs,
+  update it with `graphify . --update` before using it for another query.
+- If full semantic extraction has no configured LLM backend, use `--code-only` and keep working;
+  do not ask for or expose API keys.
+- Keep generated graph artifacts under `graphify-out/`.
+
 ## Build and verify
 
 - Keep generated user-facing outputs in their persistent modality folders: `work/image/`,
@@ -142,6 +152,14 @@ port 2323), process list, launch and screenshots.
 
 - Commit only on the WIP branch unless the user asks otherwise. Push only when asked.
 - Do not add `Co-Authored-By` or "Generated with Claude Code" lines to commits or PR text.
+
+## Active PS5SD image-model handoff
+
+- Before resuming the PS5SD Image Studio work for PR #43, read the root `state.md` for completed
+  tasks, uncommitted files to preserve, pending checks, and the last known console/PR state.
+- Keep project progress and volatile blockers in `state.md`; do not turn task-specific status into
+  permanent console policy here. The owner deferred tests for the handoff/documentation work; honor
+  the current request's scope and do not run tests or console checks for documentation-only tasks.
 
 
 ## Debugging a title that does not start (lessons from PPSA99014-19)

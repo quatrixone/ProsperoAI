@@ -49,4 +49,35 @@ inline std::uint64_t flexible_free()
     return sceKernelAvailableFlexibleMemorySize(&bytes) == 0 ? bytes : 0;
 }
 
+// Hole-map probe (20.10, fragmentation hunt): every ALLOCATED range in the
+// direct pool, MiB-rounded. The diff between a clean boot and a
+// model-load/release cycle names the allocations that outlive release and
+// split the largest free block.
+struct BlockInfo
+{
+    std::int64_t start_mb;
+    std::int64_t size_mb;
+    int type;
+};
+inline int walk_blocks(BlockInfo *out, int max_blocks, std::int64_t *pool_mib)
+{
+    struct { std::int64_t start, end; int type; } info{};
+    constexpr int kFindNext = 1;
+    const std::int64_t pool = sceKernelGetDirectMemorySize();
+    if (pool_mib)
+        *pool_mib = pool >> 20;
+    if (pool <= 0)
+        return 0;
+    int n = 0;
+    for (std::int64_t offset = 0; offset < pool && n < max_blocks;)
+    {
+        if (sceKernelDirectMemoryQuery(offset, kFindNext, &info, sizeof(info)) != 0 ||
+            info.end <= offset)
+            break;
+        out[n++] = {info.start >> 20, (info.end - std::max(info.start, offset)) >> 20, info.type};
+        offset = info.end;
+    }
+    return n;
+}
+
 } // namespace prospero_memory

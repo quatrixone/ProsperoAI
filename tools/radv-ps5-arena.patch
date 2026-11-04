@@ -1,0 +1,368 @@
+From 6863534536824dc5c30a511e64bf3d794a624a53 Mon Sep 17 00:00:00 2001
+From: "Adrian (PS5LM)" <adrian@abar.ro>
+Date: Wed, 21 Oct 2026 08:04:17 +0300
+Subject: [PATCH] radv/ps5: sub-allocate direct-memory buffers from arenas
+
+Every winsys buffer used to be its own sceKernelAllocateDirectMemory
+segment, and freeing it scattered a physical hole through the kernel's
+direct-memory pool. Model load/unload cycles walked the pool into
+islands and the gigabyte-scale compute-graph allocations died with
+ErrorOutOfDeviceMemory while the pool still had gigabytes free.
+
+Small buffers (< 64 MiB) now carve from 256 MiB arenas. Big buffers
+carve from an 8 GiB arena whose direct memory is claimed lazily in
+2 MiB pieces where blocks actually land: a gigabyte request becomes a
+thousand small allocations the dirtiest pool can answer, and no
+caller ever asks the kernel for a gigabyte run again. An arena that
+empties hands everything back as mergeable pieces. Window (32-bit)
+buffers stay dedicated: the kernel places window mappings where it
+likes and a big window reservation starves the application heap.
+---
+ src/amd/vulkan/winsys/ps5/radv_ps5_platform.c | 281 +++++++++++++++++-
+ src/amd/vulkan/winsys/ps5/radv_ps5_platform.h |   8 +
+ 2 files changed, 287 insertions(+), 2 deletions(-)
+
+diff --git a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c
+index 98783e37036..5e30c701e61 100644
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.c
+@@ -210,6 +210,58 @@ radv_ps5_window_contains(uint64_t address, uint64_t bytes)
+ 
+ static int32_t radv_ps5_agc_result = -1;
+ 
++/* ------------------------------------------------------------------ arenas */
++
++/* A small buffer used to take its own direct-memory segment and hand it back
++ * when it died, so every create/destroy cycle punched another physical hole
++ * into the kernel's pool; the holes never merged back and a big contiguous
++ * allocation eventually found no gap wide enough. Below the cutoff, buffers
++ * are now carved from big arena segments that stay mapped and keep their
++ * direct memory for the life of the process: the kernel pool only ever sees
++ * a handful of huge segments, and freed granules coalesce inside the arena
++ * for the next small buffer to take. A window32 arena is itself placed in the
++ * 4 GiB window, so its sub-blocks answer 32-bit addressing as any other
++ * window buffer does. */
++#define RADV_PS5_ARENA_CUTOFF (UINT64_C(64) << 20)
++#define RADV_PS5_ARENA_BYTES (UINT64_C(256) << 20)
++#define RADV_PS5_ARENA_GRANULES (RADV_PS5_ARENA_BYTES / RADV_PS5_LARGE_BYTES)
++/* Large buffers (a compute graph's single gigabyte-scale allocation) join an
++ * arena too, and this one is backed lazily in 2 MiB pieces: its 8 GiB of
++ * address space costs one reservation, and direct memory is claimed granule
++ * by granule only where a block actually lands. A gigabyte request then
++ * needs a thousand small allocations, which the dirtiest pool can always
++ * answer, instead of one gigabyte run it can no longer place. */
++#define RADV_PS5_BIG_ARENA_BYTES (UINT64_C(8) << 30)
++#define RADV_PS5_BIG_GRANULES (RADV_PS5_BIG_ARENA_BYTES / RADV_PS5_LARGE_BYTES)
++#define RADV_PS5_ARENA_SLOTS 16u
++#define RADV_PS5_ARENA_MAX_RUNS 70u
++
++struct radv_ps5_arena {
++   struct radv_ps5_memory mem; /* the arena's own dedicated segment */
++   bool live;                  /* mapped and sub-allocatable */
++   bool creating;              /* a thread is mapping it now; skip it, do not race it */
++   bool burned;                /* mapping it failed once; never retry */
++   bool window32;              /* the class of request it serves */
++   uint64_t bytes;             /* segment size; the arena only serves its own class */
++   /* Chunk-backed arenas (mem.physical < 0): the direct memory behind each
++    * granule, -1 where the granule still answers reads as the zero block.
++    * Unused by arenas that hold one dedicated segment. */
++   int64_t chunk[RADV_PS5_BIG_GRANULES];
++   /* free runs of granules, sorted by start and always coalesced */
++   uint32_t run_start[RADV_PS5_ARENA_MAX_RUNS];
++   uint32_t run_count[RADV_PS5_ARENA_MAX_RUNS];
++   unsigned runs;
++};
++
++static struct radv_ps5_arena radv_ps5_arenas[RADV_PS5_ARENA_SLOTS];
++static simple_mtx_t radv_ps5_arena_lock;
++
++static bool radv_ps5_memory_alloc_dedicated(uint64_t bytes, uint64_t alignment, bool window32,
++                                            struct radv_ps5_memory *out);
++static bool radv_ps5_map_fixed(uint8_t *at, uint64_t bytes, int64_t physical);
++bool radv_ps5_vrange_reserve(uint64_t bytes, bool window32, bool replayable, uint64_t replay_va,
++                             struct radv_ps5_memory *out);
++
+ /* The top of the window, kept for the replayable window buffers (a ray tracing
+  * pipeline's shader arenas when group handles are captured): the kernel
+  * places every other window mapping, so an address captured among them may be
+@@ -245,6 +297,8 @@ radv_ps5_window_replayable(void)
+ static void
+ radv_ps5_platform_once(void)
+ {
++   simple_mtx_init(&radv_ps5_arena_lock, mtx_plain);
++
+    /* RADV's shader cache in the title's own folder, as ps5vk kept its compiled
+     * shaders there (ps5vk-shader-cache), in the database form, which needs no
+     * file mapping. A title may choose otherwise, as on Linux. */
+@@ -286,8 +340,226 @@ radv_ps5_memory_available_bytes(void)
+    return available;
+ }
+ 
++/* Bytes out of a live arena of the request's class, growing the pool with a
++ * new arena when none has room. The bytes and alignment arrive as the caller
++ * asked for them; false means fall back to a dedicated segment. */
++static bool
++radv_ps5_arena_take(uint64_t bytes, uint64_t alignment, bool window32, struct radv_ps5_memory *out)
++{
++   /* Window buffers stay dedicated: an arena mapped in the 4 GiB window took
++    * virtual room the application's own heap grows into, and its next big
++    * host allocation failed ("Internal Memory is running out"). The kernel
++    * places window mappings where it likes; the port may not grab a 256 MiB
++    * slice of that space behind the application's back. */
++   if (window32)
++      return false;
++   bytes = align64(MAX2(bytes, 1), RADV_PS5_PAGE_BYTES);
++   const uint64_t arena_bytes = bytes >= RADV_PS5_ARENA_CUTOFF ? RADV_PS5_BIG_ARENA_BYTES
++                                                               : RADV_PS5_ARENA_BYTES;
++   if (bytes >= arena_bytes)
++      return false;
++   const uint32_t need = (uint32_t)DIV_ROUND_UP(bytes, RADV_PS5_LARGE_BYTES);
++   const uint32_t arena_granules = (uint32_t)(arena_bytes / RADV_PS5_LARGE_BYTES);
++   /* The arena itself is 2 MiB-aligned, so any granule start answers an
++    * alignment up to that; a higher one takes its run from a matching one. */
++   const uint64_t aligned = util_next_power_of_two64(MAX2(alignment, RADV_PS5_PAGE_BYTES));
++   const uint32_t align_granules =
++      (uint32_t)MAX2(aligned > RADV_PS5_LARGE_BYTES ? aligned / RADV_PS5_LARGE_BYTES : 1, 1);
++
++   simple_mtx_lock(&radv_ps5_arena_lock);
++   for (;;) {
++      for (unsigned i = 0; i < RADV_PS5_ARENA_SLOTS; i++) {
++         struct radv_ps5_arena *const a = &radv_ps5_arenas[i];
++         if (!a->live || a->window32 != window32 || a->bytes != arena_bytes)
++            continue;
++         for (unsigned r = 0; r < a->runs; r++) {
++            const uint32_t lo = a->run_start[r];
++            const uint32_t hi = lo + a->run_count[r];
++            const uint32_t start = (lo + align_granules - 1) / align_granules * align_granules;
++            if (start + need > hi)
++               continue;
++            if (start > lo && hi > start + need && a->runs + 1 > RADV_PS5_ARENA_MAX_RUNS)
++               continue;
++            /* Back every granule the block would touch that has no direct
++             * memory yet. Each claim is 2 MiB, which even a walked-apart
++             * pool places; granules left backed by an attempt that then
++             * failed cost only their own memory and stay in the arena. */
++            if (a->mem.physical < 0) {
++               bool backed = true;
++               for (uint32_t g = start; g < start + need && backed; g++) {
++                  if (a->chunk[g] >= 0)
++                     continue;
++                  int64_t phys = -1;
++                  if (sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), RADV_PS5_LARGE_BYTES,
++                                                    RADV_PS5_LARGE_BYTES, RADV_PS5_DIRECT_TYPE, &phys) != 0) {
++                     backed = false;
++                     break;
++                  }
++                  if (!radv_ps5_map_fixed(a->mem.cpu + (uint64_t)g * RADV_PS5_LARGE_BYTES, RADV_PS5_LARGE_BYTES,
++                                          phys)) {
++                     sceKernelReleaseDirectMemory(phys, RADV_PS5_LARGE_BYTES);
++                     backed = false;
++                     break;
++                  }
++                  a->chunk[g] = phys;
++               }
++               if (!backed)
++                  continue;
++            }
++            /* Carve [start, start+need) out of run r. The list stays sorted:
++             * a run's neighbors never touch it, so the pieces left beside the
++             * block cannot need coalescing with anything else. */
++            const uint32_t pre = start - lo, post = hi - (start + need);
++            if (pre && post) {
++               memmove(&a->run_start[r + 2], &a->run_start[r + 1], (a->runs - r - 1) * sizeof(uint32_t));
++               memmove(&a->run_count[r + 2], &a->run_count[r + 1], (a->runs - r - 1) * sizeof(uint32_t));
++               a->run_start[r] = lo;
++               a->run_count[r] = pre;
++               a->run_start[r + 1] = start + need;
++               a->run_count[r + 1] = post;
++               a->runs++;
++            } else if (pre) {
++               a->run_count[r] = pre;
++            } else if (post) {
++               a->run_start[r] = start + need;
++               a->run_count[r] = post;
++            } else {
++               memmove(&a->run_start[r], &a->run_start[r + 1], (a->runs - r - 1) * sizeof(uint32_t));
++               memmove(&a->run_count[r], &a->run_count[r + 1], (a->runs - r - 1) * sizeof(uint32_t));
++               a->runs--;
++            }
++            const uint64_t off = (uint64_t)start * RADV_PS5_LARGE_BYTES;
++            *out = (struct radv_ps5_memory){
++               .cpu = a->mem.cpu + off,
++               .bytes = bytes,
++               .physical = a->mem.physical >= 0 ? a->mem.physical + (int64_t)off : -1,
++               .granule = start,
++               .granules = need,
++               .arena_sub = true,
++               .arena_slot = i,
++            };
++            simple_mtx_unlock(&radv_ps5_arena_lock);
++            return true;
++         }
++      }
++      /* No room anywhere: grow the pool, or give up when every slot lives,
++       * is being made, or was burned. */
++      unsigned slot = RADV_PS5_ARENA_SLOTS;
++      for (unsigned i = 0; i < RADV_PS5_ARENA_SLOTS; i++)
++         if (!radv_ps5_arenas[i].live && !radv_ps5_arenas[i].creating && !radv_ps5_arenas[i].burned) {
++            slot = i;
++            break;
++         }
++      if (slot == RADV_PS5_ARENA_SLOTS)
++         break;
++      struct radv_ps5_arena *const a = &radv_ps5_arenas[slot];
++      a->creating = true;
++      simple_mtx_unlock(&radv_ps5_arena_lock);
++      /* Made outside the lock: the mapping is a kernel call, and a second
++       * thread asked for room meanwhile skips this slot instead of making a
++       * second arena for the same bytes. */
++      const bool chunk_backed = arena_bytes == RADV_PS5_BIG_ARENA_BYTES;
++      const bool made =
++         chunk_backed ? radv_ps5_vrange_reserve(arena_bytes, window32, false, 0, &a->mem)
++                      : radv_ps5_memory_alloc_dedicated(arena_bytes, RADV_PS5_LARGE_BYTES, window32, &a->mem);
++      simple_mtx_lock(&radv_ps5_arena_lock);
++      a->creating = false;
++      if (!made) {
++         a->burned = true;
++         fprintf(stderr, "radv/ps5: arena %u could not be made, burned\n", slot);
++         continue;
++      }
++      fprintf(stderr, "radv/ps5: arena %u made at va %" PRIu64 " phys %lld\n", slot,
++              (uint64_t)(uintptr_t)a->mem.cpu, (long long)a->mem.physical);
++      a->window32 = window32;
++      a->bytes = arena_bytes;
++      if (chunk_backed)
++         for (unsigned g = 0; g < ARRAY_SIZE(a->chunk); g++)
++            a->chunk[g] = -1;
++      a->run_start[0] = 0;
++      a->run_count[0] = arena_granules;
++      a->runs = 1;
++      a->live = true;
++   }
++   simple_mtx_unlock(&radv_ps5_arena_lock);
++   return false;
++}
++
++/* Return a sub-block to its arena, coalescing with the runs it now touches. */
++static void
++radv_ps5_arena_give(const struct radv_ps5_memory *memory)
++{
++   simple_mtx_lock(&radv_ps5_arena_lock);
++   struct radv_ps5_arena *const a = &radv_ps5_arenas[memory->arena_slot];
++   const uint32_t lo = memory->granule;
++   unsigned r = 0;
++   while (r < a->runs && a->run_start[r] < lo)
++      r++;
++   unsigned at;
++   if (r > 0 && a->run_start[r - 1] + a->run_count[r - 1] == lo) {
++      a->run_count[r - 1] += memory->granules;
++      at = r - 1;
++   } else if (a->runs < RADV_PS5_ARENA_MAX_RUNS) {
++      memmove(&a->run_start[r + 1], &a->run_start[r], (a->runs - r) * sizeof(uint32_t));
++      memmove(&a->run_count[r + 1], &a->run_count[r], (a->runs - r) * sizeof(uint32_t));
++      a->run_start[r] = lo;
++      a->run_count[r] = memory->granules;
++      a->runs++;
++      at = r;
++   } else {
++      /* Cannot happen: a block that was taken once leaves room to be given
++       * back. Losing the run keeps the arena usable, just one gap less. */
++      fprintf(stderr, "radv/ps5: arena %u free list is full, %u granules at %u lost\n", memory->arena_slot,
++              memory->granules, lo);
++      simple_mtx_unlock(&radv_ps5_arena_lock);
++      return;
++   }
++   /* Absorb the run the block now reaches on its right. */
++   if (at + 1 < a->runs && a->run_start[at + 1] == a->run_start[at] + a->run_count[at]) {
++      a->run_count[at] += a->run_count[at + 1];
++      memmove(&a->run_start[at + 1], &a->run_start[at + 2], (a->runs - at - 2) * sizeof(uint32_t));
++      memmove(&a->run_count[at + 1], &a->run_count[at + 2], (a->runs - at - 2) * sizeof(uint32_t));
++      a->runs--;
++   }
++   /* An arena holding nothing is just a 256 MiB island in the physical pool:
++    * a big contiguous request would fail across it. Hand the whole segment
++    * back so the pool can defragment; the next small churn makes a new one. */
++   struct radv_ps5_memory dying = a->mem;
++   const uint32_t dying_slot = memory->arena_slot;
++   /* Under the arena lock, so one static copy serves every give. */
++   static int64_t dying_chunk[RADV_PS5_BIG_GRANULES];
++   if (dying.physical < 0)
++      memcpy(dying_chunk, a->chunk, sizeof(dying_chunk));
++   if (a->runs == 1 && a->run_start[0] == 0 && a->run_count[0] == a->bytes / RADV_PS5_LARGE_BYTES) {
++      a->live = false;
++      *a = (struct radv_ps5_arena){0};
++      simple_mtx_unlock(&radv_ps5_arena_lock);
++      fprintf(stderr, "radv/ps5: arena %u emptied, segment returned\n", dying_slot);
++      sceKernelMunmap(dying.cpu, dying.bytes);
++      if (dying.granules)
++         radv_ps5_granules_give(&radv_ps5_region, dying.granule, dying.granules);
++      if (dying.physical >= 0) {
++         sceKernelReleaseDirectMemory(dying.physical, dying.bytes);
++      } else {
++         for (unsigned g = 0; g < ARRAY_SIZE(dying_chunk); g++)
++            if (dying_chunk[g] >= 0)
++               sceKernelReleaseDirectMemory(dying_chunk[g], RADV_PS5_LARGE_BYTES);
++      }
++      return;
++   }
++   simple_mtx_unlock(&radv_ps5_arena_lock);
++}
++
+ bool
+ radv_ps5_memory_alloc(uint64_t bytes, uint64_t alignment, bool window32, struct radv_ps5_memory *out)
++{
++   if (radv_ps5_arena_take(bytes, alignment, window32, out))
++      return true;
++   return radv_ps5_memory_alloc_dedicated(bytes, alignment, window32, out);
++}
++
++static bool
++radv_ps5_memory_alloc_dedicated(uint64_t bytes, uint64_t alignment, bool window32, struct radv_ps5_memory *out)
+ {
+    *out = (struct radv_ps5_memory){.physical = -1};
+    bytes = align64(MAX2(bytes, 1), RADV_PS5_PAGE_BYTES);
+@@ -351,8 +623,6 @@ radv_ps5_memory_alloc(uint64_t bytes, uint64_t alignment, bool window32, struct
+    return true;
+ }
+ 
+-static bool radv_ps5_map_fixed(uint8_t *at, uint64_t bytes, int64_t physical);
+-
+ /* A replayable window buffer, in the window's replay range: captured from its
+  * top, replayed at the captured address. */
+ static bool
+@@ -626,6 +896,13 @@ radv_ps5_memory_free(struct radv_ps5_memory *memory)
+ {
+    if (!memory->cpu)
+       return;
++   if (memory->arena_sub) {
++      /* Back to its arena: the granules are mapped and physical for good, so
++       * the kernel pool neither gains a hole nor loses one. */
++      radv_ps5_arena_give(memory);
++      *memory = (struct radv_ps5_memory){.physical = -1};
++      return;
++   }
+    if (memory->window_replay) {
+       /* Back to a reservation, for the next capture or replay. */
+       void *at = memory->cpu;
+diff --git a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h
+index 68bdeb35a7c..29ea046ae55 100644
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_platform.h
+@@ -48,6 +48,14 @@ struct radv_ps5_memory {
+    uint32_t granule;
+    uint32_t granules;
+    bool window_replay;
++   /* A sub-block of an anti-fragmentation arena: its bytes live inside a big
++    * arena segment that stays mapped and keeps its direct memory, so freeing
++    * returns the granules (granule, granules) to the arena and never touches
++    * the kernel pool. physical is the arena's, offset to this sub-block, so
++    * anything that maps memory->physical (a sparse bind, a placed mapping)
++    * still reaches exactly these pages. arena_slot names the arena. */
++   bool arena_sub;
++   uint32_t arena_slot;
+ };
+ 
+ /* Initialises AGC once per process. It has to run from the title's own
+-- 
+2.50.1 (Apple Git-155)
+

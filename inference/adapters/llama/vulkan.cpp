@@ -12,6 +12,7 @@
 #include "model_paths.hpp"
 #include "model_presets.hpp"
 #include "kv_budget.hpp"
+#include "model_load_budget.hpp"
 #include "direct_memory.hpp"
 #include "prefix_reuse.hpp"
 #include "runtime_settings.hpp"
@@ -249,6 +250,17 @@ bool prepare() {
     mp.n_gpu_layers = 99;
     mp.load_mode = LLAMA_LOAD_MODE_NONE;
     if (!model) {
+        struct stat model_stat{};
+        const auto direct_free = prospero_memory::free_total();
+        const auto load_free = direct_free && direct_free <= total_bytes
+            ? direct_free : prospero_kv::validated_free_bytes(free_bytes, total_bytes);
+        if (stat(files[selected].path.c_str(), &model_stat) != 0 || model_stat.st_size <= 0 ||
+            !prospero_memory::resident_model_fits(
+                static_cast<std::uint64_t>(model_stat.st_size), load_free, total_bytes)) {
+            log_message(GGML_LOG_LEVEL_ERROR,
+                        "Model load refused: GGUF weights plus 768 MiB reserve exceed available memory, or memory/file size is unknown.\n", nullptr);
+            return false;
+        }
         model_load_free_bytes = free_before_model;
         model = llama_model_load_from_file(files[selected].path.c_str(), mp);
         prospero_runtime::set_model_resident(model != nullptr);
@@ -398,11 +410,19 @@ const char *gpt_runtime_name() { return gpt_runtime_model_name(gpt_runtime_selec
 const char *gpt_runtime_backend() { return "llama.cpp Vulkan / RADV"; }
 const char *gpt_runtime_purpose() { return "text-to-text"; }
 bool gpt_runtime_context_full() { std::lock_guard<std::mutex> lock(runtime_mutex); return context_full; }
-std::uint64_t gpt_runtime_vulkan_heap_bytes() {
+bool gpt_runtime_vulkan_memory(std::uint64_t *free_bytes, std::uint64_t *total_bytes) {
     auto *device = ggml_backend_dev_by_name("Vulkan0");
-    if (!device) return 0;
-    size_t free_bytes = 0, total_bytes = 0;
-    ggml_backend_dev_memory(device, &free_bytes, &total_bytes);
+    if (!device || !free_bytes || !total_bytes) return false;
+    size_t free_memory = 0, total_memory = 0;
+    ggml_backend_dev_memory(device, &free_memory, &total_memory);
+    if (free_memory > total_memory || total_memory == 0) return false;
+    *free_bytes = free_memory;
+    *total_bytes = total_memory;
+    return true;
+}
+std::uint64_t gpt_runtime_vulkan_heap_bytes() {
+    std::uint64_t free_bytes = 0, total_bytes = 0;
+    if (!gpt_runtime_vulkan_memory(&free_bytes, &total_bytes)) return 0;
     return total_bytes;
 }
 bool gpt_runtime_select_model(unsigned i) {
@@ -427,7 +447,7 @@ int gpt_runtime_prepare() {
     std::lock_guard<std::mutex> lock(runtime_mutex);
     try {
         const auto settings = prospero_settings::get();
-        configure_context(settings.context, "auto");
+        configure_context(settings.context, prospero_settings::kv_name(settings.kv));
         if (prepare()) return 0;
         release_model(); // a refused model must not keep its weights resident
         return 1;

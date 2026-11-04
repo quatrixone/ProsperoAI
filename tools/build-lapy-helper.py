@@ -70,7 +70,10 @@ def fetch_lapy():
     try:
         subprocess.run(["git", "init", "-q"], cwd=staging, check=True)
         subprocess.run(["git", "remote", "add", "origin",
-                        "https://github.com/blackbearreloaded/PS5-Lapy-JB-Daemon.git"],
+                        # upstream blackbearreloaded repo went private/moved (2026-10-19);
+                        # this public fork still serves the pinned commit, whose SHA
+                        # cryptographically pins the tree contents.
+                        "https://github.com/ArkSama/PS5-Lapy-JB-Daemon.git"],
                        cwd=staging, check=True)
         subprocess.run(["git", "fetch", "-q", "--depth", "1", "origin", LAPY_COMMIT],
                        cwd=staging, check=True)

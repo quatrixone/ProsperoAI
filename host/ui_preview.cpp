@@ -687,6 +687,7 @@ int main(int argc, char **argv)
 }
 
 bool prospero_http_server_mobile_url(char *output, std::size_t capacity) { if(output && capacity) output[0]=0; return false; }
+int prospero_http_server_auth_status() { return 0; }
 
 void gpt_runtime_set_idle_unload_timeout(unsigned) {}
 namespace prospero_model_download { bool delete_model_files(const char *) { return false; } }

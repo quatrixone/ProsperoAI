@@ -450,8 +450,9 @@ void *download_range(void *opaque) {
     // A resumed range asks for everything after its last saved byte, and a range the
     // manifest already reports as whole is not fetched at all.
     std::uint64_t received = std::min(task.resume, length);
-    bool ok = true;
-    if (received < length) {
+    bool ok = received == length;
+    for (unsigned attempt = 0; received < length && attempt < 3 && !cancel_pending(); ++attempt) {
+        ok = true;
         HttpSession http;
         ok = http.get_range(*task.url, task.first + received, task.last);
         const int file = ok ? open(task.path->c_str(), O_WRONLY) : -1;
@@ -479,6 +480,8 @@ void *download_range(void *opaque) {
             if (http.read(&extra, 1) != 0) ok = false;
         }
         if (file >= 0) close(file);
+        if (!ok && !cancel_pending() && received < length)
+            ::usleep(250000u * (attempt + 1));
     }
     task.ok = ok && received == length && !cancel_pending();
     // Record the byte count even when the connection dropped: the next attempt picks
@@ -1023,13 +1026,25 @@ bool delete_model_files(const char *raw_id) {
     if (stat(directory.c_str(), &info) != 0 || !S_ISDIR(info.st_mode)) return false;
     const std::string index_path = directory + "/model_index.json";
     std::FILE *index = std::fopen(index_path.c_str(), "rb");
-    if (!index) return false;
+    if (!index) {
+        if (errno != ENOENT) return false;
+        for (const char *name : {"qwen_image_2.1-Q2_K.gguf", "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                                 "qwen_image_2.1_vae_bf16.safetensors"}) {
+            struct stat asset{};
+            const std::string path = directory + "/" + name;
+            if (stat(path.c_str(), &asset) != 0 || !S_ISREG(asset.st_mode) || asset.st_size <= 0)
+                return false;
+        }
+        remove_tree(directory);
+        return access(directory.c_str(), F_OK) != 0;
+    }
     char contents[8192]{};
     const std::size_t count = std::fread(contents, 1, sizeof(contents) - 1, index);
     const bool failed = std::ferror(index) != 0;
     std::fclose(index);
     if (failed || count == 0 ||
         (!std::strstr(contents, "Flux2KleinPipeline") &&
+         !std::strstr(contents, "QwenImage21Pipeline") &&
          !std::strstr(contents, "StableDiffusion3Pipeline") &&
          !std::strstr(contents, "StableDiffusionXLPipeline")))
         return false;

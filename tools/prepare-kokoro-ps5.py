@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Apply guarded PS5 scheduler sizing to the pinned Kokoro adapter source."""
 from pathlib import Path
+from prepare_build import write_text_if_changed
 import argparse
 
 root = Path(__file__).resolve().parents[1]
@@ -32,4 +33,4 @@ if after_meta not in text:
         raise SystemExit(f'{source}: expected one pinned Kokoro compute-metadata sizing expression')
     text = text.replace(before_meta, after_meta)
 
-source.write_text(text)
+write_text_if_changed(source, text)

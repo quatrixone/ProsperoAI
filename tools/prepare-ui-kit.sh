@@ -17,7 +17,12 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 commit=f775c31d9b9809be7f26a4b6da1b1ddb28428652
-url=https://github.com/blackbearreloaded/ps5-homebrew-ui.git
+# The upstream account was renamed (2026-10-19) and blackbearreloaded/ps5-homebrew-ui
+# vanished; fetch from our full-history mirror first, then the original remote.
+urls=(
+    https://github.com/Skystar9999/ps5-homebrew-ui-mirror.git
+    https://github.com/blackbearreloaded/ps5-homebrew-ui.git
+)
 
 cache="$root/.deps/ui-kit"
 stage="$cache/stage"
@@ -33,8 +38,12 @@ else
         printf '==> [ui-kit] Fetching ps5-homebrew-ui %s\n' "${commit:0:7}" >&2
         rm -rf -- "$kit"
         git init --quiet "$kit"
-        git -C "$kit" remote add origin "$url"
-        git -C "$kit" fetch --quiet --depth 1 origin "$commit"
+        for candidate in "${urls[@]}"; do
+            git -C "$kit" remote add origin "$candidate"
+            if git -C "$kit" fetch --quiet --depth 1 origin "$commit"; then break; fi
+            printf '==> [ui-kit] remote unavailable: %s\n' "$candidate" >&2
+            git -C "$kit" remote remove origin
+        done
         git -C "$kit" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
     fi
     [[ $(git -C "$kit" rev-parse HEAD) == "$commit" ]] || {
