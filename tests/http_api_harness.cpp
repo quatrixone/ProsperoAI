@@ -304,6 +304,23 @@ bool gpt_runtime_delete_model(const char *id)
 {
     return id && std::strcmp(id, "second.gguf") == 0 && current_model == 0;
 }
+int gpt_runtime_upscale_image(const char *source_path, unsigned factor, char *out,
+                              std::size_t capacity)
+{
+    if (!source_path || (factor != 2 && factor != 4))
+    {
+        std::snprintf(out, capacity, "Upscale factor must be 2 or 4.");
+        return 1;
+    }
+    if (std::getenv("PROSPERO_TEST_UPSCALE_FAIL"))
+    {
+        std::snprintf(out, capacity, "Real-ESRGAN could not upscale the image.");
+        return 2;
+    }
+    std::snprintf(out, capacity, "%supscaled-x%u.png", PROSPERO_IMAGE_DIR, factor);
+    std::ofstream(out, std::ios::binary) << "png";
+    return 0;
+}
 int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
                          const gpt_runtime_settings_t &settings, char *out, std::size_t capacity,
                          gpt_runtime_stats_t *stats, gpt_runtime_progress_fn progress,

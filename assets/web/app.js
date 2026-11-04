@@ -264,6 +264,32 @@ function emptyMediaNote(){
     if(mediaKind==='audio')return 'No generated audio yet.';
     return 'Generated images and audio appear here.';
 }
+// Enlarging an existing picture, asked for on the picture itself. The console no longer
+// enlarges every render, so this is where upscaling happens.
+async function upscaleImage(file,factor,button,refresh){
+    const name=file.path.split('/').at(-1)||'this image';
+    if(!await askConfirm(`Enlarge \u201c${name}\u201d ${factor}\u00d7 with Real-ESRGAN? It runs on your console and takes a moment.`,
+                         {title:'Upscale image?',action:`Upscale ${factor}\u00d7`}))return;
+    const label=button.textContent;
+    button.disabled=true;button.textContent='Upscaling\u2026';
+    try{
+        await api('/api/images/upscale',{method:'POST',body:JSON.stringify({path:file.path,factor})});
+        await refresh();
+    }catch(error){
+        $('feedback').textContent=error.message;
+        if($('image-status'))$('image-status').textContent=error.message;
+        button.disabled=false;button.textContent=label;
+    }
+}
+function upscaleButtons(file,refresh){
+    return [2,4].map(factor=>{
+        const button=document.createElement('button');
+        button.className='secondary';button.type='button';
+        button.textContent=`Upscale ${factor}\u00d7`;
+        button.onclick=()=>void upscaleImage(file,factor,button,refresh);
+        return button;
+    });
+}
 // The Studio's own library, beside the form as in Music Studio: a generation lands here
 // the moment it finishes, without a trip to the Gallery page.
 async function renderImageLibrary(){
@@ -292,7 +318,7 @@ async function renderImageLibrary(){
                 try{await api('/api/media',{method:'DELETE',body:JSON.stringify({path:file.path})});await renderImageLibrary();}
                 catch(error){$('image-status').textContent=error.message;remove.disabled=false;}
             };
-            actions.append(edit,guide,remove);
+            actions.append(edit,guide,...upscaleButtons(file,renderImageLibrary),remove);
             card.append(heading,preview,actions);
             appendMedia(preview,{path:file.path,kind:'image'},'','Generated image');
             root.append(card);
@@ -325,7 +351,7 @@ async function renderMediaLibrary(kind=mediaKind){
             if(file.kind==='image'){
                 const edit=document.createElement('button');edit.className='secondary';edit.type='button';edit.textContent='Stage image for editing';edit.onclick=()=>void stageGalleryImage(file,'image_to_image');
                 const guide=document.createElement('button');guide.className='secondary';guide.type='button';guide.textContent='Use as ControlNet guide';guide.onclick=()=>void stageGalleryImage(file,'controlnet');
-                card.append(edit,guide);
+                card.append(edit,guide,...upscaleButtons(file,()=>renderMediaLibrary(mediaKind)));
             }
             card.append(remove);appendMedia(preview,{path:file.path,kind:file.kind});root.append(card);
         }

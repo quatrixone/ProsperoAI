@@ -178,6 +178,16 @@ extern "C"
     {
         return 1;
     }
+    int ps5_sd_upscale(const char *source, unsigned factor, char *out, std::size_t n)
+    {
+        if (factor != 2 && factor != 4)
+        {
+            std::snprintf(out, n, "Upscale factor must be 2 or 4.");
+            return 1;
+        }
+        std::snprintf(out, n, "upscaled-%s-x%u.png", source, factor);
+        return 0;
+    }
     int ps5_sd_generate(const char *, const char *, char *out, std::size_t n,
                         std::uint64_t *elapsed, const gpt_runtime_image_options_t *options,
                         gpt_runtime_progress_fn)

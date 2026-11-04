@@ -611,6 +611,35 @@ class HttpApiTests(unittest.TestCase):
             self.request("/api/conversations/" + session_id, method="DELETE", key="secret",
                          headers=headers)
 
+    def test_images_can_be_upscaled_on_their_own(self):
+        source = self.image_dir / "to-enlarge.png"
+        source.write_bytes((ROOT / "tests/fixtures/one-pixel.png").read_bytes())
+        produced = self.image_dir / "upscaled-x4.png"
+        try:
+            head, body = self.request("/api/images/upscale",
+                                      {"path": str(source), "factor": 4})
+            self.assertIn("200 OK", head, body)
+            self.assertEqual(json.loads(body)["image_path"], str(produced))
+            self.assertTrue(produced.is_file())
+
+            for rejected in ({"path": str(source), "factor": 3},
+                             {"path": str(source)},
+                             {"path": "/etc/passwd", "factor": 4},
+                             {"factor": 4}):
+                head, response = self.request("/api/images/upscale", rejected)
+                self.assertIn("400 Bad Request", head, rejected)
+                self.assertIn("factor of 2 or 4", json.loads(response)["error"])
+
+            head, response = self.request("/api/images/upscale",
+                                          {"path": str(source), "factor": 2},
+                                          environment={"PROSPERO_TEST_UPSCALE_FAIL": "1"})
+            self.assertIn("409 Conflict", head)
+            self.assertIn("could not upscale", json.loads(response)["error"])
+        finally:
+            source.unlink(missing_ok=True)
+            produced.unlink(missing_ok=True)
+            (self.image_dir / "upscaled-x2.png").unlink(missing_ok=True)
+
     def test_media_lists_work_folder_files_with_no_conversation(self):
         # Music Studio writes straight to the audio folder and never saves a
         # conversation, so its tracks were missing from Media entirely.

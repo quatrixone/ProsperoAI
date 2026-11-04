@@ -563,4 +563,28 @@ int gpt_runtime_generate(const gpt_runtime_message_t *messages, unsigned count,
     note_inference_activity();
     return result;
 }
+
+int gpt_runtime_upscale_image(const char *source_path, unsigned factor, char *output,
+                              std::size_t capacity)
+{
+    if (!output || capacity == 0)
+        return 1;
+    if (!source_path || !*source_path)
+    {
+        std::snprintf(output, capacity, "No image was given to upscale.");
+        return 1;
+    }
+    // Real-ESRGAN is not a catalog model and needs no selection, but it does need the
+    // device to itself, so it waits for a running generation like any other inference.
+    std::unique_lock<std::mutex> inference(inference_mutex, std::try_to_lock);
+    if (!inference.owns_lock())
+    {
+        std::snprintf(output, capacity,
+                      "The runtime is busy. Try again when the current generation finishes.");
+        return 1;
+    }
+    const int result = prospero::inference::upscale_image(source_path, factor, output, capacity);
+    note_inference_activity();
+    return result;
+}
 #endif

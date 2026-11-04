@@ -51,6 +51,9 @@ struct Adapter
 };
 
 const Adapter *find_adapter(Modality modality);
+// Enlarge an existing picture with Real-ESRGAN, no catalog model involved.
+int upscale_image(const char *source_path, unsigned factor, char *output,
+                  std::size_t output_capacity);
 const char *modality_name(Modality modality);
 bool is_media(Modality modality);
 

@@ -247,6 +247,35 @@ struct DecodedInput
     }
 };
 
+// Real-ESRGAN lives outside the image presets, in its own folder.
+bool upscaler_model_path(char (&path)[512])
+{
+    if (std::snprintf(path, sizeof(path), "%s/upscalers/RealESRGAN_x4plus.pth",
+                      prospero::model_root()) >= static_cast<int>(sizeof(path)))
+        return false;
+    std::FILE *file = std::fopen(path, "rb");
+    if (!file)
+        return false;
+    std::fclose(file);
+    return true;
+}
+
+// One Real-ESRGAN pass over an image already in memory. The model produces only its own
+// x4 scale, so a 2x request is that pass halved.
+bool run_upscaler(const char *model_path, const sd_image_t &source, unsigned factor,
+                  sd_image_t **out_images, int *out_count)
+{
+    upscaler_ctx_t *upscaler = new_upscaler_ctx(model_path, false, 1, 128, "Vulkan0", "Vulkan0");
+    if (!upscaler)
+        return false;
+    bool ok = upscale(upscaler, source, 4, out_images, out_count) && *out_count == 1 &&
+              *out_images && (*out_images)[0].data;
+    free_upscaler_ctx(upscaler);
+    if (ok && factor == 2 && !halve_image((*out_images)[0]))
+        ok = false;
+    return ok;
+}
+
 bool valid_image_options(const gpt_runtime_image_options_t *options, bool flux2_klein)
 {
     if (!options)
@@ -424,11 +453,16 @@ bool ensure_context(const char *root)
     // with 10.88 GiB free, so the pass wants a little over 5 GiB for its workspace, the
     // allocator's own blocks and whatever the previous model left behind. A constant
     // cannot track that, which is why Z-Image failed by 175 MB after following the 9B.
+    //
+    // Every image model gets the budget, not only the split-file ones: the heap is what
+    // runs out, and the family has nothing to do with it. Without it SDXL Inpainting and
+    // the SDXL Canny guide rendered once and then failed their second request on the
+    // spot, their first render's weights still holding the device.
     char weight_budget[16]{};
     std::uint64_t free_bytes = 0, total_bytes = 0;
     constexpr std::uint64_t kSamplingReserveBytes = 5632ull << 20;
     constexpr std::uint64_t kSmallestUsefulBudgetBytes = 2048ull << 20;
-    if (flux2_klein && gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
+    if (gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
         free_bytes > kSamplingReserveBytes + kSmallestUsefulBudgetBytes &&
         std::snprintf(weight_budget, sizeof(weight_budget), "%.2f",
                       static_cast<double>(free_bytes - kSamplingReserveBytes) /
@@ -451,6 +485,59 @@ bool ensure_context(const char *root)
 extern "C" void ps5_sd_shutdown()
 {
     release_context();
+}
+
+// Enlarge a picture that already exists, with no diffusion model involved. The web
+// gallery asks for this on the image it wants, which is cheaper and more deliberate than
+// enlarging every render.
+extern "C" int ps5_sd_upscale(const char *source_path, unsigned factor, char *response,
+                              std::size_t response_capacity)
+{
+    if (!response || response_capacity == 0)
+        return 1;
+    if (factor != 2 && factor != 4)
+    {
+        std::snprintf(response, response_capacity, "Upscale factor must be 2 or 4.");
+        return 1;
+    }
+    char upscaler_path[512]{};
+    if (!upscaler_model_path(upscaler_path))
+    {
+        std::snprintf(response, response_capacity,
+                      "Real-ESRGAN model missing. Place RealESRGAN_x4plus.pth in models/upscalers/.");
+        return 2;
+    }
+    DecodedInput source;
+    if (!source.load(source_path))
+    {
+        std::snprintf(response, response_capacity, "Could not read the image to upscale.");
+        return 1;
+    }
+    char output[512];
+    if (!prospero_generated_output_path(output, sizeof(output), "image", "prosperoai-upscaled",
+                                        "png"))
+    {
+        std::snprintf(response, response_capacity, "Could not name the upscaled image.");
+        return 2;
+    }
+    // The diffusion weights have no part in this and the heap is tight, so let them go.
+    release_context();
+    std::vector<std::uint8_t> storage;
+    const sd_image_t input = source.sd_image_with_channels(storage, 3);
+    sd_image_t *images = nullptr;
+    int image_count = 0;
+    const bool upscaled = input.data && run_upscaler(upscaler_path, input, factor, &images,
+                                                     &image_count);
+    const bool written = upscaled && write_png(output, images[0]);
+    free_sd_images(images, image_count);
+    if (!written)
+    {
+        std::remove(output);
+        std::snprintf(response, response_capacity, "Real-ESRGAN could not upscale the image.");
+        return 2;
+    }
+    std::snprintf(response, response_capacity, "%s", output);
+    return 0;
 }
 
 extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *response,
@@ -520,28 +607,17 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
     std::remove(display_output);
     const std::uint64_t start = sceKernelGetProcessTime();
     const auto runtime_settings = prospero_settings::get();
-    // The image workflow carries its own flag; the Settings toggle is its default and
-    // still drives the native UI, which has no per-request options.
-    const unsigned upscale_factor = image_options ? image_options->upscale
-                                                  : runtime_settings.sd_upscale;
+    // Only a request can ask for an upscale. The console has no per-request options, and
+    // enlarging every console render was not what the setting was for -- the web asks for
+    // it on the picture it wants, from the gallery, once the render is done.
+    const unsigned upscale_factor = image_options ? image_options->upscale : 0;
     const bool upscale_requested = upscale_factor != 0;
     char upscaler_path[512]{};
-    if (upscale_requested)
+    if (upscale_requested && !upscaler_model_path(upscaler_path))
     {
-        if (std::snprintf(upscaler_path, sizeof(upscaler_path), "%s/upscalers/RealESRGAN_x4plus.pth",
-                          prospero::model_root()) >= static_cast<int>(sizeof(upscaler_path)))
-        {
-            std::snprintf(response, response_capacity, "Upscaler path is too long.");
-            return 2;
-        }
-        std::FILE *upscaler_file = std::fopen(upscaler_path, "rb");
-        if (!upscaler_file)
-        {
-            std::snprintf(response, response_capacity,
-                          "Real-ESRGAN model missing. Place RealESRGAN_x4plus.pth in models/upscalers/.");
-            return 2;
-        }
-        std::fclose(upscaler_file);
+        std::snprintf(response, response_capacity,
+                      "Real-ESRGAN model missing. Place RealESRGAN_x4plus.pth in models/upscalers/.");
+        return 2;
     }
     if (!ensure_context(root))
     {
@@ -644,18 +720,8 @@ extern "C" int ps5_sd_generate(const char *root, const char *prompt, char *respo
         }
         // Free the diffusion weights before loading ESRGAN to keep the Vulkan memory peak lower.
         release_context();
-        upscaler_ctx_t *upscaler = new_upscaler_ctx(upscaler_path, false, 1, 128,
-                                                     "Vulkan0", "Vulkan0");
-        if (upscaler)
-        {
-            upscaled = upscale(upscaler, images[0], 4, &upscaled_images, &upscaled_count) &&
-                       upscaled_count == 1 && upscaled_images && upscaled_images[0].data;
-            free_upscaler_ctx(upscaler);
-            // The model's own scale is the only one it produces, so a 2x request is the
-            // 4x pass halved -- still the restored detail, at half the pixels.
-            if (upscaled && upscale_factor == 2 && !halve_image(upscaled_images[0]))
-                upscaled = false;
-        }
+        upscaled = run_upscaler(upscaler_path, images[0], upscale_factor, &upscaled_images,
+                                &upscaled_count);
         if (!upscaled)
             log_line("[prosperoai:sd] Real-ESRGAN failed; saving original image\n");
     }

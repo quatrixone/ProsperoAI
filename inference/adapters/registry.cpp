@@ -10,6 +10,7 @@ extern "C"
 {
 int ps5_sd_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
                     const gpt_runtime_image_options_t *, gpt_runtime_progress_fn);
+int ps5_sd_upscale(const char *, unsigned, char *, std::size_t);
 int ps5_stable_audio_generate(const char *, const char *, char *, std::size_t, std::uint64_t *,
                               gpt_runtime_progress_fn);
 int ps5_kokoro_tts_generate(const char *, const char *, const char *, char *, std::size_t, std::uint64_t *,
@@ -176,6 +177,12 @@ const char *modality_name(Modality modality)
         return "text-to-speech";
     }
     return "unknown";
+}
+
+int upscale_image(const char *source_path, unsigned factor, char *output,
+                  std::size_t output_capacity)
+{
+    return ps5_sd_upscale(source_path, factor, output, output_capacity);
 }
 
 bool is_media(Modality modality)

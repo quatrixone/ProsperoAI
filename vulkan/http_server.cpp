@@ -4651,6 +4651,32 @@ void handle_connection(const NetApi &api, int sock)
         handle_openai_chat(api, sock, body);
 #endif
 #if defined(PS5_LLAMA_VULKAN) && defined(PROSPERO_UI_VULKAN)
+    else if (std::strcmp(method, "POST") == 0 && std::strcmp(path, "/api/images/upscale") == 0)
+    {
+        const auto request = nlohmann::json::parse(body, nullptr, false);
+        const std::string source = request.is_object() && request.contains("path") &&
+                                           request["path"].is_string()
+                                       ? request["path"].get<std::string>()
+                                       : std::string();
+        const unsigned factor = request.is_object() && request.contains("factor") &&
+                                        request["factor"].is_number_unsigned()
+                                    ? request["factor"].get<unsigned>()
+                                    : 0U;
+        if (source.empty() || !media_path_allowed(source) || (factor != 2 && factor != 4))
+            send_status(api, sock, "400 Bad Request", "application/json",
+                        "{\"error\":\"Provide a stored image path and a factor of 2 or 4.\"}");
+        else
+        {
+            char output[512]{};
+            const int result = gpt_runtime_upscale_image(source.c_str(), factor, output,
+                                                         sizeof(output));
+            if (result == 0)
+                send_json(api, sock, nlohmann::json{{"image_path", output}}.dump().c_str());
+            else
+                send_status(api, sock, "409 Conflict", "application/json",
+                            nlohmann::json{{"error", output}}.dump().c_str());
+        }
+    }
     else if (std::strcmp(path, "/api/media") == 0 &&
              (std::strcmp(method, "GET") == 0 || std::strcmp(method, "DELETE") == 0))
     {
