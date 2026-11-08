@@ -20,7 +20,7 @@
 
 ![ProsperoAI native model library](docs/images/native-models.png)
 
-The interface is built with [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui),
+The interface is built with [ps5-homebrew-ui](https://github.com/JVK3R/ps5-homebrew-ui),
 fetched at a pinned commit when the app is built. This picture is the production frontend
 drawn on a PC with stand-in models. See the [UI guide](docs/NATIVE_UI.md) for the pages,
 how it is built, and what a run on a console showed.

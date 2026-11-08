@@ -6,7 +6,7 @@
 # usage: tools/prepare-ui-kit.sh           (prints the staged kit: <stage>/src)
 #        tools/prepare-ui-kit.sh --kit     (prints the kit checkout: fonts, sounds, font baker)
 #
-# The kit (https://github.com/blackbearreloaded/ps5-homebrew-ui) is a build
+# The kit (https://github.com/JVK3R/ps5-homebrew-ui) is a build
 # dependency, not part of this repository: nothing of it is copied or patched
 # here. Its pinned commit is fetched once into .deps/ui-kit/checkout and its
 # src/ is staged in .deps/ui-kit/stage, where every build compiles it from
@@ -17,7 +17,12 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 commit=f775c31d9b9809be7f26a4b6da1b1ddb28428652
-url=https://github.com/blackbearreloaded/ps5-homebrew-ui.git
+# The original repository is unavailable; mirrors provide the same pinned commit.
+urls=(
+    https://github.com/JVK3R/ps5-homebrew-ui.git
+    https://github.com/Skystar9999/ps5-homebrew-ui-mirror.git
+    https://github.com/blackbearreloaded/ps5-homebrew-ui.git
+)
 
 cache="$root/.deps/ui-kit"
 stage="$cache/stage"
@@ -33,8 +38,12 @@ else
         printf '==> [ui-kit] Fetching ps5-homebrew-ui %s\n' "${commit:0:7}" >&2
         rm -rf -- "$kit"
         git init --quiet "$kit"
-        git -C "$kit" remote add origin "$url"
-        git -C "$kit" fetch --quiet --depth 1 origin "$commit"
+        for candidate in "${urls[@]}"; do
+            git -C "$kit" remote add origin "$candidate"
+            if git -C "$kit" fetch --quiet --depth 1 origin "$commit"; then break; fi
+            printf '==> [ui-kit] remote unavailable: %s\n' "$candidate" >&2
+            git -C "$kit" remote remove origin
+        done
         git -C "$kit" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
     fi
     [[ $(git -C "$kit" rev-parse HEAD) == "$commit" ]] || {

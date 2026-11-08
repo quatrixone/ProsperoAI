@@ -5,7 +5,7 @@
 ProsperoAI builds on the
 [PS5 Native App Boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate)
 and the public [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk).
-Its native interface uses [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui)
+Its native interface uses [ps5-homebrew-ui](https://github.com/JVK3R/ps5-homebrew-ui), a mirror of the pinned upstream commit,
 and [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl).
 [SDL2](https://github.com/libsdl-org/SDL/tree/SDL2) (John Törnblom's [PS5 port](https://github.com/ps5-payload-dev/SDL))
 remains for media and system helpers. Model runtimes incorporate work from
@@ -67,7 +67,7 @@ and uses the public [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk).
 The clean-room application runtime and project-owned source are distributed
 under GPL-3.0-or-later.
 
-The interface kit ([ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui),
+The interface kit ([ps5-homebrew-ui](https://github.com/JVK3R/ps5-homebrew-ui),
 GPL-3.0-or-later) and the [ps5-opengl](https://github.com/blackbearreloaded/ps5-opengl) SDK are
 build dependencies fetched at pinned versions; neither is kept in this repository. A release
 contains, compiled or copied from them:

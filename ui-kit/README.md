@@ -1,7 +1,8 @@
 # The interface kit
 
 ProsperoAI's interface is built with
-[ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui). The kit is a
+[ps5-homebrew-ui](https://github.com/JVK3R/ps5-homebrew-ui), a mirror of the pinned
+upstream commit. The kit is a
 build dependency: none of its source, fonts or sounds are kept in this repository, and
 nothing is patched over it.
 
