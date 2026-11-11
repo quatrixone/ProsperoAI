@@ -12,10 +12,10 @@
     },
     {
       "name": "llama-cpp",
-      "about": "llama.cpp at the revision the Vulkan backend migration is developed against (ggml-vulkan)",
+      "about": "Upstream llama.cpp master pinned for the shared Vulkan runtime",
       "kind": "git",
       "url": "https://github.com/ggml-org/llama.cpp.git",
-      "commit": "cb7934c52ca8710994b2ecc19775ebefcfdb8d01",
+      "commit": "cb44fdb1892eebca072e0949875a60c11245a8bb",
       "path": ".deps/llama.cpp"
     },
     {
@@ -72,10 +72,10 @@
     },
     {
       "name": "ggml-upstream",
-      "about": "Upstream GGML v0.26.0 shared by llama.cpp, Stable Diffusion, Kokoro and audio.cpp",
+      "about": "Upstream GGML shared by llama.cpp, Stable Diffusion, Kokoro and audio.cpp",
       "kind": "git",
       "url": "https://github.com/ggml-org/ggml.git",
-      "commit": "d7cb574130e6f01ad25b3289685489200febcd74",
+      "commit": "cd6d2b75f5d3e4b2f3fe8e8fbc6c8b84ac80e74a",
       "path": "build/ggml-upstream"
     },
     {

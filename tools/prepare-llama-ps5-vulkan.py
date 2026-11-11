@@ -133,10 +133,14 @@ replace(
         dmmv_wg = profile_wg == 0 ? DMMV_WG_SIZE_SUBGROUP : DMMV_WG_SIZE_LARGE;
     return ctx->device->pipeline_dequant_mul_mat_vec_id_f32[dmmv_wg][a_type];""",
 )
-replace(
-    "    uint64_t flops_per_submit = std::min(flops_cap, ctx->last_total_flops / 40u);\n",
-    "    uint64_t flops_per_submit = prospero_vk_submit_flops(std::min(flops_cap, ctx->last_total_flops / 40u));\n",
-)
+old_submit = "    uint64_t flops_per_submit = std::min(flops_cap, ctx->last_total_flops / 40u);\n"
+new_submit = "    uint64_t flops_per_submit = prospero_vk_submit_flops(std::min(flops_cap, ctx->last_total_flops / 40u));\n"
+if old_submit in text:
+    replace(old_submit, new_submit)
+else:
+    old_submit = "        std::clamp(ctx->last_total_flops / 40u, std::min<uint64_t>(100'000'000ULL, flops_cap), flops_cap);\n"
+    new_submit = "        prospero_vk_submit_flops(std::clamp(ctx->last_total_flops / 40u, std::min<uint64_t>(100'000'000ULL, flops_cap), flops_cap));\n"
+    replace(old_submit, new_submit)
 
 write_text_if_changed(path, text)
 print(f"{path}: PS5 Vulkan profile hooks applied")

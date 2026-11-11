@@ -76,8 +76,8 @@ Set `PROSPERO_TEST_TITLE=<TEST-TITLE-ID>` before using the test-app targets. For
 `PROSPERO_TEST_TITLE=<TEST-TITLE-ID> make vulkan-runtime` builds the test folder
 `build/vulkan-runtime/<TEST-TITLE-ID>` without uploading or launching it. `make app`
 packages the same runtime for the configured
-release title. The app links upstream llama.cpp `cb7934c` and one shared GGML v0.26.0
-`d7cb574`, `GGML_MAX_NAME=160`, source-built SD, audio and Kokoro adapters on Vulkan.
+release title. The app links upstream llama.cpp `cb44fdb` and one shared GGML
+`cd6d2b7`, `GGML_MAX_NAME=160`, source-built SD, audio and Kokoro adapters on Vulkan.
 AGC inference and private SD/TTS ggml archives are removed;
 RADV still requires the console's AGC platform driver. Only one modality runtime stays
 resident at a time; after two minutes without inference activity by default, the active

@@ -63,9 +63,17 @@ replace(buffers,
         GGML_LOG_INFO("ps5 vkalloc: %llu MiB (import=%d)\\n",
                       (unsigned long long)(mem_req.size >> 20), int(import_ptr != nullptr));''')
 
+# The PS5 SDK exposes F_DUPFD but not the POSIX close-on-exec variant; Vulkan
+# only duplicates these descriptors for its multi-device path (disabled here).
+comm = ggml_source / 'src/ggml-vulkan/ggml-vulkan-comm.cpp'
+replace(comm, '#include <fcntl.h>', '''#include <fcntl.h>
+#ifndef F_DUPFD_CLOEXEC
+#define F_DUPFD_CLOEXEC F_DUPFD
+#endif''')
+
 # prospero-ps5-small-alloc-slab: sub-allocate small ggml-vulkan device buffers
 # inside ggml-owned slabs so the PS5 direct-memory pool stops fragmenting.
-# Anchors validated against ggml commit d7cb574130e (21.10).
+# Anchors validated against the pinned GGML source.
 types_h = ggml_source / 'src/ggml-vulkan/ggml-vulkan-types.h'
 
 SLAB_CODE = '''// ---- prospero-ps5-small-alloc-slab ------------------------------------------
@@ -253,10 +261,10 @@ replace(buffers,
  '    device->device.bindBufferMemory(buf->buffer, buf->device_memory, buf->slab_offset);')
 
 # A5: host_malloc failure path must release the slab region, not the memory.
-replace(buffers,
- '''        device->device.freeMemory(buf->device_memory);
-        device->device.destroyBuffer(buf->buffer);''',
- '''        if (buf->slab_owner) {
+host_malloc_failure = '''        device->device.freeMemory(buf->device_memory);
+        device->device.destroyBuffer(buf->buffer);'''
+if host_malloc_failure in buffers.read_text():
+    replace(buffers, host_malloc_failure, '''        if (buf->slab_owner) {
             vk_slab_release(buf->slab_owner, buf->slab_offset, buf->size);
             buf->slab_owner = nullptr;
             buf->device_memory = VK_NULL_HANDLE;

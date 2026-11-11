@@ -66,6 +66,16 @@ def prepare(llama: Path, prism: Path) -> None:
     upstream = llama / "src"
     prism_src = prism / "src"
 
+    # Recent upstream already carries the verified Prism Hadamard path. Keep
+    # its implementation instead of layering this older source adaptation on top.
+    if all(marker in (upstream / file).read_text() for file, marker in (
+        ("llama-model.cpp", "void llama_model_base::load_hparams_hadamard"),
+        ("llama-graph.cpp", "llm_graph_context::build_hadamard_input"),
+        ("llama-context.cpp", "static void llama_verify_hadamard_graph"),
+    )):
+        print("Upstream llama.cpp already includes the Bonsai Hadamard path")
+        return
+
     # The model metadata and its post-load transform buffers are copied from the
     # pinned Prism model loader. The rest of the upstream loader stays untouched.
     p_model = (prism_src / "llama-model.cpp").read_text()

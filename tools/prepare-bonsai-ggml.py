@@ -181,7 +181,7 @@ def main() -> None:
     # upstream enum value and its GGUF encoding stays unchanged.
     replace_once(
         ggml / "include/ggml.h",
-        "        GGML_TYPE_COUNT   = 43,",
+        "        GGML_TYPE_COUNT   = 44,",
         "        GGML_TYPE_PQ2_0  = 142, // PrismML Q2, group 128\n"
         "        GGML_TYPE_PTQ1_0 = 143, // PrismML ternary, group 128\n"
         "        GGML_TYPE_COUNT   = 144,",
@@ -286,11 +286,11 @@ void ggml_vec_dot_ptq1_0_q8_0(int, float * GGML_RESTRICT, size_t, const void * G
     fallback = cpu / "arch-fallback.h"
     replace_once(
         fallback,
-        "#elif defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)\n// quants.c\n#define ggml_vec_dot_q2_0_q8_0_generic ggml_vec_dot_q2_0_q8_0",
+        "#elif defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)\n// repack.cpp",
         "#elif defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)\n// quants.c\n"
         "#define ggml_vec_dot_pq2_0_q8_0_generic ggml_vec_dot_pq2_0_q8_0\n"
         "#define ggml_vec_dot_ptq1_0_q8_0_generic ggml_vec_dot_ptq1_0_q8_0\n"
-        "#define ggml_vec_dot_q2_0_q8_0_generic ggml_vec_dot_q2_0_q8_0",
+        "// repack.cpp",
     )
     add_before(cpu / "ggml-cpu.c", "    [GGML_TYPE_Q4_0] = {", """
     [GGML_TYPE_PQ2_0] = {

@@ -48,7 +48,7 @@ runs after releasing the diffusion model from GPU memory.
 ## Other GGUF text models
 
 ProsperoAI can also download and discover standalone `.gguf` text models. The pinned
-[llama.cpp revision](https://github.com/ggml-org/llama.cpp/tree/cb7934c52ca8710994b2ecc19775ebefcfdb8d01)
+[llama.cpp revision](https://github.com/ggml-org/llama.cpp/tree/cb44fdb1892eebca072e0949875a60c11245a8bb)
 includes loaders for the Llama, Qwen, Gemma, Phi, DeepSeek, Granite and other architectures,
 plus chat-template handling. This means many GGUF models from those families can be tried
 without adding model-specific app code. In Models, search for the model name or repository,
@@ -69,8 +69,8 @@ must be supported, its tensor types must have Vulkan kernels, and its weights pl
 must fit the console's available memory. Very large models, multimodal GGUFs, embedding models,
 unsupported templates or quantizations can fail even when llama.cpp recognizes the architecture.
 The list is representative rather than exhaustive; many fine-tunes of a supported family may
-also work. See the pinned [architecture list](https://github.com/ggml-org/llama.cpp/blob/cb7934c52ca8710994b2ecc19775ebefcfdb8d01/src/llama-arch.cpp)
-and [chat-template list](https://github.com/ggml-org/llama.cpp/blob/cb7934c52ca8710994b2ecc19775ebefcfdb8d01/src/llama-chat.cpp).
+also work. See the pinned [architecture list](https://github.com/ggml-org/llama.cpp/blob/cb44fdb1892eebca072e0949875a60c11245a8bb/src/llama-arch.cpp)
+and [chat-template list](https://github.com/ggml-org/llama.cpp/blob/cb44fdb1892eebca072e0949875a60c11245a8bb/src/llama-chat.cpp).
 
 The curated presets were each exercised for three generation rounds on the test title; their
 results are in [the retained 3× test record](performance/2026-10-14/pr27-all-models-3x-final.json).

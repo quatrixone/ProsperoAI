@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-11",
+  "branch": "codex/five-improvements-plan",
+  "test_title": "PPSA99023",
+  "llama_cpp": "cb44fdb1892eebca072e0949875a60c11245a8bb",
+  "ggml": "cd6d2b75f5d3e4b2f3fe8e8fbc6c8b84ac80e74a",
+  "host": {
+    "build_vulkan_runtime": "pass",
+    "make_test": "pass",
+    "make_lint": "pass"
+  },
+  "ps5": {
+    "folder_build": "pass",
+    "deployment": "pass",
+    "launch": "pass",
+    "alive_after_generation": true,
+    "runtime_api": "pass",
+    "screenshot": "build/pr43-validation/screenshots/upstream-welcome.jpg",
+    "visual_review": "Welcome/workspace is clean dark-and-gold UI; screenshot reviewed via Remote Play."
+  },
+  "catalog": {
+    "installed_presets": 25,
+    "generic_generation_requests_passed": 22,
+    "note": "Generic benchmark inputs are not sufficient to validate workflow-only presets.",
+    "passed_modalities": [
+      "5 text presets arithmetic check",
+      "10 visually plausible text-to-image presets",
+      "3 audio-generation presets",
+      "2 speech presets"
+    ],
+    "workflow_only": {
+      "sdxl-inpainting-q8-0": "Generic text-to-image produced a poor result; inpainting input path could not be verified because uploaded image lease was rejected.",
+      "sd15-inpainting-q8-0": "Generic text-to-image produced a poor result; inpainting input path could not be verified because uploaded image lease was rejected.",
+      "sdxl-canny-q8-0": "Generic text-to-image produced a poor result; ControlNet input path could not be verified because uploaded image lease was rejected.",
+      "sheetsage2-orig": "Cover workflow blocked: console reports selected WAV source missing/not regular, although FTP lists the file.",
+      "htdemucs-q8_0": "Stems workflow blocked: console reports selected WAV source missing/not regular, although FTP lists the file.",
+      "upscalers": "Generic benchmark cannot dispatch tool kind; Real-ESRGAN independently verified at 2x (1024x1024) and 4x (2048x2048)."
+    }
+  },
+  "local_non_catalog_gguf": {
+    "Ternary-Bonsai-2-27B-PTQ1_0.gguf": "pass, arithmetic answer 51",
+    "qwen-image-2.1/Qwen3VL-8B-Instruct-Q4_K_M.gguf": "pass, arithmetic answer 51",
+    "gemma4/gemma-4-26B-A4B-it-Q4_K_M.gguf": "fail, unable to load GGUF model on Vulkan",
+    "unsloth-Qwen3.8-27B-GGUF--Qwen3.8-27B-UD-Q2_K_XL.gguf": "fail, unable to load GGUF model on Vulkan",
+    "qwen-image-2.1/mmproj-Qwen3VL-8B-Instruct-F16.gguf": "not tested; component file, not standalone model",
+    "qwen-image-2.1/qwen_image_2.1-Q2_K.gguf": "not tested; diffusion component, not standalone text model"
+  },
+  "release_gate": "Do not claim full model coverage until workflow input access is resolved and local GGUF failures are triaged."
+}

@@ -9,7 +9,7 @@ bash "$root/tools/setup-pacbrew-dependencies.sh" --all >/dev/null
 ref="$root/.deps/mihawk-vulkan-review"
 sdk="$ref/.deps/native/ps5-payload-sdk"
 archive="$ref/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a"
-# All text and media now share upstream GGML v0.26.0 and its Vulkan backend.
+# All text and media share upstream GGML and its Vulkan backend.
 # Legacy AGC/private-ggml comparison builds live in earlier commits.
 [[ ${SHARED_SD:-1} == 1 && ${MEDIA_VULKAN:-1} == 1 ]] || {
  echo "AGC inference was removed; this build requires shared Vulkan media" >&2; exit 2;
@@ -281,5 +281,5 @@ cp "$work/self-update/self-updater.elf" "$app/self-updater.elf"
 cp "$root/third_party/miniz/LICENSE" "$app/licenses/miniz-MIT.txt"
 cp "$llama_source/LICENSE" "$app/licenses/llama.cpp-MIT.txt"
 cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
-printf '%s\n' 'llama.cpp cb7934c52ca8710994b2ecc19775ebefcfdb8d01; GGML v0.26.0 d7cb574130e6f01ad25b3289685489200febcd74; GGML_MAX_NAME=160' > "$app/licenses/vulkan-runtime-source.txt"
+printf '%s\n' 'llama.cpp cb44fdb1892eebca072e0949875a60c11245a8bb; GGML cd6d2b75f5d3e4b2f3fe8e8fbc6c8b84ac80e74a; GGML_MAX_NAME=160' > "$app/licenses/vulkan-runtime-source.txt"
 echo "Native Vulkan app folder: $app"
