@@ -1,7 +1,7 @@
 # Native UI
 
 ProsperoAI's interface is drawn with OpenGL through
-[ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui), fetched at a
+[ps5-homebrew-ui](https://github.com/JVK3R/ps5-homebrew-ui), fetched from a mirror at a
 pinned commit when the app is built ([ui-kit/README.md](../ui-kit/README.md)). The old
 RmlUi document renderer, its bitmap-font engine and FreeType are gone from the
 repository. SDL remains for the media decoder, the input clock and the system-keyboard

@@ -6,7 +6,7 @@
 # usage: tools/prepare-ui-kit.sh           (prints the staged kit: <stage>/src)
 #        tools/prepare-ui-kit.sh --kit     (prints the kit checkout: fonts, sounds, font baker)
 #
-# The kit (https://github.com/blackbearreloaded/ps5-homebrew-ui) is a build
+# The kit (https://github.com/JVK3R/ps5-homebrew-ui) is a build
 # dependency, not part of this repository: nothing of it is copied or patched
 # here. Its pinned commit is fetched once into .deps/ui-kit/checkout and its
 # src/ is staged in .deps/ui-kit/stage, where every build compiles it from
@@ -17,9 +17,9 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 commit=f775c31d9b9809be7f26a4b6da1b1ddb28428652
-# The upstream account was renamed (2026-10-19) and blackbearreloaded/ps5-homebrew-ui
-# vanished; fetch from our full-history mirror first, then the original remote.
+# Try the restored upstream first, then the full-history mirror and legacy remote.
 urls=(
+    https://github.com/JVK3R/ps5-homebrew-ui.git
     https://github.com/Skystar9999/ps5-homebrew-ui-mirror.git
     https://github.com/blackbearreloaded/ps5-homebrew-ui.git
 )
