@@ -1,5 +1,18 @@
 # Changelog
 
+## 01.007.000
+
+- Updated the shared Vulkan inference runtime to upstream llama.cpp and GGML, including PS5
+  and Ternary Bonsai compatibility for the upstream API changes.
+- Image Studio now passes uploaded images and masks reliably, and SDXL ControlNet keeps its
+  model weights resident alongside the guide network during sampling.
+- Fixed Cover and Stems rejecting valid WAV files on PS5; both workflows now produce their
+  expected artifacts.
+- Added symlink-safe file checks for image upload leases and audio workflow inputs.
+- Verified all 25 installed curated model presets and their applicable workflows on the PS5
+  test title. Two optional local GGUFs remain outside the supported catalog because they
+  exceed available console Vulkan memory.
+
 ## Unreleased
 
 - Search now reaches 41 providers in nine selectable groups from the console itself: the

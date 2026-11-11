@@ -1,0 +1,557 @@
+{
+  "label": "pr43-upstream-llama-cpp",
+  "test_title": "PPSA99023",
+  "rounds": 1,
+  "order": [
+    "Mistral-7B-Instruct-v0.3.Q4_0.gguf",
+    "sd-turbo-fp16",
+    "qwen3.8-9b-distill-q4-k-m.gguf",
+    "realistic-vision-v51-fp16",
+    "minicpm5-2b-q8-0.gguf",
+    "sdxs-512-q8-0",
+    "granite-4.0-h-tiny-q4-k-m.gguf",
+    "sdxl-base-q8-0",
+    "bohf-12b-moe-3a-q3-k-m.gguf",
+    "raehoshi-illustxl-1-1-q8-0",
+    "ilustmix-v11-1-q8-0",
+    "sdxl-inpainting-q8-0",
+    "sd15-inpainting-q8-0",
+    "sdxl-canny-q8-0",
+    "flux2-klein-4b-q8-0",
+    "flux2-klein-9b-q4-0",
+    "z-image-turbo-q4-k",
+    "stable-audio-3-small-sfx-vulkan",
+    "ace-step-1.5-turbo-q8-0",
+    "kokoro-82m-vulkan",
+    "chatterbox-500m-q8-0",
+    "yue2-3b-q8-0",
+    "sheetsage2-orig",
+    "htdemucs-q8_0",
+    "upscalers"
+  ],
+  "method": "each round visits every installed model in interleaved text/media order; every request is a model switch; HTTP time includes model loading",
+  "runs": [
+    {
+      "round": 1,
+      "model": "Mistral-7B-Instruct-v0.3.Q4_0.gguf",
+      "kind": 0,
+      "answer": "51",
+      "correct": true,
+      "decode_tokens": 86,
+      "tokens_per_second": 72.30910184439252,
+      "generation_ms": 1244.091,
+      "decode_text": "The sky appears blue due to a process called Rayleigh scattering. When sunlight, which is made up of different wavelengths of light, travels through the atmosph",
+      "passed": true,
+      "http_seconds": 4.491,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "sd-turbo-fp16",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435249469526-1.png",
+        "bytes": 600243,
+        "sha256": "cbd5d562213629d2939aa7b6af6660513d2dd49c881c8475d548651c7977382a",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 29.385,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "qwen3.8-9b-distill-q4-k-m.gguf",
+      "kind": 0,
+      "answer": "51",
+      "correct": true,
+      "decode_tokens": 122,
+      "tokens_per_second": 53.39141377816176,
+      "generation_ms": 2368.279,
+      "decode_text": "The sky appears blue due to a phenomenon called Rayleigh scattering. When sunlight reaches Earth's atmosphere, it collides with gas molecules like nitrogen and ",
+      "passed": true,
+      "http_seconds": 7.32,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "realistic-vision-v51-fp16",
+      "kind": 1,
+      "prompt": "A portrait of a woman in a garden, natural light, realistic photography.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435286579794-3.png",
+        "bytes": 622082,
+        "sha256": "33011acdcbd8bab48ae030b87007870c02801e4ac49b9fec42e09056075d1730",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 34.274,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "minicpm5-2b-q8-0.gguf",
+      "kind": 0,
+      "answer": "51",
+      "correct": true,
+      "decode_tokens": 128,
+      "tokens_per_second": 109.92996509074416,
+      "generation_ms": 1190.648,
+      "decode_text": "The sky appears blue because of a phenomenon called Rayleigh scattering. When sunlight enters our atmosphere, it interacts with tiny molecules of gas like nitro",
+      "passed": true,
+      "http_seconds": 3.458,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "sdxs-512-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435324614974-5.png",
+        "bytes": 482196,
+        "sha256": "3ff0c37b3d41dacadfd7b26238339ee8db5dae92826484cdd11a0790fad239d7",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 8.358,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "granite-4.0-h-tiny-q4-k-m.gguf",
+      "kind": 0,
+      "answer": "51",
+      "correct": true,
+      "decode_tokens": 112,
+      "tokens_per_second": 105.30929624928133,
+      "generation_ms": 1124.47,
+      "decode_text": "The sky appears blue due to a phenomenon called Rayleigh scattering. As sunlight enters Earth's atmosphere, it collides with gas molecules, which are much small",
+      "passed": true,
+      "http_seconds": 5.286,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "sdxl-base-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435338613365-7.png",
+        "bytes": 415566,
+        "sha256": "3f1121c4342553705f248ecb97fd9f20fda8e3fd52a30dd803b8eb8fb971cb99",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 63.431,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "bohf-12b-moe-3a-q3-k-m.gguf",
+      "kind": 0,
+      "answer": "51",
+      "correct": true,
+      "decode_tokens": 119,
+      "tokens_per_second": 68.97486976609336,
+      "generation_ms": 1840.811,
+      "decode_text": "The sky appears blue due to a phenomenon called Rayleigh scattering. When sunlight enters the Earth's atmosphere, it encounters tiny molecules of gases such as ",
+      "passed": true,
+      "http_seconds": 6.814,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "raehoshi-illustxl-1-1-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435409236934-9.png",
+        "bytes": 447917,
+        "sha256": "b179bc77ff85b4f6510f330409302c33856dcc2ea561fa4f12df8b419e80f71c",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 84.9,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "ilustmix-v11-1-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435494303375-11.png",
+        "bytes": 456128,
+        "sha256": "b471ec189111a203e146c107953fbf372db2986e6d361f6c75b60ce70fdeaeb9",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 85.132,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "sdxl-inpainting-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435579613826-13.png",
+        "bytes": 684115,
+        "sha256": "f2bb5ffc2e41b8c5904a8f78c3f4d2d6ff774801f460e57ba0d5fbf8604727d8",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 63.485,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "sd15-inpainting-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435643311914-15.png",
+        "bytes": 665549,
+        "sha256": "b8cb2414cc6ffac940d071f7cf2d248f5b4a1619e42f732b7830c9b033221245",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 21.423,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "sdxl-canny-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435664910585-17.png",
+        "bytes": 415566,
+        "sha256": "3f1121c4342553705f248ecb97fd9f20fda8e3fd52a30dd803b8eb8fb971cb99",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 63.581,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "flux2-klein-4b-q8-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435728668265-19.png",
+        "bytes": 575286,
+        "sha256": "19b1fa8f57db9e950fb45c2327bcfebde30dbceb95bff482fce9420dd47b30ec",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 80.726,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "flux2-klein-9b-q4-0",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435809623792-21.png",
+        "bytes": 480841,
+        "sha256": "c5f6586ebb5bbc13932191a3a58f7a7aadf2a1ef76809a9f0ea4ba76a62ac314",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 141.161,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "z-image-turbo-q4-k",
+      "kind": 1,
+      "prompt": "A red apple on a wooden table, natural window light, photographic detail.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/image/prosperoai-image-1794435950969987-23.png",
+        "bytes": 525298,
+        "sha256": "b45aed1460501a43c56c4cd4a31be4d4d30217ce8bb0f50aa4d2be0d611afffc",
+        "width": 512,
+        "height": 512
+      },
+      "passed": true,
+      "http_seconds": 83.42,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "stable-audio-3-small-sfx-vulkan",
+      "kind": 2,
+      "prompt": "A short, clear bell chime with a soft resonant decay.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/audio/stable-audio-3-1794436034569281-24.wav",
+        "bytes": 705644,
+        "sha256": "e38c58cee0e9d3497ea7bfe6225aea025736bf3d5ed77bf7df0708501911b5eb",
+        "rate": 44100,
+        "channels": 2,
+        "seconds": 4.0,
+        "peak": 0.293975830078125,
+        "clipped_fraction": 0.0
+      },
+      "passed": true,
+      "http_seconds": 19.431,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "ace-step-1.5-turbo-q8-0",
+      "kind": 2,
+      "prompt": "A short instrumental track with warm piano, soft strings, and a gentle steady rhythm.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/audio/ace-step-1.5-1794436054076892-25.wav",
+        "bytes": 1536044,
+        "sha256": "960a095c366d2cb957f207da48c19de9496d9e25b96c36016850f273f10fc19f",
+        "rate": 48000,
+        "channels": 2,
+        "seconds": 8.0,
+        "peak": 0.915313720703125,
+        "clipped_fraction": 0.0
+      },
+      "passed": true,
+      "http_seconds": 114.654,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "kokoro-82m-vulkan",
+      "kind": 3,
+      "prompt": "Hello from Prospero AI. This is a short speech test.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/voice/kokoro-speech-1794436168897848-26.wav",
+        "bytes": 187244,
+        "sha256": "96bb2095c0a1c93b32512ac1863a24adabf772932e4a731504c4d4a9a83475d2",
+        "rate": 24000,
+        "channels": 1,
+        "seconds": 3.9,
+        "peak": 0.333160400390625,
+        "clipped_fraction": 0.0
+      },
+      "passed": true,
+      "http_seconds": 3.985,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "chatterbox-500m-q8-0",
+      "kind": 3,
+      "prompt": "Hello from Prospero AI. This is a short speech test.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/voice/chatterbox-speech-1794436186905298-27.wav",
+        "bytes": 171884,
+        "sha256": "356b0f7dfa088731868cdc6114dc08ef3ab3a4ece90e187e597149a7dd1b9468",
+        "rate": 24000,
+        "channels": 1,
+        "seconds": 3.58,
+        "peak": 0.98614501953125,
+        "clipped_fraction": 0.0
+      },
+      "passed": true,
+      "http_seconds": 14.096,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "yue2-3b-q8-0",
+      "kind": 2,
+      "prompt": "A short, clear bell chime with a soft resonant decay.",
+      "output": {
+        "path": "/download0/ProsperoAI/work/audio/yue2-1794436187332229-28.wav",
+        "bytes": 4746028,
+        "sha256": "171dd94e2b8876140a8aa77e006b78c20678b5d6ac7a5759152556017c6cd2a0",
+        "rate": 48000,
+        "channels": 2,
+        "seconds": 24.719,
+        "peak": 0.764892578125,
+        "clipped_fraction": 0.0
+      },
+      "passed": true,
+      "http_seconds": 66.749,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "sheetsage2-orig",
+      "kind": 2,
+      "passed": false,
+      "failure": "RuntimeError: Cover needs audio_options 'input_audio=/download0/ProsperoAI/work/audio/<file>.wav'",
+      "http_seconds": 0.009,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "htdemucs-q8_0",
+      "kind": 2,
+      "passed": false,
+      "failure": "RuntimeError: Stems needs audio_options 'input_audio=/download0/ProsperoAI/work/audio/<file>.wav'",
+      "http_seconds": 0.008,
+      "title_alive": true
+    },
+    {
+      "round": 1,
+      "model": "upscalers",
+      "kind": 4,
+      "passed": false,
+      "failure": "KeyError: 4",
+      "http_seconds": 0.0,
+      "title_alive": true
+    }
+  ],
+  "summary": {
+    "Mistral-7B-Instruct-v0.3.Q4_0.gguf": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 4.491,
+      "median_tokens_per_second": 72.31
+    },
+    "sd-turbo-fp16": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 29.385
+    },
+    "qwen3.8-9b-distill-q4-k-m.gguf": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 7.32,
+      "median_tokens_per_second": 53.39
+    },
+    "realistic-vision-v51-fp16": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 34.274
+    },
+    "minicpm5-2b-q8-0.gguf": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 3.458,
+      "median_tokens_per_second": 109.93
+    },
+    "sdxs-512-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 8.358
+    },
+    "granite-4.0-h-tiny-q4-k-m.gguf": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 5.286,
+      "median_tokens_per_second": 105.31
+    },
+    "sdxl-base-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 63.431
+    },
+    "bohf-12b-moe-3a-q3-k-m.gguf": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 6.814,
+      "median_tokens_per_second": 68.97
+    },
+    "raehoshi-illustxl-1-1-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 84.9
+    },
+    "ilustmix-v11-1-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 85.132
+    },
+    "sdxl-inpainting-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 63.485
+    },
+    "sd15-inpainting-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 21.423
+    },
+    "sdxl-canny-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 63.581
+    },
+    "flux2-klein-4b-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 80.726
+    },
+    "flux2-klein-9b-q4-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 141.161
+    },
+    "z-image-turbo-q4-k": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 83.42
+    },
+    "stable-audio-3-small-sfx-vulkan": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 19.431
+    },
+    "ace-step-1.5-turbo-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 114.654
+    },
+    "kokoro-82m-vulkan": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 3.985
+    },
+    "chatterbox-500m-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 14.096
+    },
+    "yue2-3b-q8-0": {
+      "passed": 1,
+      "runs": 1,
+      "median_http_seconds": 66.749
+    },
+    "sheetsage2-orig": {
+      "passed": 0,
+      "runs": 1,
+      "median_http_seconds": 0.009
+    },
+    "htdemucs-q8_0": {
+      "passed": 0,
+      "runs": 1,
+      "median_http_seconds": 0.008
+    },
+    "upscalers": {
+      "passed": 0,
+      "runs": 1,
+      "median_http_seconds": 0.0
+    }
+  },
+  "passed": false,
+  "restored_settings": {
+    "context": "4k",
+    "thinking": false,
+    "kv": "auto"
+  }
+}

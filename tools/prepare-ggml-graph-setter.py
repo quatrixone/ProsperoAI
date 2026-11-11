@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from prepare_build import write_text_if_changed
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,14 +51,14 @@ def main() -> None:
             raise SystemExit(f"{header}: expected exactly one compatibility insertion point")
         if implementation_text.count(SOURCE_GETTER) != 1:
             raise SystemExit(f"{implementation}: expected exactly one compatibility insertion point")
-        header.write_text(header_text.replace(HEADER_DECL, HEADER_DECL + "\n" + HEADER_SETTER, 1))
-        implementation.write_text(
+        write_text_if_changed(header, header_text.replace(HEADER_DECL, HEADER_DECL + "\n" + HEADER_SETTER, 1))
+        write_text_if_changed(implementation,
             implementation_text.replace(SOURCE_GETTER, SOURCE_GETTER + "\n\n" + SOURCE_SETTER, 1)
         )
     if PS5_MATH_CONDITION not in cmake_text:
         if cmake_text.count(MATH_CONDITION) != 1:
             raise SystemExit(f"{cmake}: expected exactly one math-library compatibility site")
-        cmake.write_text(cmake_text.replace(MATH_CONDITION, PS5_MATH_CONDITION, 1))
+        write_text_if_changed(cmake, cmake_text.replace(MATH_CONDITION, PS5_MATH_CONDITION, 1))
     header_changed = not header_has_setter
     print(
         f"{source}: graph setter {'added' if header_changed else 'present'}; "

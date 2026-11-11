@@ -30,7 +30,7 @@ how it is built, and what a run on a console showed.
 > on the PS5 GPU. It is not production software.
 
 > [!NOTE]
-> `vulkan-runtime` uses one upstream GGML v0.26.0/Vulkan runtime for llama.cpp text,
+> `vulkan-runtime` uses one upstream GGML/Vulkan runtime for llama.cpp text,
 > Stable Diffusion, audio.cpp and Kokoro adapters on RADV. The dedicated AGC inference
 > backend is removed. CPU operations still handle remaining media kernels; RADV
 > continues to use the platform GPU driver. See [current status](docs/VK_ACTIVE.md),
@@ -376,6 +376,7 @@ to suggest another.
 - Vision models: let a text model look at a picture.
 - Image-to-image, and variations of a generated picture.
 - More image models beside SD-Turbo, with size and step settings.
+- Qwen-Image 2.1 text-to-image using the PS5-sized GGUF diffusion and text-encoder weights.
 - Speech to text: dictate a prompt through the DualSense microphone.
 - Spoken answers: read a text answer aloud, with a choice of voices.
 - Personas and system prompts, saved per conversation.

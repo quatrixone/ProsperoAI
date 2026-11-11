@@ -89,12 +89,19 @@ class MiniCPM5Tests(unittest.TestCase):
 
     def test_existing_defaults_and_optional_catalog(self):
         models = json.loads((ROOT/'model-tools/presets.json').read_text())
-        self.assertEqual([m['id'] for m in models[:5]], [
+        curated_images = {
+            'sdxs-512-q8-0', 'sdxl-base-q8-0', 'raehoshi-illustxl-1-1-q8-0',
+            'ilustmix-v11-1-q8-0', 'sdxl-inpainting-q8-0', 'sd15-inpainting-q8-0',
+            'sdxl-canny-q8-0', 'flux2-klein-4b-q8-0', 'flux2-klein-9b-q4-0',
+            'z-image-turbo-q4-k',
+        }
+        existing_models = [model for model in models if model['id'] not in curated_images]
+        self.assertEqual([m['id'] for m in existing_models[:5]], [
             'sd-turbo-fp16', 'realistic-vision-v51-fp16',
             'stable-audio-3-small-sfx-vulkan', 'ace-step-1.5-turbo-q8-0',
             'kokoro-82m-vulkan'])
         self.assertNotIn('kokoro-82m-fp16', [model['id'] for model in models])
-        self.assertEqual(models[5]['id'], 'minicpm5-2b-q8-0.gguf')
+        self.assertEqual(existing_models[5]['id'], 'minicpm5-2b-q8-0.gguf')
         header = (ROOT/'include/model_presets.hpp').read_text()
         self.assertLess(header.index('"Mistral-7B-Instruct'), header.index('"minicpm5-2b'))
         self.assertLess(header.index('"qwen3.8-9b'), header.index('"minicpm5-2b'))

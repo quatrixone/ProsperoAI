@@ -17,7 +17,7 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 commit=f775c31d9b9809be7f26a4b6da1b1ddb28428652
-# The original repository is unavailable; mirrors provide the same pinned commit.
+# Try the restored upstream first, then the full-history mirror and legacy remote.
 urls=(
     https://github.com/JVK3R/ps5-homebrew-ui.git
     https://github.com/Skystar9999/ps5-homebrew-ui-mirror.git

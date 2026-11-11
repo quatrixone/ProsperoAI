@@ -50,7 +50,7 @@ int main(int argc, char **argv)
     ggml_set_name(tensor, name.c_str());
     assert(std::strcmp(ggml_get_name(tensor), name.c_str()) == 0);
     assert(tensor->ne[0] == 4 && tensor->type == GGML_TYPE_F32);
-    assert(std::strcmp(sd_commit(), "f89d9b13d730eabeede7314ce49dacd18d3c90c2") == 0);
+    assert(std::strcmp(sd_commit(), "b13a48219d5cdf408edcb93da6cd69b612ed03d3") == 0);
     if (argc > 2)
     {
         std::ifstream file(argv[2], std::ios::binary);

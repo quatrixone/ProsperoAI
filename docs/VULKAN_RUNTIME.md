@@ -1,7 +1,7 @@
 # vulkan-runtime
 
-The PS5 runtime is migrating to upstream llama.cpp `cb7934c52ca8710994b2ecc19775ebefcfdb8d01`
-and one shared upstream GGML v0.26.0 `d7cb574130e6f01ad25b3289685489200febcd74` ABI
+The PS5 runtime pins upstream llama.cpp `cb44fdb1892eebca072e0949875a60c11245a8bb`
+and one shared upstream GGML `cd6d2b75f5d3e4b2f3fe8e8fbc6c8b84ac80e74a` ABI
 (`GGML_MAX_NAME=160`). Text, source-built Stable Diffusion, audio.cpp and Kokoro link to the
 same upstream GGML/Vulkan target through model adapters. The production app keeps the RADV
 link recipe and console AGC platform-driver imports; AGC inference is removed. Prism's private

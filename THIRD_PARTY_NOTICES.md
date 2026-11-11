@@ -56,7 +56,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 The shared-Vulkan SD compile probe fetches stable-diffusion.cpp (MIT) at
 `f89d9b13d730eabeede7314ce49dacd18d3c90c2`, pinned in `tools/deps.json`.
-The experimental shared folder builds this source against upstream GGML v0.26.0; default
+The experimental shared folder builds this source against the pinned upstream GGML; default
 release packaging retains the previously shipped media runtime until console gates pass.
 Host-only recursive PickleValue adaptation and constant-initialized TLS declarations
 are maintained in `tools/vulkan-runtime/`; the pinned source checkout is unchanged.

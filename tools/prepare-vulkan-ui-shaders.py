@@ -2,6 +2,7 @@
 """Compile the pinned upstream UI shader math to Vulkan SPIR-V, without redesign."""
 import argparse
 from pathlib import Path
+from prepare_build import write_text_if_changed
 import re
 import struct
 import subprocess
@@ -56,12 +57,15 @@ for name, file, vertex, fragment in programs:
         prefix = '#version 450\nlayout(push_constant) uniform Push { ' + blocks[name] + ' } pc;\n'
         prefix += ''.join(f'#define {key} ({value})\n' for key, value in macros[name].items())
         glsl = args.output / f'{name}.{stage}'
-        glsl.write_text(prefix + shader)
+        generated_source = prefix + shader
+        source_unchanged = glsl.exists() and glsl.read_text() == generated_source
+        write_text_if_changed(glsl, generated_source)
         spirv = glsl.with_suffix(glsl.suffix + '.spv')
-        subprocess.run(['glslangValidator', '-V', '--target-env', 'vulkan1.1', str(glsl), '-o', str(spirv)], check=True)
+        if not source_unchanged or not spirv.exists():
+            subprocess.run(['glslangValidator', '-V', '--target-env', 'vulkan1.1', str(glsl), '-o', str(spirv)], check=True)
         data = spirv.read_bytes()
         words = struct.unpack('<' + 'I' * (len(data) // 4), data)
         header.append(f'inline constexpr std::uint32_t {name}_{stage}[] = {{')
         header.extend('    ' + ','.join(hex(w) for w in words[i:i+8]) + ',' for i in range(0,len(words),8))
         header.append('};')
-(args.output / 'ui_shaders.hpp').write_text('\n'.join(header) + '\n')
+write_text_if_changed(args.output / 'ui_shaders.hpp', '\n'.join(header) + '\n')

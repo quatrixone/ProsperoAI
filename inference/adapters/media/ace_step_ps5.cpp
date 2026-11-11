@@ -179,7 +179,10 @@ extern "C" int ps5_ace_step_generate(const char *root, const char *prompt,
         std::snprintf(seed, sizeof(seed), "%u", settings.audio_seed);
         if (!request || audiocpp_request_set_text(request, prompt, nullptr) != AUDIOCPP_OK ||
             audiocpp_request_set_option(request, "duration_sec", duration) != AUDIOCPP_OK ||
-            audiocpp_request_set_option(request, "seed", seed) != AUDIOCPP_OK)
+            audiocpp_request_set_option(request, "seed", seed) != AUDIOCPP_OK ||
+            (!settings.audio_lyrics.empty() &&
+             audiocpp_request_set_option(request, "lyrics", settings.audio_lyrics.c_str()) !=
+                 AUDIOCPP_OK))
         {
             log_error("request setup failed");
             result_code = 3;

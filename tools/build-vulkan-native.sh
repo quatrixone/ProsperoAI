@@ -9,7 +9,7 @@ bash "$root/tools/setup-pacbrew-dependencies.sh" --all >/dev/null
 ref="$root/.deps/mihawk-vulkan-review"
 sdk="$ref/.deps/native/ps5-payload-sdk"
 archive="$ref/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a"
-# All text and media now share upstream GGML v0.26.0 and its Vulkan backend.
+# All text and media share upstream GGML and its Vulkan backend.
 # Legacy AGC/private-ggml comparison builds live in earlier commits.
 [[ ${SHARED_SD:-1} == 1 && ${MEDIA_VULKAN:-1} == 1 ]] || {
  echo "AGC inference was removed; this build requires shared Vulkan media" >&2; exit 2;
@@ -43,11 +43,14 @@ sources=(src/kv_budget.cpp src/prefix_reuse.cpp src/main.cpp src/native_app.cpp 
  src/font_set.cpp src/media_preview.cpp src/dev_script.cpp src/gpt_input.cpp src/gpt_ime.cpp
  search-engine/src/query.cpp search-engine/src/providers.cpp search-engine/src/scan.cpp
  search-engine/src/cache.cpp search-engine/src/search.cpp search-engine/src/transport.cpp
- src/media_output_ps5.cpp src/voice_recorder.cpp src/session_store.cpp src/runtime_support.cpp
+ src/media_output_ps5.cpp src/voice_recorder.cpp src/session_store.cpp src/image_codec.cpp src/audio_workflows.cpp src/runtime_support.cpp
  src/agc_lifecycle.cpp inference/router.cpp inference/adapters/registry.cpp
  inference/adapters/media/stable_diffusion_ps5.cpp inference/adapters/media/stable_audio_ps5.cpp
  inference/adapters/media/kokoro_ps5.cpp inference/adapters/media/ace_step_ps5.cpp
- inference/adapters/media/chatterbox_ps5.cpp
+ inference/adapters/media/chatterbox_ps5.cpp inference/adapters/media/yue2_ps5.cpp
+ inference/adapters/media/sheetsage_ps5.cpp
+ inference/adapters/media/stems_ps5.cpp
+ tools/yue2-ggml-compat.cpp
  vulkan/storage.cpp vulkan/storage_paths.cpp vulkan/elevation/elevation.cpp vulkan/debug_tee.cpp src/debug_log.cpp
  src/native_ui_update.cpp vulkan/update_ps5.cpp
  inference/adapters/llama/vulkan.cpp vulkan/http_server.cpp vulkan/model_downloader_ps5.cpp
@@ -75,11 +78,19 @@ for relative in "${sources[@]}"; do
  abi_definitions=()
  abi_definitions+=(-DGGML_MAX_NAME=160)
  case "$relative" in
+  src/image_codec.cpp)
+   media_includes=(-I "$root/.deps/stable-diffusion-vulkan/thirdparty");;
   inference/adapters/media/stable_diffusion_ps5.cpp)
    media_includes=(-I "$root/.deps/stable-diffusion-vulkan/include");;
   inference/adapters/media/stable_audio_ps5.cpp)
    media_includes=(-I "$root/build/audio-cpp-upstream/include");;
   inference/adapters/media/ace_step_ps5.cpp)
+   media_includes=(-I "$root/build/audio-cpp-upstream/include");;
+  inference/adapters/media/yue2_ps5.cpp)
+   media_includes=(-I "$root/build/audio-cpp-upstream/include");;
+  inference/adapters/media/sheetsage_ps5.cpp)
+   media_includes=(-I "$root/build/audio-cpp-upstream/include");;
+  inference/adapters/media/stems_ps5.cpp)
    media_includes=(-I "$root/build/audio-cpp-upstream/include");;
   inference/adapters/media/chatterbox_ps5.cpp)
    media_includes=(-I "$root/build/audio-cpp-upstream/include"
@@ -87,6 +98,8 @@ for relative in "${sources[@]}"; do
   inference/adapters/media/kokoro_ps5.cpp)
    media_includes=(-I "$root/.deps/kokoro.cpp/include"
     -I "$root/build/ggml-upstream/include");;
+  tools/yue2-ggml-compat.cpp)
+   media_includes=(-I "$root/build/ggml-upstream/include");;
  esac
  object="$work/obj/${relative//\//_}.o"
  ninja_inputs=("$root/$relative" "$root/tooling/prospero-clang18")
@@ -238,6 +251,7 @@ mkdir -p "$app/assets/fonts" "$app/assets/audio/sfx"
 cp "$fonts/"*.huifont "$fonts/"*.txt "$app/assets/fonts/"
 cp -a "$kit/assets/audio/sfx/." "$app/assets/audio/sfx/"
 mkdir -p "$app/assets/web/fonts"
+rm -f "$app/assets/web/workspace-audio.js"
 cp -a "$root/assets/web/." "$app/assets/web/"
 rm -rf "$app/assets/audio/chatterbox-voices"
 for font in Inter-Regular.ttf Inter-SemiBold.ttf Montserrat-Medium.ttf Inter-LICENSE.txt Montserrat-LICENSE.txt; do
@@ -267,5 +281,5 @@ cp "$work/self-update/self-updater.elf" "$app/self-updater.elf"
 cp "$root/third_party/miniz/LICENSE" "$app/licenses/miniz-MIT.txt"
 cp "$llama_source/LICENSE" "$app/licenses/llama.cpp-MIT.txt"
 cp "$root/THIRD_PARTY_NOTICES.md" "$app/licenses/THIRD_PARTY_NOTICES.md"
-printf '%s\n' 'llama.cpp cb7934c52ca8710994b2ecc19775ebefcfdb8d01; GGML v0.26.0 d7cb574130e6f01ad25b3289685489200febcd74; GGML_MAX_NAME=160' > "$app/licenses/vulkan-runtime-source.txt"
+printf '%s\n' 'llama.cpp cb44fdb1892eebca072e0949875a60c11245a8bb; GGML cd6d2b75f5d3e4b2f3fe8e8fbc6c8b84ac80e74a; GGML_MAX_NAME=160' > "$app/licenses/vulkan-runtime-source.txt"
 echo "Native Vulkan app folder: $app"

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from prepare_build import write_text_if_changed
 
 
 def extract_block(text: str, marker: str) -> str:
@@ -49,7 +50,7 @@ def insert_once(path: Path, anchor: str, addition: str) -> None:
         return
     if anchor not in text:
         raise SystemExit(f"{path}: missing insertion anchor: {anchor}")
-    path.write_text(text.replace(anchor, addition + anchor, 1))
+    write_text_if_changed(path, text.replace(anchor, addition + anchor, 1))
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
@@ -58,12 +59,22 @@ def replace_once(path: Path, old: str, new: str) -> None:
         return
     if text.count(old) != 1:
         raise SystemExit(f"{path}: expected one replacement anchor, got {text.count(old)}: {old[:100]!r}")
-    path.write_text(text.replace(old, new, 1))
+    write_text_if_changed(path, text.replace(old, new, 1))
 
 
 def prepare(llama: Path, prism: Path) -> None:
     upstream = llama / "src"
     prism_src = prism / "src"
+
+    # Recent upstream already carries the verified Prism Hadamard path. Keep
+    # its implementation instead of layering this older source adaptation on top.
+    if all(marker in (upstream / file).read_text() for file, marker in (
+        ("llama-model.cpp", "void llama_model_base::load_hparams_hadamard"),
+        ("llama-graph.cpp", "llm_graph_context::build_hadamard_input"),
+        ("llama-context.cpp", "static void llama_verify_hadamard_graph"),
+    )):
+        print("Upstream llama.cpp already includes the Bonsai Hadamard path")
+        return
 
     # The model metadata and its post-load transform buffers are copied from the
     # pinned Prism model loader. The rest of the upstream loader stays untouched.

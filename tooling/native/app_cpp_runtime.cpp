@@ -48,7 +48,11 @@ extern "C"
 namespace
 {
 constexpr std::size_t direct_alignment = 0x4000;
-constexpr std::size_t direct_arena_size = 4ULL * 1024 * 1024 * 1024;
+// SheetSage2 wants 1 GiB + 3 GiB weight stores plus graph pools inside this one
+// arena; 4 GiB was sized for the YuE2 buffers alone. The kernel refuses the
+// whole arena if the pool cannot hold it, and every caller then fails the same
+// clean way it did before, so growing it is the safe direction.
+constexpr std::size_t direct_arena_size = 6ULL * 1024 * 1024 * 1024;
 constexpr std::size_t small_mapped_allocation_limit = 2ULL * 1024 * 1024;
 constexpr std::size_t mapped_allocation_slots = 256;
 constexpr std::uint64_t direct_allocation_magic = 0x505335414c4c4f43ULL;
