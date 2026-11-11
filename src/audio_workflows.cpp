@@ -95,9 +95,12 @@ bool valid_artifact_name(const std::string &name)
 
 bool regular_file(const std::string &path, struct stat &info)
 {
-    if (lstat(path.c_str(), &info) != 0)
+    const int descriptor = open(path.c_str(), O_RDONLY | O_NOFOLLOW);
+    if (descriptor < 0)
         return false;
-    return S_ISREG(info.st_mode);
+    const bool regular = fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode);
+    close(descriptor);
+    return regular;
 }
 
 std::uint16_t read_le16(std::FILE *file)

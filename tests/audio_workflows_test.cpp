@@ -321,6 +321,8 @@ int main(int argc, char **argv)
 
     std::filesystem::create_directories(PROSPERO_AUDIO_DIR);
     write_wav(std::string(PROSPERO_AUDIO_DIR) + "source.wav");
+    std::filesystem::create_symlink(std::string(PROSPERO_AUDIO_DIR) + "source.wav",
+                                    std::string(PROSPERO_AUDIO_DIR) + "source-link.wav");
     std::ofstream(std::string(PROSPERO_AUDIO_DIR) + "source-malformed.wav", std::ios::binary)
         << "not a wav";
     write_wav(std::string(PROSPERO_AUDIO_DIR) + "source-unsupported.wav", 6, 1, 16000, 8, 2);
@@ -347,6 +349,10 @@ int main(int argc, char **argv)
     runtime_resident = false;
     available_memory = 12ull << 30;
     expected_id = "sheetsage-model";
+    const unsigned before_symlink_source = generation_calls;
+    const auto symlink_source =
+        prospero::audio_workflows::cover_to_abc(expected_id, "source-link.wav", {});
+    assert(!symlink_source.ok && generation_calls == before_symlink_source);
     expected_prompt = "Cover to ABC: source.wav";
     expected_lyrics = settings.audio_lyrics;
     expected_options = "original=option\ninput_audio=" PROSPERO_AUDIO_DIR "source.wav";

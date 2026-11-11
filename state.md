@@ -1,13 +1,13 @@
 # PR #43 Image Studio — handoff state
 
-Last updated: 2026-11-11
+Last updated: 2026-11-12
 
 ## Current work
 
 - Checkout: `/home/dietpi/Projects/console/ProsperoAI`
 - Branch: `codex/five-improvements-plan`, PR #43 open as draft.
-- PR head before this work: `0cb7bf66ddc8d604ac39e03459c72a5a63cedf4a`.
-- Latest `origin/main`: `ab13fea738fc3fccdaceab6d808d8e83dafe1ac4`; PR conflicts with main's UI-kit source fix.
+- PR head before follow-up fixes: `1b62b87ad4e2501824e8b6b2946ea973d50e4b61`.
+- Latest `origin/main`: `ab13fea738fc3fccdaceab6d808d8e83dafe1ac4`; UI-kit source conflict was resolved and PR is mergeable.
 - Test title: `PPSA99023`; currently running. Do not touch `PPSA99004` on console.
 - Console setup is already permission-free in this environment; `tools/ps5ctl.py doctor` passes.
 
@@ -20,22 +20,24 @@ Last updated: 2026-11-11
 - Remote Play welcome/workspace screenshot reviewed: clean dark/gold layout. Screenshot: `build/pr43-validation/screenshots/upstream-welcome.jpg`.
 - Validation details: `docs/performance/2026-11-11/pr43-upstream-validation.json`; per-preset run data: `docs/performance/2026-11-11/pr43-upstream-all-models.json`.
 
-## Model validation and blockers
+## Follow-up validation (2026-11-12)
 
-- 22/25 catalog entries passed the generic benchmark (five text, twelve image generation requests, five audio/speech generation requests); generic image calls do not prove inpainting or ControlNet functionality.
-- Ten ordinary text-to-image outputs looked plausible. Inpainting and ControlNet outputs were poor under generic text-to-image input; proper image upload IDs were rejected, so these modes remain unverified.
-- Stable Audio 3, ACE-Step, Kokoro, Chatterbox and YuE2 generated valid audio outputs. SheetSage Cover and HTDemucs Stems could not open a WAV source even though it was listed over FTP; both remain blocked.
-- Real-ESRGAN was independently verified at 2x (1024x1024) and 4x (2048x2048).
-- Two extra local standalone GGUFs (Gemma 4 26B and Qwen3.8 27B) failed to load on Vulkan; Bonsai and Qwen3VL passed. Two other GGUF files are components and were not tested as standalone models.
-- Do not describe all models/features as passing. Resolve or clearly scope these issues before a release claiming full model support.
+- Image upload lease validation and audio source validation now open files with `O_NOFOLLOW` and verify them with `fstat`; symlink regression checks were added.
+- SDXL ControlNet now budgets memory for both model weights and its guide-network sampling workspace.
+- On `PPSA99023`, real image uploads and both inpainting presets passed; downloaded outputs were visually reviewed. SDXL Canny ControlNet passed with a real guide and its default 25 steps; output was visually reviewed.
+- SheetSage Cover completed in about 41 seconds and produced ABC plus event JSON. HTDemucs produced all five expected stem WAV files.
+- The 25 installed curated presets have successful generic or workflow-specific checks. Real-ESRGAN 2x and 4x passed. Remote Play welcome/workspace screenshot remains clean and readable.
+- `make test`: 138 passed, 2 skipped; host integration suite passed. `make lint` passed.
+- Two optional non-catalog local models (Gemma 4 26B and Qwen3.8 27B) exceed available console Vulkan memory. This does not establish arbitrary local GGUF support. Component GGUFs are not standalone models.
+- Full results: `docs/performance/2026-11-12/pr43-console-validation.json`.
 
 ## PR and release next steps
 
-1. Merge latest `origin/main` into this branch; preserve its JVK3R UI-kit source and combine the fallback mirror list.
-2. Inspect the two workflow input failures and unsupported local GGUFs if release scope requires all-model coverage.
-3. Rerun the build and checks after merge, update PR description/title, and complete the PR/release flow only with accurate validation claims.
-4. Clean only the task-owned temporary input `/data/prosperoai/work/audio/pr43-input.wav` if it still exists. Preserve generated media in the persistent work folders and all user `work/` content.
+1. Commit and push the verified fixes and validation report to PR #43.
+2. Wait for PR checks, then merge and publish the requested release if they pass.
+3. Keep claims scoped to the 25 installed curated presets and mention the two optional local GGUF memory limits.
+4. Preserve generated media in persistent work folders and all user `work/` content.
 
 ## PS5 state
 
-`PPSA99023` is mounted and its app process is alive. No reboot was performed. Latest deployed build is the PR #43 upstream llama.cpp/GGML folder build.
+`PPSA99023` is mounted and its app process is alive after workflow runs. No reboot was performed. Latest deployed build is the PR #43 upstream llama.cpp/GGML folder build with the verified file and ControlNet fixes.

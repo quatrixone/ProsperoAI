@@ -470,17 +470,22 @@ bool ensure_context(const char *root)
     // allocator's own blocks and whatever the previous model left behind. A constant
     // cannot track that, which is why Z-Image failed by 175 MB after following the 9B.
     //
-    // Only the split-file presets get it. The reserve below is measured at 1024x1024 and
-    // is far too generous for a model that fits comfortably: applied to every image model
-    // it sent SDXL Inpainting's weights to disk and took one render from 77 s to 1643 s.
+    // Split-file models and ControlNet get a bounded resident weight budget. The larger
+    // ControlNet reserve is measured from its additional guide-network sampling workspace;
+    // applying either reserve to ordinary inpainting sent weights to disk and made it crawl.
     char weight_budget[16]{};
     std::uint64_t free_bytes = 0, total_bytes = 0;
     constexpr std::uint64_t kSamplingReserveBytes = 5632ull << 20;
+    constexpr std::uint64_t kControlNetSamplingReserveBytes = 6656ull << 20;
     constexpr std::uint64_t kSmallestUsefulBudgetBytes = 2048ull << 20;
-    if (flux2_klein && gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
-        free_bytes > kSamplingReserveBytes + kSmallestUsefulBudgetBytes &&
+    const bool has_controlnet = layout.control_net[0] != '\0';
+    const std::uint64_t sampling_reserve = has_controlnet ? kControlNetSamplingReserveBytes
+                                           : flux2_klein ? kSamplingReserveBytes : 0;
+    if ((flux2_klein || has_controlnet) &&
+        gpt_runtime_vulkan_memory(&free_bytes, &total_bytes) &&
+        free_bytes > sampling_reserve + kSmallestUsefulBudgetBytes &&
         std::snprintf(weight_budget, sizeof(weight_budget), "%.2f",
-                      static_cast<double>(free_bytes - kSamplingReserveBytes) /
+                      static_cast<double>(free_bytes - sampling_reserve) /
                           static_cast<double>(1ull << 30)) <
             static_cast<int>(sizeof(weight_budget)))
         parameters.max_vram = weight_budget;

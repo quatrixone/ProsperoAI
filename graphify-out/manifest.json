@@ -362,10 +362,10 @@
     "semantic_hash": "59b851a4d6aae339242de7c724651ec1"
   },
   "inference/adapters/media/stable_diffusion_ps5.cpp": {
-    "mtime": 1793752684.4467247,
-    "seen": 1794434127.372447,
-    "ast_hash": "0057b8bdeb73f947ce9bad109e1cc265",
-    "semantic_hash": "0057b8bdeb73f947ce9bad109e1cc265"
+    "mtime": 1794438502.573422,
+    "seen": 1794439719.7827861,
+    "ast_hash": "b11e2ab8d9f1d8b00b1beaf4471bddc7",
+    "semantic_hash": "b11e2ab8d9f1d8b00b1beaf4471bddc7"
   },
   "inference/adapters/media/stems_ps5.cpp": {
     "mtime": 1793691177.8967762,
@@ -1023,10 +1023,10 @@
     "semantic_hash": "cd1563f574c6a00b8c4352991dd84d7a"
   },
   "tests/http_api_harness.cpp": {
-    "mtime": 1793749895.9127762,
-    "seen": 1794434127.3792634,
-    "ast_hash": "88f43ebb99703a860e757d54eb06b6a3",
-    "semantic_hash": "88f43ebb99703a860e757d54eb06b6a3"
+    "mtime": 1794437727.089422,
+    "seen": 1794439719.7937217,
+    "ast_hash": "24a588d570996038e6a35d98b29cd528",
+    "semantic_hash": "24a588d570996038e6a35d98b29cd528"
   },
   "tests/http_lifecycle_test.cpp": {
     "mtime": 1793691177.9087763,
@@ -1732,8 +1732,8 @@
     "semantic_hash": "3fe25d9a4bb2b64085ee72f99e9f057a"
   },
   "tools/build-vulkan-native.sh": {
-    "mtime": 1794433261.593422,
-    "seen": 1794434127.3856225,
+    "mtime": 1794436937.637422,
+    "seen": 1794439719.8054733,
     "ast_hash": "4c71725331d2eb8567a73b9b8cf77c73",
     "semantic_hash": "4c71725331d2eb8567a73b9b8cf77c73"
   },
@@ -1798,8 +1798,8 @@
     "semantic_hash": "1e3135d42403efb0d3fe513641ab3b43"
   },
   "tools/deps.json": {
-    "mtime": 1794433242.805422,
-    "seen": 1794434127.3861182,
+    "mtime": 1794436937.637422,
+    "seen": 1794439719.806419,
     "ast_hash": "89eb88d0e04fe1fc8b71a492cccf9ba3",
     "semantic_hash": "89eb88d0e04fe1fc8b71a492cccf9ba3",
     "ast_empty": true
@@ -1937,14 +1937,14 @@
     "semantic_hash": "f4c6cfa3ef2a512008ac739fda0d3d73"
   },
   "tools/prepare-bonsai-ggml.py": {
-    "mtime": 1794433325.461422,
-    "seen": 1794434127.3871398,
+    "mtime": 1794436937.637422,
+    "seen": 1794439719.808452,
     "ast_hash": "b924122b3b74574a2beb619e9c3f974b",
     "semantic_hash": "b924122b3b74574a2beb619e9c3f974b"
   },
   "tools/prepare-bonsai-llama.py": {
-    "mtime": 1794433024.941422,
-    "seen": 1794434127.3871903,
+    "mtime": 1794436937.637422,
+    "seen": 1794439719.8084965,
     "ast_hash": "32e70336bd8eb718caa9eca4e6fe433b",
     "semantic_hash": "32e70336bd8eb718caa9eca4e6fe433b"
   },
@@ -1967,14 +1967,14 @@
     "semantic_hash": "711779f5b5b7dbb2dad48422de8dd3a6"
   },
   "tools/prepare-llama-ps5-io.py": {
-    "mtime": 1794433391.469422,
-    "seen": 1794434127.3873706,
-    "ast_hash": "08c4f8b357ad4fafd2cfb7129f19b0b6",
-    "semantic_hash": "08c4f8b357ad4fafd2cfb7129f19b0b6"
+    "mtime": 1794436937.637422,
+    "seen": 1794439719.8088367,
+    "ast_hash": "7e61aecaeb4ab4857448ae0dc6386132",
+    "semantic_hash": "7e61aecaeb4ab4857448ae0dc6386132"
   },
   "tools/prepare-llama-ps5-vulkan.py": {
-    "mtime": 1794433411.241422,
-    "seen": 1794434127.3874156,
+    "mtime": 1794436937.637422,
+    "seen": 1794439719.8088808,
     "ast_hash": "6f7fab6d33ff1de8ff5fe5ffb158e114",
     "semantic_hash": "6f7fab6d33ff1de8ff5fe5ffb158e114"
   },
@@ -1985,10 +1985,10 @@
     "semantic_hash": "1991c652f527ac0e0ce5d809db2a37f2"
   },
   "tools/prepare-ui-kit.sh": {
-    "mtime": 1794129342.5757155,
-    "seen": 1794434127.3875065,
-    "ast_hash": "ca7bc8a776f54a22952cc525fe277a5a",
-    "semantic_hash": "ca7bc8a776f54a22952cc525fe277a5a"
+    "mtime": 1794436958.749422,
+    "seen": 1794439719.80901,
+    "ast_hash": "d6ea71308b23521b2c9b2ba76b82ce74",
+    "semantic_hash": "d6ea71308b23521b2c9b2ba76b82ce74"
   },
   "tools/prepare-vulkan-ui-shaders.py": {
     "mtime": 1793691177.8247762,
@@ -2813,10 +2813,10 @@
     "semantic_hash": "1d5a4e60996841964f87ee30dbea73f3"
   },
   "vulkan/http_server.cpp": {
-    "mtime": 1793749880.6047764,
-    "seen": 1794434127.3956354,
-    "ast_hash": "8459d16ef93b515f0c41d411f5d9f92b",
-    "semantic_hash": "8459d16ef93b515f0c41d411f5d9f92b"
+    "mtime": 1794437727.085422,
+    "seen": 1794439719.824304,
+    "ast_hash": "34082a0a5674f800d15ddb13e520e504",
+    "semantic_hash": "34082a0a5674f800d15ddb13e520e504"
   },
   "vulkan/http_server.hpp": {
     "mtime": 1793691177.9287763,
@@ -2939,10 +2939,10 @@
     "semantic_hash": "e44ea83d3c1d285f42371a4974514e2d"
   },
   "src/audio_workflows.cpp": {
-    "mtime": 1793726234.4127762,
-    "seen": 1794434127.3776028,
-    "ast_hash": "5547af7b677937ab7cb1550830991225",
-    "semantic_hash": "5547af7b677937ab7cb1550830991225"
+    "mtime": 1794437727.085422,
+    "seen": 1794439719.7905304,
+    "ast_hash": "b0db5c7a97ee29e885803bd20d831870",
+    "semantic_hash": "b0db5c7a97ee29e885803bd20d831870"
   },
   "src/image_codec.cpp": {
     "mtime": 1793691177.9007764,
@@ -2951,10 +2951,10 @@
     "semantic_hash": "d65ee99ae9d6f7028f09e7443be9392f"
   },
   "tests/audio_workflows_test.cpp": {
-    "mtime": 1793726260.8807762,
-    "seen": 1794434127.3790243,
-    "ast_hash": "1f2685f42aa27338b38532cd2b46aa7e",
-    "semantic_hash": "1f2685f42aa27338b38532cd2b46aa7e"
+    "mtime": 1794438548.285422,
+    "seen": 1794439719.7932367,
+    "ast_hash": "b8c688ad3ba0ceaafdc91998dc5c1bc9",
+    "semantic_hash": "b8c688ad3ba0ceaafdc91998dc5c1bc9"
   },
   "tests/image_checkpoint_layout_test.cpp": {
     "mtime": 1793706546.8607762,
@@ -3177,5 +3177,19 @@
     "seen": 1794434127.4012392,
     "ast_hash": "c42abb580d01158511a7961ef3a309f3",
     "semantic_hash": "c42abb580d01158511a7961ef3a309f3"
+  },
+  "docs/performance/2026-11-11/pr43-upstream-all-models.json": {
+    "mtime": 1794435834.493422,
+    "seen": 1794439719.7782607,
+    "ast_hash": "5d45463337cdc8266cc96f3572d7b8e2",
+    "semantic_hash": "5d45463337cdc8266cc96f3572d7b8e2",
+    "ast_empty": true
+  },
+  "docs/performance/2026-11-11/pr43-upstream-validation.json": {
+    "mtime": 1794436934.269422,
+    "seen": 1794439719.7782638,
+    "ast_hash": "474f33c139aed61abb5adcf5291a0d2c",
+    "semantic_hash": "474f33c139aed61abb5adcf5291a0d2c",
+    "ast_empty": true
   }
 }

@@ -594,6 +594,17 @@ int main(int argc, char **argv)
         const std::string path = created.path;
         finish_image_upload(&created, false);
 
+        const std::string target = path + ".target";
+        if (::rename(path.c_str(), target.c_str()) != 0 ||
+            ::symlink(target.c_str(), path.c_str()) != 0)
+            return 5;
+        ImageUploadLease symlink_lease{};
+        const bool rejected_symlink = !acquire_image_upload(id.c_str(), &symlink_lease);
+        ::unlink(path.c_str());
+        ::rename(target.c_str(), path.c_str());
+        if (!rejected_symlink)
+            return 5;
+
         ImageUploadLease leased{};
         if (!acquire_image_upload(id.c_str(), &leased))
             return 5;

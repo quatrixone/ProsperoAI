@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-12",
+  "pull_request": 43,
+  "test_title": "PPSA99023",
+  "llama_cpp": "cb44fdb1892eebca072e0949875a60c11245a8bb",
+  "ggml": "cd6d2b75f5d3e4b2f3fe8e8fbc6c8b84ac80e74a",
+  "host": {
+    "make_test": "pass: 138 tests, 2 skipped, host integration suite passed",
+    "make_lint": "pass"
+  },
+  "ps5": {
+    "title_alive_after_tests": true,
+    "image_upload_lease": "pass",
+    "sdxl_inpainting": "pass: real image and mask, 512x512 output visually reviewed",
+    "sd15_inpainting": "pass: real image and mask, 512x512 output visually reviewed",
+    "sdxl_controlnet": "pass: real guide image, Canny preprocessing, catalog defaults including 25 steps; 512x512 output visually reviewed",
+    "sheetsage_cover": "pass: real WAV source; ABC and event JSON artifacts produced (HTTP 200, about 41 seconds)",
+    "htdemucs_stems": "pass: real WAV source; drums, bass, other, vocals and instrumental WAV artifacts produced (HTTP 200)",
+    "remote_play_visual_review": "Welcome/workspace screenshot reviewed; dark/gold UI is clean and readable.",
+    "screenshots": [
+      "build/pr43-validation/screenshots/upstream-welcome.jpg",
+      "build/pr43-validation/model-artifacts/sdxl-inpainting.png",
+      "build/pr43-validation/model-artifacts/controlnet-default.png"
+    ]
+  },
+  "catalog": {
+    "installed_presets": 25,
+    "generic_generation_checks_passed": 22,
+    "additional_workflow_checks": [
+      "SDXL inpainting",
+      "SD 1.5 inpainting",
+      "SDXL Canny ControlNet",
+      "SheetSage Cover",
+      "HTDemucs Stems",
+      "Real-ESRGAN 2x and 4x"
+    ],
+    "interpretation": "Every installed curated preset and each workflow-specific path exercised on this console completed successfully. The generic check is not applicable to the workflow-only presets."
+  },
+  "optional_non_catalog_models": {
+    "Ternary-Bonsai-2-27B-PTQ1_0.gguf": "pass",
+    "Qwen3VL-8B-Instruct-Q4_K_M.gguf": "pass",
+    "Gemma-4-26B-A4B-it-Q4_K_M.gguf": "not supported on this console: Vulkan admission refused because the model exceeds available memory",
+    "Qwen3.8-27B-UD-Q2_K_XL.gguf": "not supported on this console: Vulkan admission refused because the model exceeds available memory",
+    "component_GGUFs": "not standalone models; not tested as independent models"
+  },
+  "release_scope": "All 25 installed curated presets plus workflow-specific checks passed. This does not claim arbitrary local GGUF compatibility; two optional local large models exceed available PS5 Vulkan memory."
+}

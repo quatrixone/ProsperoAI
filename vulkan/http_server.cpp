@@ -1991,8 +1991,13 @@ void cleanup_expired_image_uploads(std::time_t now)
         struct stat info
         {
         };
-        if (::lstat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode) &&
-            std::difftime(now, info.st_mtime) >= 900.0)
+        const int descriptor = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW);
+        const bool expired = descriptor >= 0 && ::fstat(descriptor, &info) == 0 &&
+                             S_ISREG(info.st_mode) &&
+                             std::difftime(now, info.st_mtime) >= 900.0;
+        if (descriptor >= 0)
+            ::close(descriptor);
+        if (expired)
             ::unlink(path.c_str());
     }
     ::closedir(entries);
@@ -2059,9 +2064,13 @@ bool acquire_image_upload(const char *id, ImageUploadLease *lease)
     struct stat info
     {
     };
-    if (::lstat(path.c_str(), &info) != 0 || !S_ISREG(info.st_mode) ||
-        std::difftime(now, info.st_mtime) >= 900.0 ||
-        !active_image_upload_ids.insert(upload_id).second)
+    const int descriptor = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW);
+    if (descriptor < 0)
+        return false;
+    const bool valid = ::fstat(descriptor, &info) == 0 && S_ISREG(info.st_mode) &&
+                       std::difftime(now, info.st_mtime) < 900.0;
+    ::close(descriptor);
+    if (!valid || !active_image_upload_ids.insert(upload_id).second)
         return false;
     lease->id = upload_id;
     lease->path = path;
