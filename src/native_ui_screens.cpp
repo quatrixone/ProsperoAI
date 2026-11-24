@@ -12,11 +12,29 @@ namespace prospero
 {
 namespace
 {
-constexpr const char *kKinds[] = {"CONVERSATION", "IMAGE", "SOUND", "VOICE"};
-constexpr const char *kKindNames[] = {"Converse", "Imagine", "Compose", "Speak"};
-constexpr const char *kKindTags[] = {"01 / TEXT", "02 / IMAGE", "03 / SOUND", "04 / VOICE"};
-constexpr const char *kKindLines[] = {"Conversation model", "Image model", "Sound model",
-                                      "Voice model"};
+std::array<const char *, 4> kKindNames()
+{
+    return {TR("screen.converse", "Converse"), TR("screen.imagine", "Imagine"),
+            TR("screen.compose", "Compose"), TR("screen.speak", "Speak")};
+}
+const char *kind_label_tr(int kind)
+{
+    const std::array<const char *, 4> labels = {
+        TR("kind.conversation", "CONVERSATION"), TR("kind.image", "IMAGE"),
+        TR("kind.sound", "SOUND"), TR("kind.voice", "VOICE")};
+    return labels[static_cast<std::size_t>(kind)];
+}
+std::array<const char *, 4> kKindTags()
+{
+    return {TR("screen.01_text", "01 / TEXT"), TR("screen.02_image", "02 / IMAGE"),
+            TR("screen.03_sound", "03 / SOUND"), TR("screen.04_voice", "04 / VOICE")};
+}
+std::array<const char *, 4> kKindLines()
+{
+    return {TR("screen.conversation_model", "Conversation model"),
+            TR("screen.image_model", "Image model"), TR("screen.sound_model", "Sound model"),
+            TR("screen.voice_model", "Voice model")};
+}
 
 // Draws one part of a page as it arrives: faded and a few pixels low until it settles.
 template <typename Draw> void part(gfx::DrawList &list, float arrival, Draw &&draw)
@@ -85,26 +103,37 @@ void NativeUI::Impl::draw_welcome(ui::Canvas &canvas) const
 {
     auto &list = canvas.list;
     const auto &state = app_.state();
-    part(list, arrival(1), [&]
-         { label(list, "A LITTLE CURIOSITY. ENDLESS POSSIBILITY.", 120, 254, palette_.accent); });
+    part(list, arrival(1),
+         [&]
+         {
+             label(list,
+                   TR("screen.a_little_curiosity_endless",
+                      "A LITTLE CURIOSITY. ENDLESS POSSIBILITY."),
+                   120, 254, palette_.accent);
+         });
     part(list, arrival(2),
          [&]
          {
-             ui::text(list, fonts_.display, "Big ideas.", 114, 382, 96, palette_.ink);
-             ui::text(list, fonts_.display, "Right here.", 114, 496, 96, palette_.accent);
+             ui::text(list, fonts_.display, TR("screen.big_ideas", "Big ideas."), 114, 382, 96,
+                      palette_.ink);
+             ui::text(list, fonts_.display, TR("screen.right_here", "Right here."), 114, 496, 96,
+                      palette_.accent);
          });
     part(list, arrival(3),
          [&]
          {
-             text(list, "A space to think, imagine, and create.", 120, 560, 29, palette_.muted);
-             text(list, "Powered by your PS5. Entirely yours.", 120, 604, 29, palette_.muted);
+             text(list, TR("screen.a_space_to_think", "A space to think, imagine, and create."),
+                  120, 560, 29, palette_.muted);
+             text(list, TR("screen.powered_by_your_ps5", "Powered by your PS5. Entirely yours."),
+                  120, 604, 29, palette_.muted);
          });
     // Keep the main action and its status text stable while the catalogue refreshes.
     // Replaying the page entrance fade made “Choose a model” appear to blink.
     {
         const Rect button{120, 652, 372, 74};
         const bool ready = app_.can_send();
-        const char *action = app_.busy() ? "Getting ready..." : "Start Conversation";
+        const char *action = app_.busy() ? TR("screen.getting_ready", "Getting ready...")
+                                         : TR("screen.start_conversation", "Start Conversation");
         if (ready)
             list.glow(button, 37, 30,
                       palette_.accent.with_alpha(0.10f + 0.12f * ui::breathe(clock_, 2.8f)));
@@ -124,7 +153,11 @@ void NativeUI::Impl::draw_welcome(ui::Canvas &canvas) const
     draw_sculpture(list, 1390, 440, 250 + 60 * grown, palette_.accent.with_alpha(grown), clock_,
                    48);
     part(list, arrival(4),
-         [&] { label(list, "THOUGHT, TAKING SHAPE", 1238, 742, palette_.muted); });
+         [&]
+         {
+             label(list, TR("screen.thought_taking_shape", "THOUGHT, TAKING SHAPE"), 1238, 742,
+                   palette_.muted);
+         });
 
     // What is installed, by what it can do.
     for (int i = 0; i < 4; ++i)
@@ -146,16 +179,21 @@ void NativeUI::Impl::draw_welcome(ui::Canvas &canvas) const
                                 kind.with_alpha(count ? 0.9f : 0.35f), static_cast<float>(i) * 9,
                                 0);
                  list.pop_clip();
-                 label(list, kKindTags[i], tile.x + 26, tile.y + 40, count ? kind : palette_.muted);
-                 text(list, kKindNames[i], tile.x + 26, tile.y + 82, 30, palette_.ink, true);
+                 label(list, kKindTags()[i], tile.x + 26, tile.y + 40,
+                       count ? kind : palette_.muted);
+                 text(list, kKindNames()[i], tile.x + 26, tile.y + 82, 30, palette_.ink, true);
                  char installed[48];
                  if (!state.initialized)
-                     std::snprintf(installed, sizeof(installed), "Looking...");
+                     std::snprintf(installed, sizeof(installed), "%s",
+                                   TR("screen.looking", "Looking..."));
                  else if (count == 0)
-                     std::snprintf(installed, sizeof(installed), "No model yet");
+                     std::snprintf(installed, sizeof(installed), "%s",
+                                   TR("screen.no_model_yet", "No model yet"));
                  else
-                     std::snprintf(installed, sizeof(installed), "%u model%s installed", count,
-                                   count == 1 ? "" : "s");
+                     std::snprintf(installed, sizeof(installed),
+                                   count == 1 ? TR("home.model_installed", "%u model installed")
+                                              : TR("home.models_installed", "%u models installed"),
+                                   count);
                  text(list, installed, tile.x + 26, tile.y + 113, 21, palette_.muted);
              });
     }
@@ -167,26 +205,30 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
     const auto &state = app_.state();
     const bool generating = app_.generating();
 
-    part(list, arrival(1),
-         [&]
-         {
-             panel(list, {kLeft, 196, 362, 740}, 24, rail_ ? 0.35f : 0.0f);
-             label(list, "YOUR SPACE", 122, 246, palette_.muted);
-             static constexpr const char *titles[] = {"All conversations", "Text", "Image", "Audio",
-                                                      "Voice"};
-             static constexpr const char *model_filters[] = {
-                 "All models", "Text models", "Image models", "Audio models", "Voice models"};
-             const std::string model_title =
-                 std::string(model_filters[workspace_model_filter_ + 1]) +
-                 (workspace_model_query_.empty() ? "" : " · " + workspace_model_query_) +
-                 " · L1/R1 type";
-             text(
-                 list,
+    part(
+        list, arrival(1),
+        [&]
+        {
+            panel(list, {kLeft, 196, 362, 740}, 24, rail_ ? 0.35f : 0.0f);
+            label(list, TR("screen.your_space", "YOUR SPACE"), 122, 246, palette_.muted);
+            const char *const titles[] = {TR("screen.all_conversations", "All conversations"),
+                                          TR("screen.text", "Text"), TR("screen.image", "Image"),
+                                          TR("screen.audio", "Audio"), TR("screen.voice", "Voice")};
+            const char *const model_filters[] = {TR("screen.all_models", "All models"),
+                                                 TR("screen.text_models", "Text models"),
+                                                 TR("screen.image_models", "Image models"),
+                                                 TR("screen.audio_models", "Audio models"),
+                                                 TR("screen.voice_models", "Voice models")};
+            const std::string model_title =
+                std::string(model_filters[workspace_model_filter_ + 1]) +
+                (workspace_model_query_.empty() ? "" : " · " + workspace_model_query_) +
+                TR("screen.l1_r1_type", " · L1/R1 type");
+            text(list,
                  fit(selecting_model_ ? model_title : titles[session_category_for(workspace_mode_)],
                      31, 310),
                  122, 292, 31, palette_.ink, true);
-             sessions_.draw(canvas);
-         });
+            sessions_.draw(canvas);
+        });
 
     const char *name = state.session.id[0] ? state.session.model_name : current_name();
     const Capability capability =
@@ -196,14 +238,16 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
     part(list, arrival(2),
          [&]
          {
-             label(list, "WORKSPACE", 536, 232, palette_.accent);
+             label(list, TR("screen.workspace", "WORKSPACE"), 536, 232, palette_.accent);
              text(list,
-                  fit(state.session.id[0] ? state.session.title : "A new conversation", 46, 1280),
+                  fit(state.session.id[0] ? state.session.title
+                                          : TR("screen.a_new_conversation", "A new conversation"),
+                      46, 1280),
                   536, 290, 46, palette_.ink, true);
              float x = 536;
              x += chip(list, x, 332, fit(name, 19, 420), kind_color(capability), true) + 12;
              if (state.session.id[0] && !app_.can_send() && !app_.busy())
-                 chip(list, x, 332, "Read only", palette_.warn, false);
+                 chip(list, x, 332, TR("screen.read_only", "Read only"), palette_.warn, false);
          });
 
     const float line = body_size_ * 1.48f;
@@ -272,8 +316,10 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
                     if (decoded)
                         spinner(list, frame.cx(), frame.cy(), 16, palette_.accent);
                     else
-                        text(list, "Image preview unavailable", frame.cx(), frame.cy() + 8, 24,
-                             palette_.muted, false, gfx::Align::center);
+                        text(list,
+                             TR("screen.image_preview_unavailable", "Image preview unavailable"),
+                             frame.cx(), frame.cy() + 8, 24, palette_.muted, false,
+                             gfx::Align::center);
                 }
             }
             else if (row.audio)
@@ -291,9 +337,11 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
                 const auto glyphs = palette_.day ? ui::GlyphStyle::light() : ui::GlyphStyle::dark();
                 ui::draw_button(list, fonts_, glyphs, ui::Button::triangle, card.x + 26, card.cy(),
                                 34);
-                text(list, selected ? "Selected audio · press △" : "Play saved audio", card.x + 78,
-                     card.cy() + 9, selected ? 23 : 26, selected ? palette_.accent : palette_.ink,
-                     true);
+                text(list,
+                     selected ? TR("screen.selected_audio_press", "Selected audio · press △")
+                              : TR("screen.play_saved_audio", "Play saved audio"),
+                     card.x + 78, card.cy() + 9, selected ? 23 : 26,
+                     selected ? palette_.accent : palette_.ink, true);
                 list.push_clip(card.inset(1));
                 draw_model_art(list, 2, card.x + card.w - 110, card.cy(), 34,
                                kind_color(capability), static_cast<float>(index), 0);
@@ -308,9 +356,12 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
         const float calm = arrival(3);
         list.push_opacity(calm);
         draw_mark(list, 30, 62, 1.6f, palette_.accent);
-        text(list, "What would you like to explore?", 0, 150, 40, palette_.ink, true);
-        text(list, "Ask, imagine, or describe. Everything stays on this console.", 0, 198, 26,
-             palette_.muted);
+        text(list, TR("screen.what_would_you_like", "What would you like to explore?"), 0, 150, 40,
+             palette_.ink, true);
+        text(list,
+             TR("screen.ask_imagine_or_describe",
+                "Ask, imagine, or describe. Everything stays on this console."),
+             0, 198, 26, palette_.muted);
         list.pop_opacity();
     }
     chat_.end(canvas);
@@ -327,7 +378,8 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
                  x += 34;
                  char elapsed[64];
                  std::snprintf(elapsed, sizeof(elapsed),
-                               "Creating on your console  \xC2\xB7  %.0f s",
+                               TR("screen.creating_on_your_console",
+                                  "Creating on your console  \xC2\xB7  %.0f s"),
                                static_cast<double>(busy_seconds_));
                  text(list, elapsed, x, 820, 21, palette_.muted);
              }
@@ -355,14 +407,17 @@ void NativeUI::Impl::draw_conversation(ui::Canvas &canvas) const
     {
         list.rounded_rect({0, 0, gfx::kVirtualWidth, gfx::kVirtualHeight}, 0,
                           Color::rgb(0x05070b, 0.78f));
-        const char *title = workspace_mode_open_    ? "YOUR SPACE  /  MODE"
-                            : workspace_queue_open_ ? "AUDIO  /  QUEUE"
-                                                    : "YOUR SPACE  /  GENERATION";
+        const char *title = workspace_mode_open_
+                                ? TR("screen.your_space_mode", "YOUR SPACE  /  MODE")
+                            : workspace_queue_open_
+                                ? TR("screen.audio_queue", "AUDIO  /  QUEUE")
+                                : TR("screen.your_space_generation", "YOUR SPACE  /  GENERATION");
         label(list, title, 536, 206, palette_.accent);
         text(list,
-             workspace_mode_open_    ? "Choose a capability"
-             : workspace_queue_open_ ? "Choose how many variants"
-                                     : "Tune this conversation",
+             workspace_mode_open_ ? TR("screen.choose_a_capability", "Choose a capability")
+             : workspace_queue_open_
+                 ? TR("screen.choose_how_many_variants", "Choose how many variants")
+                 : TR("screen.tune_this_conversation", "Tune this conversation"),
              536, 244, 32, palette_.ink, true);
         form_.draw(canvas);
     }
@@ -406,21 +461,23 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
     const auto &state = app_.state();
     if (filters_.active() == 0)
     {
-        label(list, "MODEL LIBRARY", kLeft, 222, palette_.accent);
-        text(list, "A new model, when you need one.", 92, 300, 56, palette_.ink, true);
-        text(
-            list,
-            "Search model names, choose a repository, and bring a verified GGUF into your library.",
-            kLeft, 346, 24, palette_.muted);
+        label(list, TR("screen.model_library", "MODEL LIBRARY"), kLeft, 222, palette_.accent);
+        text(list, TR("screen.a_new_model_when", "A new model, when you need one."), 92, 300, 56,
+             palette_.ink, true);
+        text(list,
+             TR("screen.search_model_names_choose", "Search model names, choose a repository, and "
+                                                    "bring a verified GGUF into your library."),
+             kLeft, 346, 24, palette_.muted);
         draw_model_filters(canvas);
         const Rect browser{96, 470, 1120, 478};
         const Rect guide{1240, 470, 584, 478};
         panel(list, browser, 26);
         panel(list, guide, 26);
-        label(list, "01  /  FIND A MODEL", 128, 518, palette_.accent);
+        label(list, TR("screen.01_find_a_model", "01  /  FIND A MODEL"), 128, 518, palette_.accent);
         search_.draw(canvas);
-        text(list, "Find a model by name, then browse its available files.", 128, 652, 19,
-             palette_.muted);
+        text(list,
+             TR("screen.find_a_model_by", "Find a model by name, then browse its available files."),
+             128, 652, 19, palette_.muted);
         char status[192]{};
         prospero_model_download::status(status, sizeof(status));
         const auto downloader_state = prospero_model_download::state();
@@ -448,9 +505,9 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
                     list.circle(137, y - 7, 4, ink);
                 char row[220];
                 const char *fit_text = candidate.fit == prospero_model_download::Fit::Tight
-                                           ? "  ·  tight on memory"
+                                           ? TR("screen.tight_on_memory", "  ·  tight on memory")
                                        : candidate.fit == prospero_model_download::Fit::DoesNotFit
-                                           ? "  ·  will not fit"
+                                           ? TR("screen.will_not_fit", "  ·  will not fit")
                                            : "";
                 if (downloader_state == prospero_model_download::State::SearchReady)
                     std::snprintf(row, sizeof(row), "%s  ·  %llu downloads  ·  Cross to browse",
@@ -462,15 +519,18 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
                 text(list, fit(row, 18, 1020, false), 154, y, 18, ink);
             }
         }
-        label(list, "02  /  READY FOR YOUR CONSOLE", 1280, 518, palette_.accent);
+        label(list, TR("screen.02_ready_for_your", "02  /  READY FOR YOUR CONSOLE"), 1280, 518,
+              palette_.accent);
         draw_sculpture(list, guide.cx(), 646, 68, palette_.accent, clock_, 22);
-        text(list, "Browse. Verify. Think.", guide.cx(), 754, 28, palette_.ink, true,
-             gfx::Align::center);
-        text(list, "GGUF files are checked before they are", guide.cx(), 804, 20, palette_.muted,
-             false, gfx::Align::center);
-        text(list, "added to the shared model library.", guide.cx(), 835, 20, palette_.muted, false,
-             gfx::Align::center);
-        text(list, "Large files are flagged tight or will not fit; context also needs memory.",
+        text(list, TR("screen.browse_verify_think", "Browse. Verify. Think."), guide.cx(), 754, 28,
+             palette_.ink, true, gfx::Align::center);
+        text(list, TR("screen.gguf_files_are_checked", "GGUF files are checked before they are"),
+             guide.cx(), 804, 20, palette_.muted, false, gfx::Align::center);
+        text(list, TR("screen.added_to_the_shared", "added to the shared model library."),
+             guide.cx(), 835, 20, palette_.muted, false, gfx::Align::center);
+        text(list,
+             TR("screen.large_files_are_flagged",
+                "Large files are flagged tight or will not fit; context also needs memory."),
              guide.cx(), 900, 17, palette_.muted, false, gfx::Align::center);
         return;
     }
@@ -480,8 +540,10 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
         part(list, arrival(1),
              [&]
              {
-                 label(list, "MODEL LIBRARY", kLeft, 222, palette_.accent);
-                 text(list, "Find your next model.", 92, 300, 52, palette_.ink, true);
+                 label(list, TR("screen.model_library", "MODEL LIBRARY"), kLeft, 222,
+                       palette_.accent);
+                 text(list, TR("screen.find_your_next_model", "Find your next model."), 92, 300, 52,
+                      palette_.ink, true);
                  draw_model_filters(canvas);
                  const Rect download_button{kLeft, 474, 344, 66};
                  list.bordered_rect(download_button, 20, palette_.accent,
@@ -489,21 +551,30 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
                                     empty_models_download_focus_
                                         ? palette_.ink.with_alpha(0.78f)
                                         : palette_.accent.with_alpha(0.8f));
-                 text(list, "Download a model", download_button.cx(), download_button.cy() + 8, 23,
-                      palette_.on_accent, true, gfx::Align::center);
-                 text(list, "Cross to browse", kLeft, 578, 21, palette_.muted);
-                 text(list, "verified GGUF downloads", kLeft, 610, 21, palette_.muted);
+                 text(list, TR("screen.download_a_model", "Download a model"), download_button.cx(),
+                      download_button.cy() + 8, 23, palette_.on_accent, true, gfx::Align::center);
+                 text(list, TR("screen.cross_to_browse", "Cross to browse"), kLeft, 578, 21,
+                      palette_.muted);
+                 text(list, TR("screen.verified_gguf_downloads", "verified GGUF downloads"), kLeft,
+                      610, 21, palette_.muted);
                  const Rect card{460, 488, 1000, 424};
                  panel(list, card, 28);
                  draw_sculpture(list, card.cx(), card.y + 130, 84, palette_.accent, clock_, 24);
-                 text(list, state.initialized ? "No models installed yet" : "Looking for models...",
+                 text(list,
+                      state.initialized
+                          ? TR("screen.no_models_installed_yet", "No models installed yet")
+                          : TR("screen.looking_for_models", "Looking for models..."),
                       card.cx(), card.y + 262, 40, palette_.ink, true, gfx::Align::center);
                  if (state.initialized)
                  {
-                     text(list, "Copy your models into the shared folder on this console,",
+                     text(list,
+                          TR("screen.copy_your_models_into",
+                             "Copy your models into the shared folder on this console,"),
                           card.cx(), card.y + 316, 25, palette_.muted, false, gfx::Align::center);
-                     text(list, "or download a model directly in ProsperoAI.", card.cx(),
-                          card.y + 352, 25, palette_.muted, false, gfx::Align::center);
+                     text(list,
+                          TR("screen.or_download_a_model",
+                             "or download a model directly in ProsperoAI."),
+                          card.cx(), card.y + 352, 25, palette_.muted, false, gfx::Align::center);
                      ui::text(list, fonts_.mono, "/data/homebrew/prosperoai/models", card.cx(),
                               card.y + 404, 22, palette_.accent, gfx::Align::center);
                  }
@@ -521,37 +592,44 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
             reduced_motion() ? 1 : tween::cubic_out(std::min(hero_age_ / 0.24f, 1.0f));
         list.push_opacity(fade);
         list.push_transform(1, 0, 0, (1 - fade) * 18, 0);
-        label(list, kKinds[kind], kLeft, 222, colour);
+        label(list, kind_label_tr(kind), kLeft, 222, colour);
         text(list, fit(model.name, 62, 1180), 92, 300, 62, palette_.ink, true);
-        text(list, fit(std::string(kKindLines[kind]) + "  \xC2\xB7  " + model.id, 25, 1180, false),
+        text(list,
+             fit(std::string(kKindLines()[kind]) + "  \xC2\xB7  " + model.id, 25, 1180, false),
              kLeft, 346, 25, palette_.muted);
         list.glow({1560, 216, 180, 110}, 60, 90, colour.with_alpha(0.07f));
         draw_model_art(list, kind, 1650, 272, 84, colour, static_cast<float>(hero_model_) * 12, 1);
         list.pop_transform();
         list.pop_opacity();
         if (hero_model_ == pending_model_ && app_.busy())
-            chip(list, 1500, 222, "Preparing", palette_.warn, true, true);
+            chip(list, 1500, 222, TR("screen.preparing", "Preparing"), palette_.warn, true, true);
         else if (hero_model_ == active_model_)
-            chip(list, 1500, 222, state.ready ? "Active" : "Needs attention",
+            chip(list, 1500, 222,
+                 state.ready ? TR("screen.active", "Active")
+                             : TR("screen.needs_attention", "Needs attention"),
                  state.ready ? palette_.good : palette_.bad, true, true);
     }
     else if (hero_model_ < -1)
     {
         const auto &preset = prospero_model_download::presets[-hero_model_ - 2];
         const Color colour = palette_.kinds[preset.kind];
-        label(list, "PRESET MODEL", kLeft, 222, colour);
+        label(list, TR("screen.preset_model", "PRESET MODEL"), kLeft, 222, colour);
         text(list, fit(preset.name, 62, 1180), 92, 300, 62, palette_.ink, true);
         text(list,
-             preset.kind == 0 ? "Verified GGUF preset · Download directly to your console"
-                              : "Prepared model bundle · Download directly to your console",
+             preset.kind == 0 ? TR("screen.verified_gguf_preset_download",
+                                   "Verified GGUF preset · Download directly to your console")
+                              : TR("screen.prepared_model_bundle_download",
+                                   "Prepared model bundle · Download directly to your console"),
              kLeft, 346, 25, palette_.muted);
         draw_model_art(list, preset.kind, 1650, 272, 84, colour, 12, 1);
     }
     else
     {
-        label(list, "YOUR MODELS", kLeft, 222, palette_.accent);
-        text(list, "Nothing matches.", 92, 300, 62, palette_.ink, true);
-        text(list, "Try another name, or another kind of model.", kLeft, 346, 25, palette_.muted);
+        label(list, TR("screen.your_models", "YOUR MODELS"), kLeft, 222, palette_.accent);
+        text(list, TR("screen.nothing_matches", "Nothing matches."), 92, 300, 62, palette_.ink,
+             true);
+        text(list, TR("screen.try_another_name_or", "Try another name, or another kind of model."),
+             kLeft, 346, 25, palette_.muted);
     }
 
     part(list, arrival(1),
@@ -562,8 +640,9 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
          });
     part(list, arrival(2), [&] { models_.draw(canvas); });
     char count[96];
-    std::snprintf(count, sizeof(count), "%zu shown  /  %zu installed", visible_models_.size(),
-                  state.models.size());
+    std::snprintf(count, sizeof(count),
+                  TR("screen.zu_shown_zu_installed", "%zu shown  /  %zu installed"),
+                  visible_models_.size(), state.models.size());
     text(list, count, kLeft, 948, 21, palette_.muted);
     char status[192]{};
     prospero_model_download::status(status, sizeof(status));
@@ -575,7 +654,8 @@ void NativeUI::Impl::draw_models(ui::Canvas &canvas) const
                              download_state == prospero_model_download::State::Failed;
     text(list,
          show_status ? fit(status, 19, 1200, false)
-                     : "Choose a preset to download, or use an installed model.",
+                     : TR("screen.choose_a_preset_to",
+                          "Choose a preset to download, or use an installed model."),
          kRight, 948, 19,
          download_state == prospero_model_download::State::Failed ? palette_.bad : palette_.muted,
          false, gfx::Align::right);
@@ -599,13 +679,14 @@ void NativeUI::Impl::draw_model(gfx::DrawList &list, const Rect &r, int index, f
     list.gradient_rect_h({r.x + 1, r.y + 1, r.w * 0.55f, r.h - 2}, 22,
                          colour.with_alpha(0.10f + 0.06f * focus), colour.with_alpha(0.0f));
     draw_model_art(list, kind, r.x + 97, r.cy(), 78, colour, static_cast<float>(index) * 12, focus);
-    label(list, kKinds[kind], r.x + 196, r.y + 55, colour);
+    label(list, kind_label_tr(kind), r.x + 196, r.y + 55, colour);
     text(list, fit(model.name, 30, r.w - 224), r.x + 196, r.y + 97, 30, palette_.ink, true);
     char detail[100]{};
     if (preset_card)
         std::snprintf(detail, sizeof(detail), "%llu MiB · %s",
                       static_cast<unsigned long long>(preset->size / (1024 * 1024)),
-                      kind == 0 ? "Text generation" : "Prepared bundle");
+                      kind == 0 ? TR("screen.text_generation", "Text generation")
+                                : TR("screen.prepared_bundle", "Prepared bundle"));
     text(list, fit(preset_card ? detail : model.id, 20, r.w - 224, false), r.x + 196, r.y + 131, 20,
          palette_.muted);
     if (preset_card)
@@ -613,24 +694,31 @@ void NativeUI::Impl::draw_model(gfx::DrawList &list, const Rect &r, int index, f
         if (prospero_model_download::active_preset() == -index - 2)
         {
             spinner(list, r.x + 206, r.y + 163, 8, colour);
-            text(list, "Downloading...", r.x + 224, r.y + 170, 20, colour);
+            text(list, TR("screen.downloading", "Downloading..."), r.x + 224, r.y + 170, 20,
+                 colour);
         }
         else
         {
-            text(list, preset_saved_[-index - 2] ? "Saved" : "Download preset", r.x + 196,
-                 r.y + 170, 20, preset_saved_[-index - 2] ? palette_.good : colour);
+            text(list,
+                 preset_saved_[-index - 2] ? TR("screen.saved", "Saved")
+                                           : TR("screen.download_preset", "Download preset"),
+                 r.x + 196, r.y + 170, 20, preset_saved_[-index - 2] ? palette_.good : colour);
         }
     }
     else if (index == pending_model_ && app_.busy())
     {
         spinner(list, r.x + 206, r.y + 163, 8, palette_.warn);
-        text(list, "Preparing...", r.x + 224, r.y + 170, 20, palette_.warn);
+        text(list, TR("screen.preparing_2", "Preparing..."), r.x + 224, r.y + 170, 20,
+             palette_.warn);
     }
     else if (index == active_model_)
     {
         const Color tone = state.ready ? palette_.good : palette_.bad;
         list.circle(r.x + 202, r.y + 163, 4, tone);
-        text(list, state.ready ? "Active" : "Needs attention", r.x + 216, r.y + 170, 20, tone);
+        text(list,
+             state.ready ? TR("screen.active", "Active")
+                         : TR("screen.needs_attention", "Needs attention"),
+             r.x + 216, r.y + 170, 20, tone);
     }
     list.pop_clip();
 }
@@ -642,8 +730,9 @@ void NativeUI::Impl::draw_settings(ui::Canvas &canvas) const
     part(list, arrival(1),
          [&]
          {
-             label(list, "SETTINGS", kLeft, 222, palette_.accent);
-             text(list, "Make it feel like yours.", 92, 296, 58, palette_.ink, true);
+             label(list, TR("screen.settings", "SETTINGS"), kLeft, 222, palette_.accent);
+             text(list, TR("screen.make_it_feel_like", "Make it feel like yours."), 92, 296, 58,
+                  palette_.ink, true);
          });
     part(list, arrival(2),
          [&]
@@ -666,13 +755,16 @@ void NativeUI::Impl::draw_settings(ui::Canvas &canvas) const
              if (category_ == kDiagnostics)
              {
                  // What to do with the log, beside its switch.
-                 label(list, "REPORTING A PROBLEM", card.x + 30, card.y + 46, palette_.accent);
+                 label(list, TR("screen.reporting_a_problem", "REPORTING A PROBLEM"), card.x + 30,
+                       card.y + 46, palette_.accent);
                  float at = card.y + 92;
                  for (const char *step :
-                      {"Turn Debug log on.", "Repeat what went wrong.",
-                       "Copy debug-trace.txt from the logs folder with an FTP program and "
-                       "send it to us with a line on what you did.",
-                       "Turn Debug log off again."})
+                      {TR("screen.turn_debug_log_on", "Turn Debug log on."),
+                       TR("screen.repeat_what_went_wrong", "Repeat what went wrong."),
+                       TR("screen.copy_debug_trace_txt",
+                          "Copy debug-trace.txt from the logs folder with an FTP program and "
+                          "send it to us with a line on what you did."),
+                       TR("screen.turn_debug_log_off", "Turn Debug log off again.")})
                      at = ui::paragraph(list, fonts_.regular, step, card.x + 30, at, 21,
                                         card.w - 60, 30, palette_.ink.with_alpha(0.92f), 5) +
                           18;
@@ -684,38 +776,46 @@ void NativeUI::Impl::draw_settings(ui::Canvas &canvas) const
              {
                  // About: the mark, the name and where it runs.
                  draw_sculpture(list, card.cx(), card.y + 150, 92, palette_.accent, clock_, 24);
-                 ui::text(list, fonts_.display, "ProsperoAI", card.cx(), card.y + 318, 38,
-                          palette_.ink, gfx::Align::center);
-                 label(list, "THOUGHT, TAKING SHAPE", card.cx(), card.y + 356, palette_.accent,
-                       gfx::Align::center);
+                 ui::text(list, fonts_.display, TR("screen.prosperoai", "ProsperoAI"), card.cx(),
+                          card.y + 318, 38, palette_.ink, gfx::Align::center);
+                 label(list, TR("screen.thought_taking_shape", "THOUGHT, TAKING SHAPE"), card.cx(),
+                       card.y + 356, palette_.accent, gfx::Align::center);
                  ui::paragraph(list, fonts_.regular,
-                               "Models run on this console's own hardware. No account or cloud "
-                               "uploads.",
+                               TR("screen.models_run_on_this",
+                                  "Models run on this console's own hardware. No account or cloud "
+                                  "uploads."),
                                card.x + 30, card.y + 420, 22, card.w - 60, 32, palette_.muted, 4);
-                 label(list, "MADE BY", card.cx(), card.y + 520, palette_.accent,
-                       gfx::Align::center);
-                 ui::text(list, fonts_.semibold, "BlackBearReloaded and Quatrixone", card.cx(),
-                          card.y + 545, 18, palette_.accent, gfx::Align::center);
+                 label(list, TR("screen.made_by", "MADE BY"), card.cx(), card.y + 520,
+                       palette_.accent, gfx::Align::center);
+                 ui::text(list, fonts_.semibold,
+                          TR("screen.blackbearreloaded_and_quatrixone",
+                             "BlackBearReloaded and Quatrixone"),
+                          card.cx(), card.y + 545, 18, palette_.accent, gfx::Align::center);
              }
              else
              {
                  // A small conversation in the colours and the reading size being chosen.
-                 label(list, "LIVE PREVIEW", card.x + 30, card.y + 46, palette_.accent);
+                 label(list, TR("screen.live_preview", "LIVE PREVIEW"), card.x + 30, card.y + 46,
+                       palette_.accent);
                  const float size = state.preferences.text_size ? 27.0f : 23.0f;
                  const Rect bubble{card.x + 90, card.y + 80, card.w - 120, size + 38};
                  list.bordered_rect(bubble, 18, gfx::mix(palette_.raised, palette_.accent, 0.12f),
                                     1, palette_.accent.with_alpha(0.28f));
-                 text(list, "Tell me a story.", bubble.x + 22, bubble.cy() + size * 0.35f, size,
-                      palette_.ink);
+                 text(list, TR("screen.tell_me_a_story", "Tell me a story."), bubble.x + 22,
+                      bubble.cy() + size * 0.35f, size, palette_.ink);
                  draw_mark(list, card.x + 44, card.y + 190, 0.7f, palette_.accent);
-                 text(list, "ProsperoAI", card.x + 70, card.y + 197, 20, palette_.ink, true);
-                 const float after = ui::paragraph(
-                     list, fonts_.regular, "Once, a small light learned to think for itself.",
-                     card.x + 30, card.y + 244, size, card.w - 60, size * 1.45f,
-                     palette_.ink.with_alpha(0.92f), 4);
+                 text(list, TR("screen.prosperoai", "ProsperoAI"), card.x + 70, card.y + 197, 20,
+                      palette_.ink, true);
+                 const float after =
+                     ui::paragraph(list, fonts_.regular,
+                                   TR("screen.once_a_small_light",
+                                      "Once, a small light learned to think for itself."),
+                                   card.x + 30, card.y + 244, size, card.w - 60, size * 1.45f,
+                                   palette_.ink.with_alpha(0.92f), 4);
                  const Rect send{card.x + 30, std::max(after + 10, card.y + 400), card.w - 60, 58};
                  ui::Painter paint(list, fonts_, theme_);
-                 paint.button(send, "Send", ui::ButtonKind::primary, {0, 0, false});
+                 paint.button(send, TR("screen.send", "Send"), ui::ButtonKind::primary,
+                              {0, 0, false});
                  draw_model_art(list, 2, card.cx(), card.y + 512, 36, palette_.accent, 3, 1);
              }
              list.pop_clip();
@@ -725,10 +825,12 @@ void NativeUI::Impl::draw_settings(ui::Canvas &canvas) const
 void NativeUI::Impl::draw_media(ui::Canvas &canvas) const
 {
     auto &list = canvas.list;
-    label(list, "YOUR CREATIONS", 120, 238, palette_.accent);
-    text(list, "Media library", 120, 286, 43, palette_.ink, true);
-    text(list, "Images and audio generated on this console. Files stay on your PS5.", 120, 332, 24,
-         palette_.muted);
+    label(list, TR("screen.your_creations", "YOUR CREATIONS"), 120, 238, palette_.accent);
+    text(list, TR("screen.media_library", "Media library"), 120, 286, 43, palette_.ink, true);
+    text(list,
+         TR("screen.images_and_audio_generated",
+            "Images and audio generated on this console. Files stay on your PS5."),
+         120, 332, 24, palette_.muted);
     panel(list, {110, 380, 1700, 580}, 24, 0.3f);
     media_.draw(canvas);
 }
@@ -736,10 +838,14 @@ void NativeUI::Impl::draw_media(ui::Canvas &canvas) const
 void NativeUI::Impl::draw_mobile(ui::Canvas &canvas) const
 {
     auto &list = canvas.list;
-    label(list, "YOUR PHONE, YOUR SPACE", 120, 238, palette_.accent);
-    text(list, "Open ProsperoAI on mobile", 120, 286, 43, palette_.ink, true);
-    text(list, "Scan this code while your phone is on the same network as your PS5.", 120, 332, 24,
-         palette_.muted);
+    label(list, TR("screen.your_phone_your_space", "YOUR PHONE, YOUR SPACE"), 120, 238,
+          palette_.accent);
+    text(list, TR("screen.open_prosperoai_on_mobile", "Open ProsperoAI on mobile"), 120, 286, 43,
+         palette_.ink, true);
+    text(list,
+         TR("screen.scan_this_code_while",
+            "Scan this code while your phone is on the same network as your PS5."),
+         120, 332, 24, palette_.muted);
 
     const Rect card{390, 390, 1140, 490};
     panel(list, card, 28, 0.3f);
@@ -759,26 +865,33 @@ void NativeUI::Impl::draw_mobile(ui::Canvas &canvas) const
                                       0, ink);
     }
     else
-        text(list, "Network address unavailable", qr_box.cx(), qr_box.cy(), 22,
-             Color::rgb(0x343943), true, gfx::Align::center);
+        text(list, TR("screen.network_address_unavailable", "Network address unavailable"),
+             qr_box.cx(), qr_box.cy(), 22, Color::rgb(0x343943), true, gfx::Align::center);
 
     const float info_x = 920;
-    label(list, "MOBILE WEB APP", info_x, 468, palette_.accent);
-    text(list, mobile_url_.empty() ? "Connect your PS5 to a network" : "Scan to open the web UI",
+    label(list, TR("screen.mobile_web_app", "MOBILE WEB APP"), info_x, 468, palette_.accent);
+    text(list,
+         mobile_url_.empty() ? TR("screen.connect_your_ps5_to", "Connect your PS5 to a network")
+                             : TR("screen.scan_to_open_the", "Scan to open the web UI"),
          info_x, 516, 30, palette_.ink, true);
     if (!mobile_url_.empty())
         text(list, fit(mobile_url_, 22, 540, false), info_x, 562, 22, palette_.muted);
-    text(list, "Your phone and PS5 must be on the same local network.", info_x, 650, 21,
-         palette_.muted);
+    text(list,
+         TR("screen.your_phone_and_ps5", "Your phone and PS5 must be on the same local network."),
+         info_x, 650, 21, palette_.muted);
     const int auth_status = prospero_http_server_auth_status();
-    const char *auth_text = auth_status < 0
-                                ? "API key configuration is invalid; requests are blocked."
-                            : auth_status > 0 ? "API key protection is enabled."
-                                              : "API key protection is off.";
+    const char *auth_text =
+        auth_status < 0   ? TR("screen.api_key_configuration_is",
+                               "API key configuration is invalid; requests are blocked.")
+        : auth_status > 0 ? TR("screen.api_key_protection_is", "API key protection is enabled.")
+                          : TR("screen.api_key_protection_is_2", "API key protection is off.");
     text(list, auth_text, info_x, 684, 21, palette_.muted);
-    text(list, "HTTP is not encrypted. Use only a trusted network.", info_x, 718, 21,
-         palette_.warn);
-    text(list, "Models and generation stay on your console.", info_x, 752, 21, palette_.muted);
+    text(list,
+         TR("screen.http_is_not_encrypted", "HTTP is not encrypted. Use only a trusted network."),
+         info_x, 718, 21, palette_.warn);
+    text(list,
+         TR("screen.models_and_generation_stay", "Models and generation stay on your console."),
+         info_x, 752, 21, palette_.muted);
 }
 
 } // namespace prospero

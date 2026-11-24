@@ -34,12 +34,14 @@ struct Preferences
 {
     unsigned style = 0, output_limit = 0; // 0 = Auto (fill the remaining context)
     unsigned context_length = 0, kv_cache = 0;
-    unsigned idle_unload_minutes = 5, kokoro_voice = 0, chatterbox_voice = 0, chatterbox_language = 0;
+    unsigned idle_unload_minutes = 5, kokoro_voice = 0, chatterbox_voice = 0,
+             chatterbox_language = 0;
     unsigned audio_duration_sec = 0, audio_seed = 42, sd_seed = 42, sd_width = 0, sd_height = 0;
     bool thinking = false;
     bool web_search = false;
     unsigned sd_upscale = 0;
     unsigned theme = 0, accent = 0, volume = 35, text_size = 0;
+    unsigned language = 0; // 0 English, 1 Italiano; matches the order of the language list
     bool reduced_motion = false, high_contrast = false;
     std::string model_id;
 };

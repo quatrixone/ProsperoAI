@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "native_app.hpp"
 #include "chatterbox_languages.hpp"
+#include "i18n.hpp"
 #include "generated_media.hpp"
 #include "runtime_settings.hpp"
 #include "prospero_search.hpp"
@@ -149,6 +150,7 @@ void validate(Preferences &p)
         p.output_limit = 0;
     p.theme = std::min(p.theme, 1U);
     p.accent = std::min(p.accent, 2U);
+    p.language = p.language > 1U ? 0U : p.language;
     p.volume = std::min(p.volume, 100U);
     p.text_size = std::min(p.text_size, 1U);
 }
@@ -177,7 +179,10 @@ void load_preferences(Preferences &p, const std::vector<Model> &models)
 {
     std::FILE *file = std::fopen(PROSPERO_SETTINGS_PATH, "rb");
     if (!file)
+    {
+        prospero::i18n::set_language(static_cast<prospero::i18n::Language>(p.language));
         return;
+    }
     char line[256]{};
     unsigned legacy_model = 0;
     if (std::fgets(line, sizeof(line), file) &&
@@ -228,6 +233,8 @@ void load_preferences(Preferences &p, const std::vector<Model> &models)
                 p.theme = number;
             else if (std::strcmp(key, "accent") == 0)
                 p.accent = number;
+            else if (std::strcmp(key, "language") == 0)
+                p.language = number;
             else if (std::strcmp(key, "volume") == 0)
                 p.volume = number;
             else if (std::strcmp(key, "text_size") == 0)
@@ -240,6 +247,7 @@ void load_preferences(Preferences &p, const std::vector<Model> &models)
     }
     std::fclose(file);
     validate(p);
+    prospero::i18n::set_language(static_cast<prospero::i18n::Language>(p.language));
 }
 
 bool save_preferences(const Preferences &p)
@@ -252,13 +260,13 @@ bool save_preferences(const Preferences &p)
         return false;
     const int bytes = std::fprintf(
         file,
-        "version=2\nmodel=%s\nstyle=%u\ntokens=%u\ntheme=%u\naccent=%u\nvolume=%"
+        "version=2\nmodel=%s\nstyle=%u\ntokens=%u\ntheme=%u\naccent=%u\nlanguage=%u\nvolume=%"
         "u\ntext_size=%u\nreduced_motion=%u\nhigh_contrast=%u\ncontext=%u\nkv=%u\nthinking=%"
         "u\nidle_unload_minutes=%u\nkokoro_voice=%u\nchatterbox_voice=%u\nchatterbox_language=%u\n"
         "web_search=%u\nweb_search_timeout=%u\nsearch_scopes=%u\n",
-        p.model_id.c_str(), p.style, runtime.output_limit, p.theme, p.accent, p.volume, p.text_size,
-        p.reduced_motion ? 1U : 0U, p.high_contrast ? 1U : 0U, runtime.context, runtime.kv,
-        runtime.thinking ? 1U : 0U, runtime.idle_unload_minutes, runtime.kokoro_voice,
+        p.model_id.c_str(), p.style, runtime.output_limit, p.theme, p.accent, p.language, p.volume,
+        p.text_size, p.reduced_motion ? 1U : 0U, p.high_contrast ? 1U : 0U, runtime.context,
+        runtime.kv, runtime.thinking ? 1U : 0U, runtime.idle_unload_minutes, runtime.kokoro_voice,
         runtime.chatterbox_voice, runtime.chatterbox_language, runtime.web_search ? 1U : 0U,
         runtime.web_search_timeout_seconds, runtime.search_scopes);
     const int closed = std::fclose(file);
@@ -719,6 +727,7 @@ bool App::retry()
 void App::set_preferences(Preferences preferences)
 {
     validate(preferences);
+    prospero::i18n::set_language(static_cast<prospero::i18n::Language>(preferences.language));
     auto runtime = prospero_settings::get();
     runtime.context = preferences.context_length;
     runtime.output_limit = preferences.output_limit;
