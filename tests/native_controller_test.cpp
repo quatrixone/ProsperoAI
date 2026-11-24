@@ -1,5 +1,6 @@
 // Host checks for real controller ownership, persistence, and multilingual layout.
 #include "native_app.hpp"
+#include "i18n.hpp"
 #include "audio_workflows.hpp"
 #include "native_audio_queue.hpp"
 #include "debug_log.hpp"
@@ -373,11 +374,39 @@ bool archive_media(const char *, unsigned, const char *, const char *, char *, s
 }
 } // namespace prospero_session
 
+// The language preference is saved with the others and set again when the app restarts.
+void language_preference_round_trips()
+{
+    std::remove(PROSPERO_SETTINGS_PATH);
+    prospero::i18n::set_language(prospero::i18n::Language::English);
+    {
+        prospero::App app;
+        assert(app.initialize());
+        settle(app);
+        assert(app.state().preferences.language == 0);
+        auto preferences = app.state().preferences;
+        preferences.language = 1;
+        app.set_preferences(preferences);
+        settle(app);
+    }
+    prospero::i18n::set_language(prospero::i18n::Language::English); // a fresh process
+    {
+        prospero::App app;
+        assert(app.initialize());
+        settle(app);
+        assert(app.state().preferences.language == 1);
+        assert(prospero::i18n::language() == prospero::i18n::Language::Italian);
+    }
+    prospero::i18n::set_language(prospero::i18n::Language::English);
+    std::remove(PROSPERO_SETTINGS_PATH);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 4);
     prospero::debug::start(argv[3]);
     test_stopped_queue_waiting_for_busy_worker();
+    language_preference_round_trips();
     std::remove(PROSPERO_SETTINGS_PATH);
     {
         std::ofstream settings(PROSPERO_SETTINGS_PATH);

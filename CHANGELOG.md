@@ -15,6 +15,9 @@
 
 ## Unreleased
 
+- The native UI has a string catalog with English as the default and fallback, and Italian
+  as a first extra language. Pick it in Settings next to the theme; it is saved with the
+  other preferences and applies at once.
 - Search now reaches 41 providers in nine selectable groups from the console itself: the
   general web, code hosting, question sites, reference works, package registries, papers,
   video, music and images. One query asked every provider in about eight seconds on the test

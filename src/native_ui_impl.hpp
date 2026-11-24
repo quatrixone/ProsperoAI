@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "native_ui.hpp"
+#include "i18n.hpp"
+#include <array>
 #include "native_audio_queue.hpp"
 #include "model_downloader_ps5.hpp"
 #include "update.hpp"
@@ -111,6 +113,9 @@ struct NativeUI::Impl
     void draw(UiFrame &frame) const;
     void sync();
     void apply_theme();
+    void apply_language();
+    void rebuild_categories();
+    void refresh_language_views();
     void announce(ui::Feedback &feedback);
     void handle_workspace(const InputFrame &input, ui::Feedback &feedback);
     void update_audio_queue();

@@ -52,9 +52,9 @@ void NativeUI::Impl::take_update_offer(ui::Feedback &feedback)
                 update_offer_.installable ? "" : ", not installable from here");
     if (!update_offer_.installable)
     {
-        toasts_.push(ui::StatusKind::info, "Update available",
+        toasts_.push(ui::StatusKind::info, TR("update.update_available", "Update available"),
                      std::string("ProsperoAI ") + update_offer_.version +
-                         " is out. Get it from homebrew.page.",
+                         TR("update.is_out_get_it", " is out. Get it from homebrew.page."),
                      8.0f);
         return;
     }
@@ -85,8 +85,8 @@ void NativeUI::Impl::take_update_offer(ui::Feedback &feedback)
             blocks.push_back(ui::TextBlock::paragraph(line));
     }
     if (!blocks.empty() && update_offer_.notes_truncated)
-        blocks.push_back(
-            ui::TextBlock::paragraph("The rest is on the app's page on homebrew.page."));
+        blocks.push_back(ui::TextBlock::paragraph(
+            TR("update.the_rest_is_on", "The rest is on the app's page on homebrew.page.")));
     update_notes_.set_content(std::move(blocks));
     open_update_offer(feedback, false);
 }
@@ -96,18 +96,22 @@ void NativeUI::Impl::open_update_offer(ui::Feedback &feedback, bool on_notes)
 {
     const bool with_notes = !update_notes_.content().empty();
     ui::DialogContent content;
-    content.title = "Update available";
+    content.title = TR("update.update_available", "Update available");
     char size[48] = "";
     if (update_offer_.size != 0)
         std::snprintf(size, sizeof(size), " (%.0f MB)",
                       static_cast<double>(update_offer_.size) / 1e6);
-    content.body = std::string("ProsperoAI ") + update_offer_.version + " is out" + size +
-                   ".\nUpdate now downloads and checks it. ProsperoAI then closes while the new "
-                   "version is put in place.";
-    content.buttons.push_back({"Skip", ui::ButtonKind::secondary, false});
+    content.body = std::string("ProsperoAI ") + update_offer_.version +
+                   TR("update.is_out", " is out") + size +
+                   TR("update.nupdate_now_downloads_and",
+                      ".\nUpdate now downloads and checks it. ProsperoAI then closes while the new "
+                      "version is put in place.");
+    content.buttons.push_back({TR("update.skip", "Skip"), ui::ButtonKind::secondary, false});
     if (with_notes)
-        content.buttons.push_back({"What's new", ui::ButtonKind::secondary, false});
-    content.buttons.push_back({"Update now", ui::ButtonKind::primary, false});
+        content.buttons.push_back(
+            {TR("update.what_s_new", "What's new"), ui::ButtonKind::secondary, false});
+    content.buttons.push_back(
+        {TR("update.update_now", "Update now"), ui::ButtonKind::primary, false});
     content.default_button =
         with_notes && on_notes ? 1 : static_cast<int>(content.buttons.size()) - 1;
     update_dialog_.open(std::move(content), feedback);
@@ -118,11 +122,13 @@ void NativeUI::Impl::open_update_failure(const char *reason, ui::Feedback &feedb
 {
     debug::line("notice", "update: not installed: %s", reason && reason[0] ? reason : "-");
     ui::DialogContent content;
-    content.title = "The update was not installed";
-    content.body = std::string(reason && reason[0] ? reason : "Something went wrong.") +
-                   "\nProsperoAI is as it was.";
-    content.buttons = {{"Close", ui::ButtonKind::secondary, false},
-                       {"Try again", ui::ButtonKind::primary, false}};
+    content.title = TR("update.the_update_was_not", "The update was not installed");
+    content.body = std::string(reason && reason[0]
+                                   ? reason
+                                   : TR("update.something_went_wrong", "Something went wrong.")) +
+                   TR("update.nprosperoai_is_as_it", "\nProsperoAI is as it was.");
+    content.buttons = {{TR("ui.close", "Close"), ui::ButtonKind::secondary, false},
+                       {TR("update.try_again", "Try again"), ui::ButtonKind::primary, false}};
     content.default_button = 1;
     update_dialog_.open(std::move(content), feedback);
     update_ui_ = UpdateUi::failed;
@@ -135,7 +141,8 @@ void NativeUI::Impl::begin_update(ui::Feedback &feedback)
     if (update::begin())
         update_ui_ = UpdateUi::working;
     else
-        open_update_failure("The update could not start.", feedback);
+        open_update_failure(TR("update.the_update_could_not", "The update could not start."),
+                            feedback);
 }
 
 // The update's own input: while it shows, nothing under it is reached.
@@ -188,7 +195,9 @@ void NativeUI::Impl::update_modal(const InputFrame &input, float dt, ui::Feedbac
             else
             {
                 update::finish();
-                open_update_failure("The update helper did not answer.", feedback);
+                open_update_failure(
+                    TR("update.the_update_helper_did", "The update helper did not answer."),
+                    feedback);
             }
         }
         else if (now.phase == update::Phase::failed || now.phase == update::Phase::cancelled)
@@ -246,14 +255,15 @@ void NativeUI::Impl::draw_update_notes(ui::Canvas &canvas) const
     const Rect &r = kNotesPanel;
     list.rounded_rect(r, 28, palette_.page_bottom);
     panel(list, r, 28, 1);
-    label(list, std::string("PROSPEROAI ") + update_offer_.version, r.x + 64, r.y + 62,
-          palette_.accent);
-    text(list, "What's new", r.x + 64, r.y + 116, 40, palette_.ink, true);
+    label(list, std::string(TR("update.prosperoai", "PROSPEROAI ")) + update_offer_.version,
+          r.x + 64, r.y + 62, palette_.accent);
+    text(list, TR("update.what_s_new", "What's new"), r.x + 64, r.y + 116, 40, palette_.ink, true);
     update_notes_.draw(canvas);
     // What the buttons do here, as the buttons themselves.
     auto glyphs = palette_.day ? ui::GlyphStyle::light() : ui::GlyphStyle::dark();
     glyphs.label = palette_.ink;
-    const ui::Hint hints[] = {{ui::Button::cross, "Update now"}, {ui::Button::circle, "Back"}};
+    const ui::Hint hints[] = {{ui::Button::cross, TR("update.update_now", "Update now")},
+                              {ui::Button::circle, TR("ui.back", "Back")}};
     ui::HintLayout layout;
     layout.size = 32;
     layout.text_size = 22;
@@ -278,29 +288,33 @@ void NativeUI::Impl::draw_update(ui::Canvas &canvas) const
     panel(list, r, 28, 1);
     const bool closing = update_ui_ == UpdateUi::closing;
     const update::Progress &now = update_progress_;
-    const char *doing = closing                                   ? "Updating"
-                        : now.phase == update::Phase::downloading ? "Downloading"
-                        : now.phase == update::Phase::unpacking   ? "Unpacking"
-                        : now.phase == update::Phase::ready || now.phase == update::Phase::applying
-                            ? "Finishing"
-                            : "Preparing";
-    label(list, std::string("PROSPEROAI ") + update_offer_.version, cx, r.y + 62, palette_.accent,
-          gfx::Align::center);
+    const char *doing =
+        closing                                   ? TR("update.updating", "Updating")
+        : now.phase == update::Phase::downloading ? TR("update.downloading", "Downloading")
+        : now.phase == update::Phase::unpacking   ? TR("update.unpacking", "Unpacking")
+        : now.phase == update::Phase::ready || now.phase == update::Phase::applying
+            ? TR("update.finishing", "Finishing")
+            : TR("screen.preparing", "Preparing");
+    label(list, std::string(TR("update.prosperoai", "PROSPEROAI ")) + update_offer_.version, cx,
+          r.y + 62, palette_.accent, gfx::Align::center);
     text(list, doing, cx, r.y + 122, 40, palette_.ink, true, gfx::Align::center);
     update_ring_.draw(canvas);
     char line[160];
-    std::snprintf(line, sizeof(line), "%s", "Starting the update helper");
+    std::snprintf(line, sizeof(line), "%s",
+                  TR("update.starting_the_update_helper", "Starting the update helper"));
     if (closing)
-        std::snprintf(line, sizeof(line), "%s", "ProsperoAI closes now.");
+        std::snprintf(line, sizeof(line), "%s",
+                      TR("update.prosperoai_closes_now", "ProsperoAI closes now."));
     else if (now.total != 0)
-        std::snprintf(line, sizeof(line), "%.1f of %.1f MB%s%s",
+        std::snprintf(line, sizeof(line), TR("update.1f_of_1f_mb", "%.1f of %.1f MB%s%s"),
                       static_cast<double>(now.done) / 1e6, static_cast<double>(now.total) / 1e6,
                       now.time_left[0] ? "  \xC2\xB7  " : "", now.time_left);
     text(list, line, cx, r.y + 442, 26, palette_.ink, false, gfx::Align::center);
     if (closing)
     {
-        text(list, "Open it again when the console says it was updated.", cx, r.y + r.h - 54, 22,
-             palette_.muted, false, gfx::Align::center);
+        text(list,
+             TR("update.open_it_again_when", "Open it again when the console says it was updated."),
+             cx, r.y + r.h - 54, 22, palette_.muted, false, gfx::Align::center);
     }
     else
     {
@@ -308,7 +322,8 @@ void NativeUI::Impl::draw_update(ui::Canvas &canvas) const
         auto glyphs = palette_.day ? ui::GlyphStyle::light() : ui::GlyphStyle::dark();
         glyphs.label = palette_.muted;
         const ui::Hint hints[] = {
-            {ui::Button::circle, "Cancel. Nothing is changed until the download is checked."}};
+            {ui::Button::circle, TR("update.cancel_nothing_is_changed",
+                                    "Cancel. Nothing is changed until the download is checked.")}};
         ui::HintLayout layout;
         layout.size = 30;
         layout.text_size = 22;

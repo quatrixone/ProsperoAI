@@ -25,7 +25,7 @@ the page, and a dialog shows its own.
 | --- | --- |
 | **Workspace** | Opens on a welcome page that says what is installed. In the conversation list, choose a model and generation settings, then choose a voice and (for Chatterbox) a spoken language. “New conversation” follows those controls. Cross opens the focused row; Square starts a fresh conversation from the chat. Triangle retries a failed answer or plays the latest saved audio. The right stick or Up and Down scroll. |
 | **Models** | The model under the focus leads the page; the grid below scrolls over any number of models. Square searches (a USB keyboard types straight into the search), L2 and R2 step through the kinds, Cross chooses a model after a confirmation. While a model is being downloaded, Triangle (or Cross on its card) cancels it after a confirmation; what was downloaded so far is removed. |
-| **Settings** | Appearance (Midnight or Daylight, three accents), Generation, Sound, Accessibility (reduced motion, high contrast, reading size) and About (version and credits). Circle returns to the categories. Changes apply at once and are saved in the background. |
+| **Settings** | Appearance (Midnight or Daylight, three accents, interface language: English or Italiano), Generation, Sound, Accessibility (reduced motion, high contrast, reading size) and About (version and credits). Circle returns to the categories. Changes apply at once and are saved in the background. |
 
 ## What the player sees and hears
 

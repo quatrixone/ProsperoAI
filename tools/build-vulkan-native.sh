@@ -39,7 +39,7 @@ export CCACHE_DIR=${CCACHE_DIR:-$root/build/ccache}
 source "$root/tools/ninja-build.sh"
 ninja_begin "$work/app.ninja"
 objects=()
-sources=(src/kv_budget.cpp src/prefix_reuse.cpp src/main.cpp src/native_app.cpp src/native_ui.cpp src/native_ui_screens.cpp src/native_ui_style.cpp third_party/qrcodegen/qrcodegen.cpp
+sources=(src/kv_budget.cpp src/i18n.cpp src/i18n_it.cpp src/prefix_reuse.cpp src/main.cpp src/native_app.cpp src/native_ui.cpp src/native_ui_screens.cpp src/native_ui_style.cpp third_party/qrcodegen/qrcodegen.cpp
  src/font_set.cpp src/media_preview.cpp src/dev_script.cpp src/gpt_input.cpp src/gpt_ime.cpp
  search-engine/src/query.cpp search-engine/src/providers.cpp search-engine/src/scan.cpp
  search-engine/src/cache.cpp search-engine/src/search.cpp search-engine/src/transport.cpp

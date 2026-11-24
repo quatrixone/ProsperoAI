@@ -40,6 +40,7 @@ struct Preferences
     bool web_search = false;
     unsigned sd_upscale = 0;
     unsigned theme = 0, accent = 0, volume = 35, text_size = 0;
+    unsigned language = 0; // 0 English, 1 Italiano (prospero::i18n::Language)
     bool reduced_motion = false, high_contrast = false;
     std::string model_id;
 };
