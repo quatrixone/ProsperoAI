@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 'use strict';
-globalThis.i18n.register('it', {
+globalThis.i18n?.register('it', {
   'screen.audio': 'Audio',
   'screen.image': 'Immagine',
   'screen.text': 'Testo',

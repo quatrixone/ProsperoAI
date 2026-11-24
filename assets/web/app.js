@@ -49,7 +49,9 @@ function renderConnection() {
 }
 i18n.apply(document);
 renderConnection();
-{ const language = $('language'); if (language) { language.value = i18n.language(); language.onchange = () => { try { i18n.setLanguage(language.value); } catch { language.value = i18n.language(); return; } i18n.apply(document); renderConnection(); }; } }
+{ const language = $('language'); if (language) { language.value = i18n.language(); language.onchange = () => { try { i18n.setLanguage(language.value); } catch { language.value = i18n.language(); } }; } }
+// Redraw the views whose text this script builds; the open conversation and the music status lines keep their old language until they next update.
+i18n.onChange(() => { i18n.apply(document); renderConnection(); renderWorkspaceModels(); renderModels(); renderHistory(); renderDownloadItems(downloadState); updateModelChip(); });
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { $('feedback').textContent = i18n.t('web.save_failed',"Your browser could not save this conversation.") } };
 const preferences = load('prospero-preferences', {theme:'midnight',accent:'gold',size:'normal',motion:false,contrast:false,temperature:0.7,length:0});

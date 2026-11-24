@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Release check for the web string catalog (not a unit test).
 
 Usage: i18n-check-web.py [app_dir]
@@ -7,7 +8,9 @@ Collects data-i18n / data-i18n-attr from assets/web/index.html and
 i18n.t("id", "english") calls from the other scripts in assets/web, and checks
 them against assets/web/i18n-it.js. Exit 1 when a used ID has no Italian entry,
 a table ID is unused, two uses of one ID disagree on the English text, an
-English/Italian pair has different placeholders, or the table repeats an ID.
+English/Italian pair has different placeholders, leading/trailing spaces or
+final punctuation (. : ? ! …), or the table repeats an ID. Calls are read only
+when the id and English text are plain quoted literals (no backticks).
 """
 import argparse
 import re
@@ -25,7 +28,7 @@ def collect_uses(web):
     uses = []
     html = (web / "index.html").read_text(encoding="utf-8")
     for m in TEXT.finditer(html):
-        uses.append((m.group(3), m.group(5).strip(), "index.html"))
+        uses.append((m.group(3), m.group(5), "index.html"))
     for tag in TAG.finditer(html):
         for pair in tag.group(1).split(";"):
             name, _, tid = (part.strip() for part in pair.partition(":"))
@@ -37,6 +40,14 @@ def collect_uses(web):
         for m in CALL.finditer(script.read_text(encoding="utf-8")):
             uses.append((m.group(2), m.group(3) if m.group(3) is not None else m.group(4), script.name))
     return uses
+
+
+def edges(text):
+    # Leading/trailing whitespace and the final sentence mark must survive translation.
+    lead = text[:len(text) - len(text.lstrip())]
+    trail = text[len(text.rstrip()):]
+    body = text.strip()
+    return lead, trail, body[-1:] if body[-1:] in tuple(".:?!…") else ""
 
 
 def check(app):
@@ -57,6 +68,8 @@ def check(app):
             errors.append(f"missing in it: {tid}")
         elif HOLDER.findall(english) != HOLDER.findall(table[tid]):
             errors.append(f"placeholder mismatch: {tid}")
+        elif edges(english) != edges(table[tid]):
+            errors.append(f"edge mismatch: {tid}")
     for tid in sorted(table):
         if tid not in english_of:
             errors.append(f"unused table id: {tid}")

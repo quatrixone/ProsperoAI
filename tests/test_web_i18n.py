@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 import subprocess
 import tempfile
 import unittest
@@ -55,3 +56,18 @@ class WebCheckToolTests(unittest.TestCase):
         result = self.run_tool("", 'i18n.t("s.x", "Done {0}", n)', [("s.x", "Fatto")])
         self.assertEqual(result.returncode, 1)
         self.assertIn("placeholder mismatch: s.x", result.stdout)
+
+    def test_edge_whitespace_mismatch_fails(self):
+        result = self.run_tool("", 'i18n.t("s.x", " GiB. ", n)', [("s.x", "GiB.")])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("edge mismatch: s.x", result.stdout)
+
+    def test_final_punctuation_mismatch_fails(self):
+        result = self.run_tool("", 'i18n.t("s.x", "Done.", n)', [("s.x", "Fatto")])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("edge mismatch: s.x", result.stdout)
+
+    def test_html_text_is_compared_unstripped(self):
+        result = self.run_tool('<b data-i18n="a.b"> Hi</b>', "", [("a.b", "Ciao")])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("edge mismatch: a.b", result.stdout)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 'use strict';
 // Behaviour tests for the web string catalog. Run: node tests/web_i18n_test.js [--real-table]
 const assert = require('assert');
@@ -72,6 +73,15 @@ const cases = {
     i18n.setLanguage('it');
     i18n.apply(dom);
     assert.strictEqual(status.textContent, 'PS5 · Connected');
+  },
+  language_change_notifies_listeners() {
+    const i18n = load(memoryStorage());
+    const seen = [];
+    i18n.onChange(language => seen.push(language));
+    i18n.setLanguage('it');
+    assert.throws(() => i18n.setLanguage('xx'), { name: 'RangeError' });
+    i18n.setLanguage('en');
+    assert.deepStrictEqual(seen, ['it', 'en']);
   },
   attribute_translation() {
     const i18n = load(memoryStorage());
