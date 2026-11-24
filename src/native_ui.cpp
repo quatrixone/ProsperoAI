@@ -274,6 +274,7 @@ void NativeUI::Impl::refresh_language_views()
     // Not called from the constructor: categories_ and form_ do not exist yet there.
     rebuild_categories();
     refresh_models();
+    refresh_sessions();
     build_form();
 }
 
@@ -424,7 +425,7 @@ void NativeUI::Impl::announce(ui::Feedback &feedback)
             refresh_sessions();
             toasts_.push(
                 ui::StatusKind::success,
-                std::string(current_name()) + TR("ui.is_ready", " is ready"),
+                i18n::fill(TR("ui.is_ready", "%s is ready"), {current_name()}),
                 TR("ui.a_new_conversation_starts", "A new conversation starts with this model."));
             break;
         case Notice::ModelFailed:
@@ -1035,9 +1036,10 @@ void NativeUI::Impl::handle_models(const InputFrame &input, ui::Feedback &feedba
                                 "Choose another model before deleting this one."));
             else
                 open_dialog(kDeleteModel, index, TR("ui.delete_this_model", "Delete this model?"),
-                            model.name + TR("ui.and_its_installed_files",
-                                            " and its installed files will be removed from the "
-                                            "console."),
+                            i18n::fill(TR("ui.and_its_installed_files",
+                                          "%s and its installed files will be removed from the "
+                                          "console."),
+                                       {model.name}),
                             TR("ui.delete_model", "Delete model"), true, feedback);
         }
         else
@@ -1069,11 +1071,11 @@ void NativeUI::Impl::handle_models(const InputFrame &input, ui::Feedback &feedba
                 open_dialog(
                     kDownloadPreset, static_cast<int>(preset_index),
                     TR("ui.download_this_model", "Download this model?"),
-                    std::string(preset.name) + TR("ui.requires", " requires ") +
-                        std::to_string(size_mib) +
-                        TR("ui.mib_free_console_storage",
-                           " MiB. Free console storage cannot be checked safely. Check that "
-                           "enough space is available before continuing."),
+                    i18n::fill(TR("ui.mib_free_console_storage",
+                                  "%s requires %s MiB. Free console storage cannot be checked "
+                                  "safely. Check that enough space is available before "
+                                  "continuing."),
+                               {preset.name, std::to_string(size_mib)}),
                     TR("ui.download_model", "Download model"), false, feedback);
             }
             return;
@@ -1463,9 +1465,10 @@ void NativeUI::Impl::handle_workspace(const InputFrame &input, ui::Feedback &fee
             else
                 open_dialog(kDeleteModel, static_cast<int>(index),
                             TR("ui.delete_this_model", "Delete this model?"),
-                            model.name + TR("ui.and_its_installed_files",
-                                            " and its installed files will be removed from the "
-                                            "console."),
+                            i18n::fill(TR("ui.and_its_installed_files",
+                                          "%s and its installed files will be removed from the "
+                                          "console."),
+                                       {model.name}),
                             TR("ui.delete_model", "Delete model"), true, feedback);
         }
         else if (input.is_pressed(Action::l3) && !selecting_model_ &&
@@ -1798,8 +1801,8 @@ void NativeUI::Impl::refresh_sessions()
         {
             ui::ListItem item;
             item.title = entry.name;
-            item.subtitle =
-                std::to_string(entry.size / 1024) + TR("ui.kib_work_audio", " KiB · work/audio/");
+            item.subtitle = i18n::fill(TR("ui.kib_work_audio", "%s KiB · work/audio/"),
+                                       {std::to_string(entry.size / 1024)});
             rows.push_back(std::move(item));
         }
         if (rows.empty())
@@ -2348,7 +2351,8 @@ void NativeUI::Impl::build_generation_form()
         form_.add_value(29, TR("ui.current_audio_duration", "Current audio duration"),
                         p.audio_duration_sec == 0
                             ? TR("ui.model_default", "Model default")
-                            : std::to_string(p.audio_duration_sec) + TR("ui.seconds", " seconds"));
+                            : i18n::fill(TR("ui.seconds", "%s seconds"),
+                                         {std::to_string(p.audio_duration_sec)}));
         auto &duration_field = form_.add_choice(
             24, TR("ui.audio_clip_duration", "Audio clip duration"),
             {TR("ui.keep_current", "Keep current"), TR("ui.model_default", "Model default"),

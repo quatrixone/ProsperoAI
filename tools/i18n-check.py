@@ -7,7 +7,8 @@ Collects every TR("id", "english") from <app>/src/*.cpp and every
 {"id", "english", "italiano"} entry from src/i18n_it.cpp. Exit 1 when a used
 ID has no Italian entry, a table ID is unused, two uses of one ID disagree on
 the English text, an English/Italian pair has different placeholders, or the
-table repeats an ID.
+table repeats an ID. English and Italian must also agree on leading and
+trailing whitespace and on the number of newlines.
 """
 import argparse
 import re
@@ -24,6 +25,13 @@ HOLDER = re.compile(
 
 def holders(text):
     return HOLDER.findall(text)
+
+
+def edges(text):
+    """Leading and trailing whitespace (with \\n unescaped) and the newline count."""
+    plain = text.replace("\\n", "\n")
+    return (plain[:len(plain) - len(plain.lstrip())], plain[len(plain.rstrip()):],
+            plain.count("\n"))
 
 
 def join(literals):
@@ -56,6 +64,8 @@ def check(app):
         table_ids.add(tid)
         if holders(english) != holders(italiano):
             errors.append(f"placeholder mismatch: {tid}")
+        if edges(english) != edges(italiano):
+            errors.append(f"whitespace mismatch: {tid}")
     english_of = {}
     for tid, english, name in collect_uses(app):
         if tid in english_of and english_of[tid][0] != english:

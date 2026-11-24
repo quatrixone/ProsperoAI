@@ -1,8 +1,8 @@
 // ProsperoAI native application controller.
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "native_app.hpp"
-#include "i18n.hpp"
 #include "chatterbox_languages.hpp"
+#include "i18n.hpp"
 #include "generated_media.hpp"
 #include "runtime_settings.hpp"
 #include "prospero_search.hpp"
@@ -150,7 +150,7 @@ void validate(Preferences &p)
         p.output_limit = 0;
     p.theme = std::min(p.theme, 1U);
     p.accent = std::min(p.accent, 2U);
-    p.language = std::min(p.language, 1U);
+    p.language = p.language > 1U ? 0U : p.language;
     p.volume = std::min(p.volume, 100U);
     p.text_size = std::min(p.text_size, 1U);
 }
@@ -179,7 +179,10 @@ void load_preferences(Preferences &p, const std::vector<Model> &models)
 {
     std::FILE *file = std::fopen(PROSPERO_SETTINGS_PATH, "rb");
     if (!file)
+    {
+        prospero::i18n::set_language(static_cast<prospero::i18n::Language>(p.language));
         return;
+    }
     char line[256]{};
     unsigned legacy_model = 0;
     if (std::fgets(line, sizeof(line), file) &&

@@ -54,14 +54,26 @@ const char *tr(const char *id, const char *english)
     return english;
 }
 
-std::string truncate_utf8(const std::string &s, std::size_t max_bytes)
+std::string fill(const char *format, std::initializer_list<std::string> values)
 {
-    if (s.size() <= max_bytes)
-        return s;
-    std::size_t cut = max_bytes;
-    // Step back over continuation bytes (10xxxxxx) so the next byte starts a character.
-    while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80)
-        --cut;
-    return s.substr(0, cut);
+    std::string out;
+    auto next = values.begin();
+    for (const char *p = format; *p; ++p)
+    {
+        if (*p == '%' && p[1] == '%')
+        {
+            out += '%';
+            ++p;
+        }
+        else if (*p == '%' && p[1] == 's')
+        {
+            if (next != values.end())
+                out += *next++;
+            ++p;
+        }
+        else
+            out += *p;
+    }
+    return out;
 }
 } // namespace prospero::i18n

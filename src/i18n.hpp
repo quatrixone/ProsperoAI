@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <initializer_list>
 #include <string>
 
 namespace prospero::i18n
@@ -25,8 +26,9 @@ const char *language_name(Language);
 // English (or unknown ID): returns `english`. Italian: the table text, else `english`.
 const char *tr(const char *id, const char *english);
 
-// Cuts on a character boundary so the result never ends inside a UTF-8 sequence.
-std::string truncate_utf8(const std::string &s, std::size_t max_bytes);
+// Replaces each "%s" in `format`, in order, with the next value ("%%" becomes "%"). Missing
+// values become empty. Whole sentences go through this so a translation can reorder the words.
+std::string fill(const char *format, std::initializer_list<std::string> values);
 
 // Italian table, defined in i18n_it.cpp (sorted by ID).
 const Entry *base_table(std::size_t *count);

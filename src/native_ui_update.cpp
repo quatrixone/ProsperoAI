@@ -53,8 +53,9 @@ void NativeUI::Impl::take_update_offer(ui::Feedback &feedback)
     if (!update_offer_.installable)
     {
         toasts_.push(ui::StatusKind::info, TR("update.update_available", "Update available"),
-                     std::string("ProsperoAI ") + update_offer_.version +
-                         TR("update.is_out_get_it", " is out. Get it from homebrew.page."),
+                     i18n::fill(TR("update.is_out_get_it",
+                                   "ProsperoAI %s is out. Get it from homebrew.page."),
+                                {update_offer_.version}),
                      8.0f);
         return;
     }
@@ -101,11 +102,11 @@ void NativeUI::Impl::open_update_offer(ui::Feedback &feedback, bool on_notes)
     if (update_offer_.size != 0)
         std::snprintf(size, sizeof(size), " (%.0f MB)",
                       static_cast<double>(update_offer_.size) / 1e6);
-    content.body = std::string("ProsperoAI ") + update_offer_.version +
-                   TR("update.is_out", " is out") + size +
-                   TR("update.nupdate_now_downloads_and",
-                      ".\nUpdate now downloads and checks it. ProsperoAI then closes while the new "
-                      "version is put in place.");
+    content.body = i18n::fill(
+        TR("update.is_out",
+           "ProsperoAI %s is out%s.\nUpdate now downloads and checks it. ProsperoAI then "
+           "closes while the new version is put in place."),
+        {update_offer_.version, size});
     content.buttons.push_back({TR("update.skip", "Skip"), ui::ButtonKind::secondary, false});
     if (with_notes)
         content.buttons.push_back(

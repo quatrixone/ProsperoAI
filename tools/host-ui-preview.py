@@ -30,7 +30,7 @@ KIT = tool("prepare-ui-kit.sh") / "src"
 FONTS = tool("bake-fonts.sh")
 kit_sources = [KIT / line for line in (ROOT / "ui-kit/sources.txt").read_text().split()
                if line.endswith(".cpp") and not line.startswith("platform/")]
-sources = [ROOT / "src/native_app.cpp", ROOT / "search-engine/src/query.cpp",
+sources = [ROOT / "src/i18n.cpp", ROOT / "src/i18n_it.cpp", ROOT / "src/native_app.cpp", ROOT / "search-engine/src/query.cpp",
            ROOT / "search-engine/src/providers.cpp", ROOT / "search-engine/src/scan.cpp",
            ROOT / "search-engine/src/cache.cpp", ROOT / "search-engine/src/search.cpp",
            ROOT / "search-engine/src/transport.cpp", ROOT / "src/native_ui.cpp",

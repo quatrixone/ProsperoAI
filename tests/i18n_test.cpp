@@ -151,12 +151,21 @@ static void no_empty_italian_values_and_valid_utf8()
     }
 }
 
-static void truncate_utf8_never_splits_a_character()
+static void fill_replaces_each_s_in_order()
 {
-    assert(truncate_utf8("perch\xC3\xA9", 5) == "perch");
-    assert(truncate_utf8("\xC3\xA0", 1) == "");
-    assert(truncate_utf8("ciao", 10) == "ciao");
-    assert(truncate_utf8("perch\xC3\xA9", 7) == "perch\xC3\xA9");
+    assert(fill("%s is ready", {"Llama"}) == "Llama is ready");
+    assert(fill("%s requires %s MiB.", {"Llama", "128"}) == "Llama requires 128 MiB.");
+    assert(fill("%s%%", {"5"}) == "5%");
+    assert(fill("%s and %s", {"a"}) == "a and ");
+    assert(fill("only text", {"x"}) == "only text");
+}
+
+static void whole_sentences_keep_whitespace_and_order()
+{
+    set_language(Language::Italian);
+    assert(fill(tr("ui.is_ready", "%s is ready"), {"Llama"}) == "Llama \xC3\xA8 pronto");
+    set_language(Language::English);
+    assert(fill(tr("ui.is_ready", "%s is ready"), {"Llama"}) == "Llama is ready");
 }
 
 int main()
@@ -169,7 +178,8 @@ int main()
     table_is_sorted_without_duplicates();
     placeholder_parser_sees_floats();
     no_empty_italian_values_and_valid_utf8();
-    truncate_utf8_never_splits_a_character();
+    fill_replaces_each_s_in_order();
+    whole_sentences_keep_whitespace_and_order();
     std::puts("i18n ok");
     return 0;
 }

@@ -401,12 +401,40 @@ void language_preference_round_trips()
     std::remove(PROSPERO_SETTINGS_PATH);
 }
 
+// A settings file from before the language setting, a missing file, and an unknown value all
+// start in English.
+void old_settings_start_in_english()
+{
+    const auto start_with = [](const char *contents)
+    {
+        std::remove(PROSPERO_SETTINGS_PATH);
+        if (contents)
+        {
+            std::FILE *file = std::fopen(PROSPERO_SETTINGS_PATH, "wb");
+            assert(file);
+            std::fputs(contents, file);
+            std::fclose(file);
+        }
+        prospero::i18n::set_language(prospero::i18n::Language::Italian); // left over from a test
+        prospero::App app;
+        assert(app.initialize());
+        settle(app);
+        assert(app.state().preferences.language == 0);
+        assert(prospero::i18n::language() == prospero::i18n::Language::English);
+    };
+    start_with("version=2\ntheme=1\n");
+    start_with(nullptr);
+    start_with("version=2\nlanguage=9\n");
+    std::remove(PROSPERO_SETTINGS_PATH);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 4);
     prospero::debug::start(argv[3]);
     test_stopped_queue_waiting_for_busy_worker();
     language_preference_round_trips();
+    old_settings_start_in_english();
     std::remove(PROSPERO_SETTINGS_PATH);
     {
         std::ofstream settings(PROSPERO_SETTINGS_PATH);

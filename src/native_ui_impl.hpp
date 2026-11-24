@@ -4,7 +4,6 @@
 #pragma once
 #include "native_ui.hpp"
 #include "i18n.hpp"
-#include <array>
 #include "native_audio_queue.hpp"
 #include "model_downloader_ps5.hpp"
 #include "update.hpp"
@@ -24,6 +23,7 @@
 #include "ui/glyphs.hpp"
 #include "ui/motion.hpp"
 
+#include <array>
 #include <map>
 #include <cstdint>
 #include <string>

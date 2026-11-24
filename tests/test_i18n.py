@@ -61,3 +61,17 @@ class CheckToolTests(unittest.TestCase):
             self.assertIn("placeholder mismatch: a.one", result.stdout)
         ok = self.run_tool('TR("a.one", "%.2f of %5.1f");', [("a.one", "%.2f of %5.1f", "%.2f su %5.1f")])
         self.assertEqual(ok.returncode, 0, ok.stdout)
+
+    def test_check_tool_flags_whitespace_mismatch(self):
+        for english, italiano in ((" is out", "e uscito"), ("Name ", "Nome"),
+                                  (" \\u00b7 x", "x"), ("a\\nb", "a b")):
+            result = self.run_tool('TR("a.one", "%s");' % english, [("a.one", english, italiano)])
+            self.assertEqual(result.returncode, 1, (english, italiano))
+            self.assertIn("whitespace mismatch: a.one", result.stdout)
+        ok = self.run_tool('TR("a.one", " is out\\n");', [("a.one", " is out\\n", " e uscito\\n")])
+        self.assertEqual(ok.returncode, 0, ok.stdout)
+
+    def test_check_tool_passes_on_repository(self):
+        result = subprocess.run(["python3", "-I", str(self.TOOL), str(ROOT)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
