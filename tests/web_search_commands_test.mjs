@@ -3,7 +3,7 @@
 // seeing, and what is refused before anything is sent to the console.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
+import { runInNewContext } from './english_i18n.mjs';
 import { test } from 'node:test';
 
 const source = readFileSync(new URL('../assets/web/app.js', import.meta.url), 'utf8');

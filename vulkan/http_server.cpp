@@ -466,6 +466,8 @@ bool serve_ui_asset(const NetApi &api, int sock, const char *path)
         {"/music.js", "music.js", "text/javascript; charset=utf-8"},
         {"/app.css", "app.css", "text/css; charset=utf-8"},
         {"/app.js", "app.js", "text/javascript; charset=utf-8"},
+        {"/i18n.js", "i18n.js", "text/javascript; charset=utf-8"},
+        {"/i18n-it.js", "i18n-it.js", "text/javascript; charset=utf-8"},
         {"/workspace.js", "workspace.js", "text/javascript; charset=utf-8"},
         {"/voice-catalog.js", "voice-catalog.js", "text/javascript; charset=utf-8"},
         {"/voice-recording.js", "voice-recording.js", "text/javascript; charset=utf-8"},

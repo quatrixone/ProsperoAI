@@ -1266,6 +1266,13 @@ class HttpApiTests(unittest.TestCase):
         header, _ = self.request("/../api_key.txt")
         self.assertIn("404 Not Found", header)
 
+    def test_i18n_scripts_are_served_public(self):
+        for route in ("/i18n.js", "/i18n-it.js"):
+            header, body = self.request(route, key="private")
+            self.assertIn("200 OK", header)
+            self.assertIn("text/javascript", header)
+            self.assertIn("i18n", body)
+
     def test_presets_and_download_progress(self):
         _, body = self.request("/api/models/presets")
         presets = json.loads(body)["data"]

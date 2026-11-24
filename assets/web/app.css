@@ -78,7 +78,7 @@ body.contrast :is(button,a,summary,[role=tab],select,input,textarea):focus-visib
 #workspace-audio-music #cover-status.busy,#workspace-audio-music #gen-status.busy{color:var(--accent)}
 #workspace-audio-music #cover-status.ok{color:var(--good)}
 #workspace-audio-music #opts-col{min-width:0}
-#workspace-audio-music #opts-col label span{display:flex;align-items:center;gap:10px}
+#workspace-audio-music #opts-col label span:not([data-i18n]){display:flex;align-items:center;gap:10px}
 #workspace-audio-music #duration{flex:1;max-width:none}
 #workspace-audio-music #dur-val{min-width:40px;text-align:right;color:var(--accent)}
 #workspace-audio-music #seed-row input{flex:1;min-width:0}

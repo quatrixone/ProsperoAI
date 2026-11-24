@@ -49,27 +49,27 @@
     }
 
     function validateImageInputs(mode, uploads = {}) {
-        if (['image_to_image', 'inpainting'].includes(mode) && !uploads.image) return 'Choose an image to continue.';
-        if (mode === 'inpainting' && !uploads.mask) return 'Paint or choose an inpainting mask.';
-        if (mode === 'controlnet' && !uploads.guide) return 'Choose a guide image to continue.';
+        if (['image_to_image', 'inpainting'].includes(mode) && !uploads.image) return i18n.t('web.choose_an_image_to_continue', 'Choose an image to continue.');
+        if (mode === 'inpainting' && !uploads.mask) return i18n.t('web.paint_or_choose_an_inpainting_mask', 'Paint or choose an inpainting mask.');
+        if (mode === 'controlnet' && !uploads.guide) return i18n.t('web.choose_a_guide_image_to_continue', 'Choose a guide image to continue.');
         return '';
     }
 
     async function uploadImageInput(api, file) {
         if (!file || !['image/png', 'image/jpeg'].includes(file.type) || file.size < 1 || file.size > 16 * 1024 * 1024)
-            throw new Error('Choose a PNG or JPEG image no larger than 16 MiB.');
+            throw new Error(i18n.t('web.choose_a_png_or_jpeg_image_no_larger_tha', 'Choose a PNG or JPEG image no larger than 16 MiB.'));
         const response = await api('/api/image/upload', {
             method: 'POST', body: file, headers: {'Content-Type': file.type},
         });
         const {id} = await response.json();
-        if (!/^[0-9a-f]{32}$/.test(id || '')) throw new Error('The image upload returned an invalid upload ID.');
+        if (!/^[0-9a-f]{32}$/.test(id || '')) throw new Error(i18n.t('web.the_image_upload_returned_an_invalid_upl', 'The image upload returned an invalid upload ID.'));
         return id;
     }
 
     function buildImageRequest({model, mode, prompt, values = {}, uploads = {}, sessionId, messageIndex}) {
         const workflow = mode;
-        if (!imageModes(model).includes(workflow)) throw new Error('This model does not support the selected image mode.');
-        if (!String(prompt || '').trim()) throw new Error('Enter a prompt before generating.');
+        if (!imageModes(model).includes(workflow)) throw new Error(i18n.t('web.this_model_does_not_support_the_selected', 'This model does not support the selected image mode.'));
+        if (!String(prompt || '').trim()) throw new Error(i18n.t('web.enter_a_prompt_before_generating', 'Enter a prompt before generating.'));
         const missing = validateImageInputs(workflow, uploads);
         if (missing) throw new Error(missing);
         const settings = imageSettings(model, workflow, values);
@@ -79,11 +79,11 @@
             options.width % 64 || options.height % 64 || options.width * options.height > 1048576 ||
             !Number.isInteger(options.steps) || options.steps < 1 || options.steps > 50 ||
             !Number.isFinite(options.cfg_scale) || options.cfg_scale < 0 || options.cfg_scale > 20)
-            throw new Error('Image dimensions, steps, or guidance are outside the supported range.');
+            throw new Error(i18n.t('web.image_dimensions_steps_or_guidance_are_o', 'Image dimensions, steps, or guidance are outside the supported range.'));
         if (showStrength && (!Number.isFinite(options.strength) || options.strength < 0 || options.strength > 1))
-            throw new Error('Strength must be between 0 and 1.');
+            throw new Error(i18n.t('web.strength_must_be_between_0_and_1', 'Strength must be between 0 and 1.'));
         if (showControlStrength && (!Number.isFinite(options.control_strength) || options.control_strength < 0 || options.control_strength > 2))
-            throw new Error('Control strength must be between 0 and 2.');
+            throw new Error(i18n.t('web.control_strength_must_be_between_0_and_2', 'Control strength must be between 0 and 2.'));
         const {upscale, ...generation} = options;
         const image_workflow = {workflow, ...generation, upscale: upscale === 2 || upscale === 4 ? upscale : 0,
                                 negative_prompt: String(values.negative_prompt || '')};
@@ -113,7 +113,7 @@
                 continue;
             }
             if (job.state !== 'done' || job.result?.error) {
-                const error = new Error(job.result?.error || 'Image generation failed.');
+                const error = new Error(job.result?.error || i18n.t('web.image_generation_failed_plain', 'Image generation failed.'));
                 error.code = 'IMAGE_JOB_TERMINAL';
                 throw error;
             }
@@ -152,7 +152,7 @@
         const model = (models || []).find(item =>
             item.id === modelId && item.purpose === AUDIO_PURPOSE.music);
         if (!model) {
-            const error = new Error('Choose an installed music model before generating.');
+            const error = new Error(i18n.t('web.choose_an_installed_music_model_before_g', 'Choose an installed music model before generating.'));
             error.code = 'MUSIC_MODEL_UNAVAILABLE';
             return Promise.reject(error);
         }
@@ -170,11 +170,11 @@
             get model() { return stagedModel; },
             setModels(value) { models = value; },
             setMode(value) {
-                if (value !== 'audio' && !MODE_PURPOSE[value]) throw new Error('Unknown workspace mode.');
+                if (value !== 'audio' && !MODE_PURPOSE[value]) throw new Error(i18n.t('web.unknown_workspace_mode', 'Unknown workspace mode.'));
                 mode = value;
             },
             setAudioSection(value) {
-                if (!AUDIO_PURPOSE[value]) throw new Error('Unknown Audio section.');
+                if (!AUDIO_PURPOSE[value]) throw new Error(i18n.t('web.unknown_audio_section', 'Unknown Audio section.'));
                 audioSection = value;
             },
             stageModel(id) { stagedModel = id || ''; },

@@ -47,17 +47,15 @@
     var startedAt = Date.now();
     return api('/api/generate', { model: model, prompt: prompt, async: true }, 30000)
       .then(function (j) {
-        if (!j.job_id) throw new Error('server has no async jobs (old build?)');
+        if (!j.job_id) throw new Error(i18n.t('web.server_has_no_async_jobs_old_build',"server has no async jobs (old build?)"));
         var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
         var poll = function () {
           return api('/api/jobs?id=' + j.job_id, undefined, 20000)
             .then(function (s) {
               if (s && s.state === 'running') {
                 if (Date.now() > deadline)
-                  throw new Error('job ' + j.job_id + ' still running after ' +
-                    Math.round((maxMs || 2700000) / 60000) + ' min');
-                setStatus('Generating — ' + Math.round((Date.now() - startedAt) / 1000) +
-                  's elapsed; the job finishes even if you close this page.', 'busy');
+                  throw new Error(i18n.t('web.mu_job_still_running', "job {0} still running after {1} min", j.job_id, Math.round((maxMs || 2700000) / 60000)));
+                setStatus(i18n.t('web.mu_generating_elapsed', "Generating — {0}s elapsed; the job finishes even if you close this page.", Math.round((Date.now() - startedAt) / 1000)), 'busy');
                 return sleep(5000).then(poll);
               }
               if (!s || !s.result) return { error: 'job ' + j.job_id + ' vanished' };
@@ -68,7 +66,7 @@
               // are process-local, so the user must check the library before
               // deciding whether to submit the work again.
               if (e && /404|no such job|job lost/.test(e.message)) {
-                throw new Error('The job is no longer available. Check the library before starting another generation.');
+                throw new Error(i18n.t('web.the_job_is_no_longer_available_check',"The job is no longer available. Check the library before starting another generation."));
               }
               // a dropped poll is not a failure: retry until the deadline
               if (e && /vanished|old build|still running/.test(e.message)) throw e;
@@ -93,9 +91,9 @@
       fetch(probe + Date.now(), { headers: { Range: 'bytes=0-0' } })
         .then(function (r) {
           if (r.ok || r.status === 206) { clearInterval(iv); onReady(); }
-          else if (tries > 36) { clearInterval(iv); onFail('the stems files never appeared (3 min)'); }
+          else if (tries > 36) { clearInterval(iv); onFail(i18n.t('web.mu_stems_never_appeared', "the stems files never appeared (3 min)")); }
         })
-        .catch(function () { if (tries > 36) { clearInterval(iv); onFail('connection lost and the stems files never appeared'); } });
+        .catch(function () { if (tries > 36) { clearInterval(iv); onFail(i18n.t('web.mu_conn_lost_stems', "connection lost and the stems files never appeared")); } });
     }, 5000);
   }
 
@@ -104,8 +102,7 @@
       var run = (d && d.jobs || []).filter(function (j) { return j.state === 'running'; });
       if (run.length) {
         var j = run[run.length - 1];
-        setStatus('Console is busy: ' + j.model + ' job running for ' + j.elapsed_s +
-          's — it finishes even if you close this page.', 'busy');
+        setStatus(i18n.t('web.mu_console_busy', "Console is busy: {0} job running for {1}s — it finishes even if you close this page.", j.model, j.elapsed_s), 'busy');
       }
     }).catch(function () {});
   }
@@ -135,7 +132,7 @@
       musicModels = available;
       var placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = available.length ? 'Choose a music model…' : 'No installed music models';
+      placeholder.textContent = available.length ? i18n.t('web.choose_a_music_model',"Choose a music model…") : i18n.t('web.no_installed_music_models',"No installed music models");
       sel.appendChild(placeholder);
       available.forEach(function (m) {
         var o = document.createElement('option');
@@ -146,7 +143,7 @@
       if (available.some(function (m) { return m.id === previous; })) sel.value = previous;
       syncAudioDurationVisibility();
       $('status-dot').className = available.length ? 'dot on' : 'dot';
-    }).catch(function (e) { $('status-dot').className = 'dot'; setStatus('Cannot load installed models: ' + e.message, 'err'); });
+    }).catch(function (e) { $('status-dot').className = 'dot'; setStatus(i18n.t('web.mu_cannot_load_models', "Cannot load installed models: {0}", e.message), 'err'); });
   }
 
   // ---- runtime settings ----
@@ -195,10 +192,10 @@
     return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
   }
   function mp3FromUrl(url, name, done, fail) {
-    if (!window.lamejs) { fail(new Error('MP3 encoder not loaded')); return; }
-    setStatus('Converting to MP3 — keep this page open...', 'busy');
+    if (!window.lamejs) { fail(new Error(i18n.t('web.mp3_encoder_not_loaded',"MP3 encoder not loaded"))); return; }
+    setStatus(i18n.t('web.converting_to_mp3_keep_this_page_ope',"Converting to MP3 — keep this page open..."), 'busy');
     fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('download failed: HTTP ' + r.status);
+      if (!r.ok) throw new Error(i18n.t('web.mu_download_failed_http', "download failed: HTTP {0}", r.status));
       return r.arrayBuffer();
     }).then(function (buf) {
       // Fast path: parse PCM WAV ourselves inside a Web Worker (no tab freeze).
@@ -206,7 +203,7 @@
         var w = new Worker('/mp3-worker.js');
         w.onmessage = function (e) {
           var d = e.data || {};
-          if (d.pct !== undefined) { setStatus('Encoding MP3... ' + d.pct + '%', 'busy'); return; }
+          if (d.pct !== undefined) { setStatus(i18n.t('web.mu_encoding_mp3', "Encoding MP3... {0}%", d.pct), 'busy'); return; }
           if (d.done) {
             w.terminate();
             var blob = new Blob([d.mp3], { type: 'audio/mpeg' });
@@ -229,11 +226,11 @@
     }).catch(fail);
   }
   function mp3DecodeFallback(buf, name, done, fail) {
-    setStatus('Converting to MP3 (compat mode, page may pause)...', 'busy');
+    setStatus(i18n.t('web.converting_to_mp3_compat_mode_page_m',"Converting to MP3 (compat mode, page may pause)..."), 'busy');
     var Ctx = window.AudioContext || window.webkitAudioContext;
     var ctx = new Ctx();
     new Promise(function (res, rej) {
-      ctx.decodeAudioData(buf, res, function (e) { rej(new Error('decode failed: ' + e)); });
+      ctx.decodeAudioData(buf, res, function (e) { rej(new Error(i18n.t('web.mu_decode_failed', "decode failed: {0}", e))); });
     }).then(function (dec) {
       var rate = dec.sampleRate, ch = Math.min(2, dec.numberOfChannels);
       var enc = new lamejs.Mp3Encoder(ch, rate, 320);
@@ -282,7 +279,7 @@
     $('track-name').value = (base ? base + ' cover' : 'cover');
     try { formSaveNow(); } catch (e) {}
     $('lyrics').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    setStatus('Cover settings loaded from ' + filename + ' — press GENERATE', 'ok');
+    setStatus(i18n.t('web.mu_cover_settings_loaded', "Cover settings loaded from {0} — press GENERATE", filename), 'ok');
   }
 
   // ---- Cover + ABC: one-click subtle-variation recipe from a library track.
@@ -297,9 +294,9 @@
       $('track-name').value = base + ' var';
     var t0 = Date.now();
     var once = function (retry) {
-      setStatus('Cover+ABC: transcribing ' + filename + ' with SheetSage2 (1-3 min, you can close the page)...', 'busy');
+      setStatus(i18n.t('web.mu_cover_abc_transcribing', "Cover+ABC: transcribing {0} with SheetSage2 (1-3 min, you can close the page)...", filename), 'busy');
       if (!$('abc').value.trim())
-        setAbcStatus('⏳ Generating ABC score — takes about a minute, it appears here automatically when ready…', 'busy');
+        setAbcStatus(i18n.t('web.mu_abc_generating_wait', "⏳ Generating ABC score — takes about a minute, it appears here automatically when ready…"), 'busy');
       return api('/api/settings/runtime', { audio_options: 'input_audio=' + AUDIO_DIR + filename }, 30000)
         .then(function () {
           return generateAndWait('sheetsage2-orig', 'transcribe ' + filename, 900000);
@@ -307,34 +304,33 @@
         .then(function (j) {
           var resp = String(j.response || j.error || JSON.stringify(j).slice(0, 400));
           if (/NEEDS_RESTART|backend buffer allocation failed|failed to allocate Yue2 NAR/.test(resp)) {
-          throw new Error('Not enough usable memory. Wait for other work to finish, then close and reopen the app before retrying.');
+          throw new Error(i18n.t('web.not_enough_usable_memory_wait_for_ot',"Not enough usable memory. Wait for other work to finish, then close and reopen the app before retrying."));
         }
           var m = resp.match(/\/download0\/\S+?\.abc/);
           if (!m) throw new Error(resp.slice(0, 220));
         var path = m[0].replace(/["',).]+$/, '');
         var fname = path.substring(path.lastIndexOf('/') + 1);
         return fetch(AUDIO_DIR + encodeURIComponent(fname)).then(function (r) {
-          if (!r.ok) throw new Error('fetch score HTTP ' + r.status);
+          if (!r.ok) throw new Error(i18n.t('web.mu_fetch_score_http', "fetch score HTTP {0}", r.status));
           return r.text();
         }).then(function (t) {
           $('abc').value = t;
-          setAbcStatus('✓ Score ready — press GENERATE to use it (or edit it first).', 'ok');
+          setAbcStatus(i18n.t('web.mu_score_ready', "✓ Score ready — press GENERATE to use it (or edit it first)."), 'ok');
           var abcName = base.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60) + '-var.abc';
           $('abc-name').value = abcName;
           knownFiles[abcName] = true;
           if ($('cot') && !$('cot').value) $('cot').value = 'melody';
           loadAbcSelect();
           try { formSaveNow(); } catch (e) {}
-          setStatus('Cover+ABC done in ' + Math.round((Date.now() - t0) / 1000) +
-            's — score armed. Tweak lyrics/style and press GENERATE; memory errors leave the app running.', 'ok');
+          setStatus(i18n.t('web.mu_cover_abc_done', "Cover+ABC done in {0}s — score armed. Tweak lyrics/style and press GENERATE; memory errors leave the app running.", Math.round((Date.now() - t0) / 1000)), 'ok');
           $('abc').scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
       });
     };
     once(2).catch(function (e) {
       if (!$('abc').value.trim())
-        setAbcStatus('ABC generation failed — you can still generate from lyrics, or paste a score manually.', 'err');
-      setStatus('Cover+ABC failed: ' + (e && e.message ? e.message : e), 'err');
+        setAbcStatus(i18n.t('web.mu_abc_generation_failed', "ABC generation failed — you can still generate from lyrics, or paste a score manually."), 'err');
+      setStatus(i18n.t('web.mu_cover_abc_failed', "Cover+ABC failed: {0}", (e && e.message ? e.message : e)), 'err');
     });
   }
 
@@ -362,7 +358,7 @@
   }
   function masterTrack(url, onProgress) {
     return fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('fetch ' + r.status);
+      if (!r.ok) throw new Error(i18n.t('web.mu_fetch_http', "fetch {0}", r.status));
       return r.arrayBuffer();
     }).then(function (buf) {
       var AC = window.AudioContext || window.webkitAudioContext;
@@ -373,7 +369,7 @@
           d = decoded.getChannelData(c);
           for (i = 0; i < d.length; i++) { var a = d[i] < 0 ? -d[i] : d[i]; if (a > peak) peak = a; }
         }
-        if (peak < 0.001) throw new Error('audio is silent');
+        if (peak < 0.001) throw new Error(i18n.t('web.audio_is_silent',"audio is silent"));
         var gain = Math.min(0.89 / peak, 12);
         var oc = new OfflineAudioContext(decoded.numberOfChannels, decoded.length, decoded.sampleRate);
         var src = oc.createBufferSource(); src.buffer = decoded;
@@ -383,7 +379,7 @@
         lim.attack.value = 0.003; lim.release.value = 0.12;
         src.connect(g); g.connect(lim); lim.connect(oc.destination);
         src.start();
-        onProgress('Mastering (normalize to -1 dBFS + limiter)...');
+        onProgress(i18n.t('web.mu_mastering_progress', "Mastering (normalize to -1 dBFS + limiter)..."));
         return oc.startRendering();
       }).then(function (rendered) { ac.close(); return rendered; });
     });
@@ -396,39 +392,39 @@
     var play = document.createElement('button'); play.type = 'button'; play.className = 'pl-play'; play.textContent = '▶';
     var tm = document.createElement('span'); tm.className = 'pl-time'; tm.textContent = '0:00 / --:--';
     var vol = document.createElement('input'); vol.type = 'range'; vol.className = 'pl-vol';
-    vol.min = '0'; vol.max = '100'; vol.step = '1'; vol.value = String(getStoredVol()); vol.title = 'Volume';
+    vol.min = '0'; vol.max = '100'; vol.step = '1'; vol.value = String(getStoredVol()); vol.title = i18n.t('web.volume',"Volume");
     audio.volume = getStoredVol() / 100;
-    var menuBtn = document.createElement('button'); menuBtn.type = 'button'; menuBtn.className = 'pl-menu'; menuBtn.textContent = '⋮'; menuBtn.title = 'More actions';
+    var menuBtn = document.createElement('button'); menuBtn.type = 'button'; menuBtn.className = 'pl-menu'; menuBtn.textContent = '⋮'; menuBtn.title = i18n.t('web.more_actions',"More actions");
     var menu = document.createElement('div'); menu.className = 'pl-menu-box'; menu.style.display = 'none';
-    var dlWav = document.createElement('a'); dlWav.href = url; dlWav.download = filename; dlWav.textContent = '⬇ Download WAV'; dlWav.style.display = isMp3Source ? 'none' : '';
-    var dlMp3 = document.createElement('button'); dlMp3.type = 'button'; dlMp3.textContent = isMp3Source ? '⬇ Download MP3' : '⬇ Download MP3 (320k, converts in browser)';
+    var dlWav = document.createElement('a'); dlWav.href = url; dlWav.download = filename; dlWav.textContent = i18n.t('web.download_wav',"⬇ Download WAV"); dlWav.style.display = isMp3Source ? 'none' : '';
+    var dlMp3 = document.createElement('button'); dlMp3.type = 'button'; dlMp3.textContent = isMp3Source ? i18n.t('web.download_mp3',"⬇ Download MP3") : i18n.t('web.download_mp3_320k_converts_in_browse',"⬇ Download MP3 (320k, converts in browser)");
     var coverBtn = document.createElement('button'); coverBtn.type = 'button';
     var hasMeta = meta && Object.keys(meta).length > 0;
     if (hasMeta) {
-      coverBtn.textContent = '🎤 Cover — load lyrics/style/seed';
+      coverBtn.textContent = i18n.t('web.cover_load_lyrics_style_seed',"🎤 Cover — load lyrics/style/seed");
       coverBtn.addEventListener('click', function (e) {
         e.stopPropagation(); menu.style.display = 'none';
         applyCover(meta, filename);
       });
     } else {
-      coverBtn.textContent = '🎤 Cover (no saved settings — old track)';
+      coverBtn.textContent = i18n.t('web.cover_no_saved_settings_old_track',"🎤 Cover (no saved settings — old track)");
       coverBtn.disabled = true; coverBtn.className = 'pl-menu-dim';
     }
     var abcCoverBtn = document.createElement('button'); abcCoverBtn.type = 'button';
     if (isMp3Source) {
-      abcCoverBtn.textContent = '🎛 Cover + ABC (WAV only)';
+      abcCoverBtn.textContent = i18n.t('web.cover_abc_wav_only',"🎛 Cover + ABC (WAV only)");
       abcCoverBtn.disabled = true; abcCoverBtn.className = 'pl-menu-dim';
     } else {
-      abcCoverBtn.textContent = '🎛 Cover + ABC (settings + score, subtle remix)';
+      abcCoverBtn.textContent = i18n.t('web.cover_abc_settings_score_subtle_remi',"🎛 Cover + ABC (settings + score, subtle remix)");
       abcCoverBtn.addEventListener('click', function (e) {
         e.stopPropagation(); menu.style.display = 'none';
         coverAndAbc(meta, filename);
       });
     }
     var masterBtn = document.createElement('button'); masterBtn.type = 'button';
-    masterBtn.textContent = '🎚 Master (normalize + limiter)';
+    masterBtn.textContent = i18n.t('web.master_normalize_limiter',"🎚 Master (normalize + limiter)");
     var ps5StemsBtn = document.createElement('button'); ps5StemsBtn.type = 'button';
-    ps5StemsBtn.textContent = '✂ Stems — PS5 GPU (htdemucs, ~25 s)';
+    ps5StemsBtn.textContent = i18n.t('web.stems_ps5_gpu_htdemucs_25_s',"✂ Stems — PS5 GPU (htdemucs, ~25 s)");
     if (isMp3Source) ps5StemsBtn.style.display = 'none';
     menu.appendChild(dlWav); menu.appendChild(dlMp3); menu.appendChild(coverBtn); menu.appendChild(abcCoverBtn); menu.appendChild(masterBtn); menu.appendChild(ps5StemsBtn);
     row.appendChild(play); row.appendChild(tm); row.appendChild(vol); row.appendChild(menuBtn); row.appendChild(menu);
@@ -474,14 +470,14 @@
       e.stopPropagation(); menu.style.display = 'none';
       if (isMp3Source) { dlWav.href = url; dlWav.download = filename; dlWav.click(); return; }
       mp3FromUrl(url, filename,
-        function (bytes) { setStatus('MP3 ready: ' + fmtSize(bytes) + ' — check your Downloads', 'ok'); },
-        function (err) { setStatus('MP3 conversion failed: ' + err.message, 'err'); });
+        function (bytes) { setStatus(i18n.t('web.mu_mp3_ready', "MP3 ready: {0} — check your Downloads", fmtSize(bytes)), 'ok'); },
+        function (err) { setStatus(i18n.t('web.mu_mp3_failed', "MP3 conversion failed: {0}", err.message), 'err'); });
     });
     masterBtn.addEventListener('click', function (e) {
       e.stopPropagation(); menu.style.display = 'none';
       var m0 = Date.now();
       var legacyMaster = function () {
-        setStatus('Mastering ' + filename + ' (decode + normalize + limiter)...', 'busy');
+        setStatus(i18n.t('web.mu_mastering_file', "Mastering {0} (decode + normalize + limiter)...", filename), 'busy');
         masterTrack(url, function (msg) { setStatus(msg, 'busy'); }).then(function (rendered) {
           var blob = encodeWav16(rendered);
           var outName = filename.replace(/\.(wav|mp3)$/i, '') + '-mastered.wav';
@@ -489,36 +485,34 @@
           a2.href = URL.createObjectURL(blob); a2.download = outName;
           document.body.appendChild(a2); a2.click();
           setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 5000);
-          setStatus('Mastered ' + outName + ' in ' + Math.round((Date.now() - m0) / 1000) +
-            's (' + fmtSize(blob.size) + ') — check your Downloads', 'ok');
+          setStatus(i18n.t('web.mu_mastered_download', "Mastered {0} in {1}s ({2}) — check your Downloads", outName, Math.round((Date.now() - m0) / 1000), fmtSize(blob.size)), 'ok');
         }).catch(function (err) {
-          setStatus('Master failed: ' + (err && err.message ? err.message : err), 'err');
+          setStatus(i18n.t('web.mu_master_failed', "Master failed: {0}", (err && err.message ? err.message : err)), 'err');
         });
       };
       // Console-side mastering (v54): survives a closed page and lands in
       // the library. mp3 has no server decoder -> stays browser-side, and
       // an old app (404 on the route) falls back to the old in-page DSP.
       if (isMp3Source) { legacyMaster(); return; }
-      setStatus('Mastering on the console (normalize + limiter)...', 'busy');
+      setStatus(i18n.t('web.mastering_on_the_console_normalize_l',"Mastering on the console (normalize + limiter)..."), 'busy');
       api('/api/music/master', { file: filename }, 300000).then(function (j) {
         loadLibrary();
-        setStatus('Mastered ' + j.out + ' in ' + Math.round((Date.now() - m0) / 1000) +
-          's — saved to the library, play it right away', 'ok');
+        setStatus(i18n.t('web.mu_mastered_library', "Mastered {0} in {1}s — saved to the library, play it right away", j.out, Math.round((Date.now() - m0) / 1000)), 'ok');
       }).catch(function (err) {
         var msg = err && err.message ? err.message : String(err);
         if (/HTTP 404/.test(msg)) { legacyMaster(); return; }
-        setStatus('Master failed: ' + msg.slice(0, 160), 'err');
+        setStatus(i18n.t('web.mu_master_failed', "Master failed: {0}", msg.slice(0, 160)), 'err');
       });
     });
     // PS5-side separation: htdemucs runs on the console's GPU through the
     // audio.cpp adapter — the phone only fires the request and may close.
     ps5StemsBtn.addEventListener('click', function (e) {
       e.stopPropagation(); menu.style.display = 'none';
-      setStatus('Stems (PS5 GPU): loading htdemucs on the console...', 'busy');
+      setStatus(i18n.t('web.stems_ps5_gpu_loading_htdemucs_on_th',"Stems (PS5 GPU): loading htdemucs on the console..."), 'busy');
       var t0 = Date.now();
       api('/api/settings/runtime', { audio_options: 'input_audio=' + AUDIO_DIR + filename }, 30000)
         .then(function () {
-          setStatus('Stems (PS5 GPU): separating on Vulkan — you can close this page', 'busy');
+          setStatus(i18n.t('web.stems_ps5_gpu_separating_on_vulkan_y',"Stems (PS5 GPU): separating on Vulkan — you can close this page"), 'busy');
           return generateAndWait('htdemucs-q8_0', 'separate ' + filename, 900000);
         })
         .then(function (j) {
@@ -527,21 +521,19 @@
           var secs = Math.round((Date.now() - t0) / 1000);
           var paths = resp.match(/\/download0\/[^\s,]+\.wav/g) || [];
           loadLibrary();
-          setStatus('Stems done in ' + secs + 's — ' + paths.length +
-            ' files grouped under the track. Open the ✂ stems group and press ZIP to take them all.', 'ok');
+          setStatus(i18n.t('web.mu_stems_done', "Stems done in {0}s — {1} files grouped under the track. Open the ✂ stems group and press ZIP to take them all.", secs, paths.length), 'ok');
         })
         .catch(function (err) {
           var msg = err && err.message ? err.message : String(err);
           var network = err instanceof TypeError || /fetch|network|abort|load failed/i.test(msg);
-          if (!network) { setStatus('Stems (PS5 GPU) failed: ' + msg.slice(0, 160), 'err'); return; }
-          setStatus('Stems (PS5 GPU): connection dropped (' + msg.slice(0, 60) +
-            ') - the console keeps working, waiting for the files to appear...', 'busy');
+          if (!network) { setStatus(i18n.t('web.mu_stems_failed', "Stems (PS5 GPU) failed: {0}", msg.slice(0, 160)), 'err'); return; }
+          setStatus(i18n.t('web.mu_stems_dropped', "Stems (PS5 GPU): connection dropped ({0}) - the console keeps working, waiting for the files to appear...", msg.slice(0, 60)), 'busy');
           var base = String(filename || '').replace(/\.(wav|mp3)$/i, '').replace(/_seed\d+$/i, '');
           waitForStems(base, function () {
             loadLibrary();
-            setStatus('Stems ready - the console finished despite the dropped connection. Open the stems group under the track.', 'ok');
+            setStatus(i18n.t('web.stems_ready_the_console_finished_des',"Stems ready - the console finished despite the dropped connection. Open the stems group under the track."), 'ok');
           }, function (why) {
-            setStatus('Stems (PS5 GPU) failed: ' + msg.slice(0, 120) + ' (' + why + ')', 'err');
+            setStatus(i18n.t('web.mu_stems_failed_why', "Stems (PS5 GPU) failed: {0} ({1})", msg.slice(0, 120), why), 'err');
           });
         });
     });
@@ -560,10 +552,10 @@
     var det = document.createElement('details'); det.className = 'track-settings';
     var total = 0; stems.forEach(function (st) { total += st.size; });
     var sum = document.createElement('summary');
-    sum.textContent = '\u2702 ' + stems.length + ' stems (htdemucs \u00b7 PS5 GPU) \u2014 ' + fmtSize(total);
+    sum.textContent = i18n.t('web.mu_stems_summary', "✂ {0} stems (htdemucs · PS5 GPU) — {1}", stems.length, fmtSize(total));
     det.appendChild(sum);
     var zip = document.createElement('a');
-    zip.textContent = '\u2b07 ZIP all ' + stems.length + ' stems (' + fmtSize(total) + ')';
+    zip.textContent = i18n.t('web.mu_zip_all_stems', "⬇ ZIP all {0} stems ({1})", stems.length, fmtSize(total));
     zip.href = '/api/music/stems.zip?track=' + encodeURIComponent(parentName);
     zip.setAttribute('download', parentName.replace(/\.(wav|mp3)$/i, '') + '-stems.zip');
     zip.style.cssText = 'display:block;margin:6px 0;padding:8px 10px;border:1px solid #4a5;' +
@@ -593,9 +585,9 @@
       var del = document.createElement('button'); del.type = 'button'; del.className = 'del';
       del.textContent = '\ud83d\uddd1';
       del.addEventListener('click', function () {
-        if (!window.confirm('Delete ' + st.name + '?')) return;
+        if (!window.confirm(i18n.t('web.mu_delete_name', "Delete {0}?", st.name))) return;
         api('/api/music/file', { name: st.name }, 15000, 'DELETE').then(loadLibrary)
-          .catch(function (e) { setStatus('Delete failed: ' + e.message, 'err'); });
+          .catch(function (e) { setStatus(i18n.t('web.mu_delete_failed', "Delete failed: {0}", e.message), 'err'); });
       });
       r.appendChild(pb); r.appendChild(nm); r.appendChild(dl); r.appendChild(del);
       det.appendChild(r);
@@ -637,11 +629,11 @@
           var sum = document.createElement('summary');
           var bits = [];
           if (f.meta.style) bits.push(f.meta.style);
-          if (f.meta.seed !== undefined) bits.push('seed ' + f.meta.seed);
+          if (f.meta.seed !== undefined) bits.push(i18n.t('web.mu_meta_seed', "seed {0}", f.meta.seed));
           if (f.meta.duration !== undefined) bits.push(f.meta.duration + 's');
           if (f.meta.cot) bits.push('cot=' + f.meta.cot);
-          if (f.meta.abc_name) bits.push('ABC: ' + f.meta.abc_name);
-          sum.textContent = '\u2699 ' + (bits.join(' \u00b7 ') || 'saved settings');
+          if (f.meta.abc_name) bits.push(i18n.t('web.mu_meta_abc', "ABC: {0}", f.meta.abc_name));
+          sum.textContent = '\u2699 ' + (bits.join(' \u00b7 ') || i18n.t('web.mu_saved_settings', "saved settings"));
           det.appendChild(sum);
           if (f.meta.lyrics) {
             var pre = document.createElement('pre'); pre.className = 'track-lyrics';
@@ -654,21 +646,20 @@
           d.appendChild(makePlayer(AUDIO_DIR + encodeURIComponent(f.name), f.name, /\.mp3$/i.test(f.name), f.meta));
         } else {
           var ext = document.createElement('div'); ext.className = 'path';
-          ext.textContent = 'ABC — use \u201cLoad into editor\u201d to edit it';
+          ext.textContent = i18n.t('web.mu_abc_use_load', "ABC — use “Load into editor” to edit it");
           d.appendChild(ext);
         }
         var del = document.createElement('button');
         del.type = 'button'; del.className = 'del'; del.textContent = '🗑';
-        del.title = 'Delete ' + f.name;
+        del.title = i18n.t('web.mu_delete_name_title', "Delete {0}", f.name);
         del.addEventListener('click', function () {
           var kids = (stemsBy[f.name] || []).map(function (k) { return k.name; });
-          if (!window.confirm('Delete ' + f.name +
-              (kids.length ? ' plus its ' + kids.length + ' stems' : '') + '?')) return;
+          if (!window.confirm(kids.length ? i18n.t('web.mu_delete_with_stems', "Delete {0} plus its {1} stems?", f.name, kids.length) : i18n.t('web.mu_delete_name', "Delete {0}?", f.name))) return;
           kids.concat([f.name]).reduce(function (pr, nm) {
             return pr.then(function () { return api('/api/music/file', { name: nm }, 15000, 'DELETE'); });
           }, Promise.resolve())
             .then(function () { delete knownFiles[f.name]; loadLibrary(); loadAbcSelect(); })
-            .catch(function (e) { setStatus('Delete failed: ' + e.message, 'err'); });
+            .catch(function (e) { setStatus(i18n.t('web.mu_delete_failed', "Delete failed: {0}", e.message), 'err'); });
         });
         s.appendChild(document.createTextNode(' '));
         s.appendChild(del);
@@ -693,10 +684,10 @@
   $('abc-save').addEventListener('click', function () {
     var name = $('abc-name').value.trim() || 'studio.abc';
     if (!/\.abc$/i.test(name)) name += '.abc';
-    setStatus('Saving ABC...', 'busy');
+    setStatus(i18n.t('web.saving_abc',"Saving ABC..."), 'busy');
     api('/api/music/abc', { name: name, content: $('abc').value })
-      .then(function () { $('abc-name').value = name; setStatus('ABC saved: ' + name); loadAbcSelect(); loadLibrary(); })
-      .catch(function (e) { setStatus('Saving ABC failed: ' + e.message, 'err'); });
+      .then(function () { $('abc-name').value = name; setStatus(i18n.t('web.mu_abc_saved', "ABC saved: {0}", name)); loadAbcSelect(); loadLibrary(); })
+      .catch(function (e) { setStatus(i18n.t('web.mu_saving_abc_failed', "Saving ABC failed: {0}", e.message), 'err'); });
   });
 
   $('abc-open').addEventListener('click', function () { $('abc-disk').click(); });
@@ -709,24 +700,24 @@
       var base = f.name.split(/[\\/]/).pop().replace(/[^A-Za-z0-9._-]/g, '_');
       if (!/\.abc$/i.test(base)) base += '.abc';
       $('abc-name').value = base;
-      setStatus('File ' + f.name + ' loaded into editor — press GENERATE (auto-saves)', 'ok');
+      setStatus(i18n.t('web.mu_file_loaded', "File {0} loaded into editor — press GENERATE (auto-saves)", f.name), 'ok');
     };
     reader.readAsText(f);
     ev.target.value = '';
   });
   $('abc-clear').addEventListener('click', function () {
     $('abc').value = '';
-    setStatus('Editor cleared — no score at GENERATE', 'ok');
+    setStatus(i18n.t('web.editor_cleared_no_score_at_generate',"Editor cleared — no score at GENERATE"), 'ok');
   });
 
   $('abc-load').addEventListener('click', function () {
     var name = ($('abc-files').value || $('abc-name').value || '').trim();
-    if (!name) { setStatus('Missing ABC file name', 'err'); return; }
+    if (!name) { setStatus(i18n.t('web.missing_abc_file_name',"Missing ABC file name"), 'err'); return; }
     fetch(AUDIO_DIR + encodeURIComponent(name)).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) throw new Error(i18n.t('web.mu_http_status', "HTTP {0}", r.status));
       return r.text();
-    }).then(function (t) { $('abc').value = t; $('abc-name').value = name; setStatus('Loaded: ' + name); })
-      .catch(function (e) { setStatus('Load failed: ' + e.message, 'err'); });
+    }).then(function (t) { $('abc').value = t; $('abc-name').value = name; setStatus(i18n.t('web.mu_loaded_name', "Loaded: {0}", name)); })
+      .catch(function (e) { setStatus(i18n.t('web.mu_load_failed', "Load failed: {0}", e.message), 'err'); });
   });
 
   // ---- generate ----
@@ -754,23 +745,22 @@
     // burning two minutes of model load (validated 20.10: empty style ->
     // "generation failed" with zero adapter logs).
     if (modelId === 'sheetsage2-orig') {
-      if (!$('abc').value.trim()) { say('Paste an ABC score first (or use Cover + ABC).', 'err'); return Promise.resolve(); }
+      if (!$('abc').value.trim()) { say(i18n.t('web.mu_paste_abc_first', "Paste an ABC score first (or use Cover + ABC)."), 'err'); return Promise.resolve(); }
     } else if (!($('style').value || '').trim()) {
-      say('Write a style prompt first (e.g. "romanian pop, female vocal").', 'err'); return Promise.resolve();
+      say(i18n.t('web.mu_write_style_first', "Write a style prompt first (e.g. \"romanian pop, female vocal\")."), 'err'); return Promise.resolve();
     } else if (!($('lyrics').value || '').trim() && !($('abc').value || '').trim()) {
-      say('Write lyrics (or load an ABC score) before generating.', 'err'); return Promise.resolve();
+      say(i18n.t('web.mu_write_lyrics_first', "Write lyrics (or load an ABC score) before generating."), 'err'); return Promise.resolve();
     }
     var seed = (ov.seed != null) ? ov.seed : (parseInt($('seed').value, 10) || 42);
     var t0 = Date.now();
     var timer = setInterval(function () {
-      say('Running... ' + Math.round((Date.now() - t0) / 1000) +
-        's (model load + generation can take 4-6 min)', 'busy');
+      say(i18n.t('web.mu_running', "Running... {0}s (model load + generation can take 4-6 min)", Math.round((Date.now() - t0) / 1000)), 'busy');
     }, 1000);
     var abcName = $('abc-name').value.trim();
     if (abcName && !/\.abc$/i.test(abcName)) abcName += '.abc';
     var abcContent = $('abc').value.trim();
     var doGenerate = function (effectiveName) {
-      say('Sending settings...', 'busy');
+      say(i18n.t('web.mu_sending_settings', "Sending settings..."), 'busy');
       var body = {
         audio_lyrics: $('lyrics').value,
         audio_duration_sec: parseInt($('duration').value, 10) || 240,
@@ -780,7 +770,7 @@
         audio_options: buildOptions(effectiveName)
       };
       return api('/api/settings/runtime', body).then(function () {
-        say('Generating...', 'busy');
+        say(i18n.t('web.mu_generating_dots', "Generating..."), 'busy');
         return generateAndWait(modelId, $('style').value, 2400000);
       });
     };
@@ -788,23 +778,23 @@
     // only names that already exist on the PS5; otherwise no abc_file at all.
     var pre = Promise.resolve('');
     if (abcName && abcContent) {
-      say('Auto-saving ABC...', 'busy');
+      say(i18n.t('web.mu_autosaving_abc', "Auto-saving ABC..."), 'busy');
       pre = api('/api/music/abc', { name: abcName, content: $('abc').value })
         .then(function () { knownFiles[abcName] = true; return abcName; });
     } else if (abcName && knownFiles[abcName]) {
       pre = Promise.resolve(abcName);
     } else if (abcName) {
-      say('ABC "' + abcName + '" missing on PS5 and the editor is empty — generating without a score', 'busy');
+      say(i18n.t('web.mu_abc_missing', "ABC \"{0}\" missing on PS5 and the editor is empty — generating without a score", abcName), 'busy');
     }
     return pre.then(doGenerate).then(function (j) {
       clearInterval(timer);
       var resp = String(j.response || j.error || JSON.stringify(j).slice(0, 300));
       if (/NEEDS_RESTART|backend buffer allocation failed|failed to allocate Yue2 NAR/.test(resp)) {
-          throw new Error('Not enough usable memory. Wait for other work to finish, then close and reopen the app before retrying.');
+          throw new Error(i18n.t('web.not_enough_usable_memory_wait_for_ot',"Not enough usable memory. Wait for other work to finish, then close and reopen the app before retrying."));
         }
       var m = resp.match(/\/download0\/\S+?\.(?:wav|mp3)/);
       if (/NEEDS_RESTART|backend buffer allocation failed|failed to allocate Yue2 NAR/.test(resp)) {
-          throw new Error('Not enough usable memory. Wait for other work to finish, then close and reopen the app before retrying.');
+          throw new Error(i18n.t('web.not_enough_usable_memory_wait_for_ot',"Not enough usable memory. Wait for other work to finish, then close and reopen the app before retrying."));
         }
       var res = $('result');
       res.innerHTML = '';
@@ -830,7 +820,7 @@
           res.appendChild(makePlayer(finalUrl, fname, /\.mp3$/i.test(finalUrl), meta));
           var p = document.createElement('div'); p.className = 'path'; p.textContent = finalUrl;
           res.appendChild(p);
-          say('Done in ' + Math.round((Date.now() - t0) / 1000) + 's 🎵');
+          say(i18n.t('web.mu_done_in', "Done in {0}s 🎵", Math.round((Date.now() - t0) / 1000)));
           api('/api/music/meta', { name: fname, meta: meta })
             .then(loadLibrary).catch(loadLibrary);
           return { url: finalUrl, fname: fname };
@@ -847,7 +837,7 @@
           return api('/api/music/rename', { src: src, dst: dst }).then(function () {
             return finish(url.replace(src, dst));
           }).catch(function () {
-            setStatus('Track is ready, but "' + dst + '" already exists — kept the original name', 'err');
+            setStatus(i18n.t('web.mu_track_ready_name_exists', "Track is ready, but \"{0}\" already exists — kept the original name", dst), 'err');
             return finish(url);
           });
         } else {
@@ -858,12 +848,12 @@
         res2.innerHTML = '';
         var p2 = document.createElement('div'); p2.className = 'path'; p2.textContent = resp;
         res2.appendChild(p2);
-        say('Generation failed: ' + (resp.trim() ? resp.trim().slice(0, 160) : 'empty response — console log has the details'), 'err');
+        say(i18n.t('web.mu_generation_failed', "Generation failed: {0}", (resp.trim() ? resp.trim().slice(0, 160) : i18n.t('web.mu_empty_response', "empty response — console log has the details"))), 'err');
         return { url: '', fname: '' };
       }
     }).catch(function (e) {
       clearInterval(timer);
-      say('Failed: ' + e.message, 'err');
+      say(i18n.t('web.mu_failed', "Failed: {0}", e.message), 'err');
       throw e;
     });
   }
@@ -897,17 +887,17 @@
     var rate = 16000;
     var AC = window.AudioContext || window.webkitAudioContext;
     var OfflineAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    cstatus('Decoding ' + file.name + '...', 'busy');
+    cstatus(i18n.t('web.mu_decoding', "Decoding {0}...", file.name), 'busy');
     file.arrayBuffer().then(function (buf) {
       if (!AC || !AC.prototype.decodeAudioData)
-        throw new Error('this browser has no Web Audio decoder');
+        throw new Error(i18n.t('web.this_browser_has_no_web_audio_decode',"this browser has no Web Audio decoder"));
       var ctx = new AC();
       var p = ctx.decodeAudioData(buf);
       return p.then(function (ab) { return ab; });
     }).then(function (ab) {
       var frames = Math.max(1, Math.ceil(ab.duration * rate));
-      if (frames > 300 * rate) throw new Error('audio longer than 5 min — trim it first');
-      if (!OfflineAC) throw new Error('this browser has no offline Web Audio renderer');
+      if (frames > 300 * rate) throw new Error(i18n.t('web.audio_longer_than_5_min_trim_it_firs',"audio longer than 5 min — trim it first"));
+      if (!OfflineAC) throw new Error(i18n.t('web.this_browser_has_no_offline_web_audi',"this browser has no offline Web Audio renderer"));
       var off = new OfflineAC(1, frames, rate);
       var src = off.createBufferSource();
       src.buffer = ab;
@@ -943,15 +933,14 @@
       };
       var next = function () {
         if (part >= parts) return Promise.resolve();
-        cstatus('Uploading ' + name + ': part ' + (part + 1) + '/' + parts + ' (' +
-          Math.round(100 * part / parts) + '%)', 'busy');
+        cstatus(i18n.t('web.mu_uploading_part', "Uploading {0}: part {1}/{2} ({3}%)", name, part + 1, parts, Math.round(100 * part / parts)), 'busy');
         var slice = wav.subarray(part * CHUNK, Math.min((part + 1) * CHUNK, wav.length));
         return api('/api/music/upload', { name: name, part: part, data: b64(slice) }, 120000)
           .then(function () { part++; return next(); });
       };
       return next();
     }).then(function () {
-      cstatus('Transcribing with SheetSage2 (first run loads the 2.7 GB model — be patient)...',
+      cstatus(i18n.t('web.mu_transcribing_sheetsage', "Transcribing with SheetSage2 (first run loads the 2.7 GB model — be patient)..."),
         'busy');
       return api('/api/settings/runtime',
         { audio_options: 'input_audio=' + AUDIO_DIR + name }, 30000)
@@ -961,22 +950,21 @@
     }).then(function (j) {
       var resp = String(j.response || j.error || JSON.stringify(j).slice(0, 400));
       var m = resp.match(/\/download0\/\S+?\.abc/);
-      if (!m) throw new Error('no ABC artifact in response: ' + resp.slice(0, 220));
+      if (!m) throw new Error(i18n.t('web.mu_no_abc_artifact', "no ABC artifact in response: {0}", resp.slice(0, 220)));
       var path = m[0].replace(/["',).]+$/, '');
       var fname = path.substring(path.lastIndexOf('/') + 1);
       return fetch(AUDIO_DIR + encodeURIComponent(fname)).then(function (r) {
-        if (!r.ok) throw new Error('fetch score HTTP ' + r.status);
+        if (!r.ok) throw new Error(i18n.t('web.mu_fetch_score_http', "fetch score HTTP {0}", r.status));
         return r.text();
       }).then(function (t) {
         $('abc').value = t;
         $('abc-name').value = name.replace(/-src\.wav$/, '-cover.abc');
-        cstatus('Cover done in ' + Math.round((Date.now() - t0) / 1000) +
-          's — score loaded into the editor ✅', 'ok');
-        setStatus('Score ' + fname + ' loaded — press GENERATE to make it a song', 'ok');
+        cstatus(i18n.t('web.mu_cover_done', "Cover done in {0}s — score loaded into the editor ✅", Math.round((Date.now() - t0) / 1000)), 'ok');
+        setStatus(i18n.t('web.mu_score_loaded', "Score {0} loaded — press GENERATE to make it a song", fname), 'ok');
         loadLibrary(); loadAbcSelect();
       });
     }).catch(function (e) {
-      cstatus('Cover failed: ' + (e && e.message ? e.message : e), 'err');
+      cstatus(i18n.t('web.mu_cover_failed', "Cover failed: {0}", (e && e.message ? e.message : e)), 'err');
     }).then(function () {
       $('cover-file').value = '';
       btn.disabled = false;
@@ -992,27 +980,26 @@
   $('lib-save').addEventListener('click', function () {
     var file = $('cover-file').files && $('cover-file').files[0];
     var btn = $('lib-save');
-    if (!file || btn.disabled) { cstat('Pick a file first', 'err'); return; }
+    if (!file || btn.disabled) { cstat(i18n.t('web.mu_pick_file_first', "Pick a file first"), 'err'); return; }
     var ext = (file.name.match(/\.(wav|mp3)$/i) || [''])[0].toLowerCase();
-    if (!ext) { cstat('Library upload accepts plain .wav or .mp3 files', 'err'); return; }
-    if (file.size > 64 * 1024 * 1024) { cstat('File is over the 64 MiB library cap', 'err'); return; }
+    if (!ext) { cstat(i18n.t('web.mu_upload_wav_mp3', "Library upload accepts plain .wav or .mp3 files"), 'err'); return; }
+    if (file.size > 64 * 1024 * 1024) { cstat(i18n.t('web.mu_file_over_cap', "File is over the 64 MiB library cap"), 'err'); return; }
     var safe = file.name.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^[-.]+|[-.]+$/g, '')
       .replace(/\.wav$/i, '.wav').replace(/\.mp3$/i, '.mp3');
     if (safe.length < 5) safe = 'upload_' + Date.now() + ext;
     btn.disabled = true;
     var t0 = Date.now();
-    cstat('Uploading ' + safe + ' (' + Math.round(file.size / 104857.6) / 10 + ' MB)...', 'busy');
+    cstat(i18n.t('web.mu_uploading_mb', "Uploading {0} ({1} MB)...", safe, Math.round(file.size / 104857.6) / 10), 'busy');
     file.arrayBuffer()
       .then(function (buf) { return uploadBinary(safe, buf); })
       .then(function () {
-        cstat('Saved ' + safe + ' to the library in ' +
-          Math.round((Date.now() - t0) / 1000) + 's ✅', 'ok');
+        cstat(i18n.t('web.mu_saved_library', "Saved {0} to the library in {1}s ✅", safe, Math.round((Date.now() - t0) / 1000)), 'ok');
         $('cover-file').value = '';
         loadLibrary();
       })
       .catch(function (e) {
-        cstat(e && e.missing ? 'This build has no library upload — flash the newest eboot'
-          : 'Upload failed: ' + (e && e.message ? e.message : e), 'err');
+        cstat(e && e.missing ? i18n.t('web.mu_no_upload', "This build has no library upload — flash the newest eboot")
+          : i18n.t('web.mu_upload_failed', "Upload failed: {0}", (e && e.message ? e.message : e)), 'err');
       })
       .then(function () { btn.disabled = false; });
   });
@@ -1064,7 +1051,7 @@
     try { queue = JSON.parse(localStorage.getItem(QKEY) || '[]'); } catch (e) { queue = []; }
     if (!Array.isArray(queue)) queue = [];
     // The server job survives reload. Never blindly submit the same item twice.
-    queue.forEach(function (it) { if (it.status === 'running') { it.status = 'failed'; it.note = 'Check running jobs and the library before retrying'; } });
+    queue.forEach(function (it) { if (it.status === 'running') { it.status = 'failed'; it.note = i18n.t('web.mu_check_jobs_retry', "Check running jobs and the library before retrying"); } });
   }
   function qsave() { try { localStorage.setItem(QKEY, JSON.stringify(queue)); } catch (e) {} }
   function qparams() {
@@ -1094,17 +1081,17 @@
     var lines = queue.map(function (it, i) {
       if (it.status === 'done') done++;
       if (it.status === 'failed') fail++;
-      return (QICON[it.status] || '?') + ' ' + (i + 1) + '. seed ' + it.seed +
+      return (QICON[it.status] || '?') + ' ' + (i + 1) + '. ' + i18n.t('web.mu_meta_seed', "seed {0}", it.seed) +
         (it.note ? ' — ' + it.note : '');
     });
-    el.textContent = 'Queue ' + done + '✓ ' + fail + '✕ / ' + queue.length +
-      (queueRunning ? ' · RUNNING' : '') + '\n' + lines.join('\n');
+    el.textContent = i18n.t('web.mu_queue_summary', "Queue {0}✓ {1}✕ / {2}", done, fail, queue.length) +
+      (queueRunning ? i18n.t('web.mu_running_tag', " · RUNNING") : '') + '\n' + lines.join('\n');
   }
   function qdelay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function runQueue() {
     if (queueRunning) return;
     var pend = queue.filter(function (it) { return it.status === 'pending'; });
-    if (!pend.length) { setStatus('Queue is empty — add variants with "+ Queue" first', 'err'); return; }
+    if (!pend.length) { setStatus(i18n.t('web.queue_is_empty_add_variants_with_que',"Queue is empty — add variants with \"+ Queue\" first"), 'err'); return; }
     if (queue.some(function (it) { return it.status === 'running'; })) return;
     queueRunning = true;
     $('q-run').disabled = true;
@@ -1112,9 +1099,9 @@
     var chain = Promise.resolve();
     pend.forEach(function (item) {
       chain = chain.then(function () {
-        if (!queueRunning) throw new Error('queue stopped');
+        if (!queueRunning) throw new Error(i18n.t('web.queue_stopped',"queue stopped"));
         idx++;
-        var label = 'Queue ' + idx + '/' + total + ' · seed ' + item.seed;
+        var label = i18n.t('web.mu_queue_label', "Queue {0}/{1} · seed {2}", idx, total, item.seed);
         // first item runs on the current session; later ones get a clean
         // title (RADV fragmentation guard), the checkbox decides
         var step = Promise.resolve();
@@ -1130,12 +1117,12 @@
         });
       });
     });
-    chain.catch(function (e) { setStatus('Queue stopped: ' + e.message, 'err'); })
+    chain.catch(function (e) { setStatus(i18n.t('web.mu_queue_stopped_msg', "Queue stopped: {0}", e.message), 'err'); })
       .then(function () {
         queueRunning = false; $('q-run').disabled = false;
         qsave(); renderQueue();
         var ok = queue.filter(function (i) { return i.status === 'done'; }).length;
-        setStatus('Queue finished: ' + ok + '/' + queue.length + ' tracks in library 🎵', 'ok');
+        setStatus(i18n.t('web.mu_queue_finished', "Queue finished: {0}/{1} tracks in library 🎵", ok, queue.length), 'ok');
       });
   }
   $('q-add').addEventListener('click', function () {
@@ -1144,11 +1131,11 @@
     for (var i = 0; i < n; i++)
       queue.push({ id: Date.now() + ':' + i, seed: Math.min(4294967295, start + i), params: qparams(), status: 'pending' });
     formSaveNow(); qsave(); renderQueue();
-    setStatus('Queued ' + n + ' variants (seeds ' + start + '–' + (start + n - 1) + ') — press ▶▶ Run queue', 'ok');
+    setStatus(i18n.t('web.mu_queued_variants', "Queued {0} variants (seeds {1}–{2}) — press ▶▶ Run queue", n, start, (start + n - 1)), 'ok');
   });
   $('q-run').addEventListener('click', runQueue);
   $('q-clear').addEventListener('click', function () {
-    if (queueRunning) { queueRunning = false; setStatus('Stopping queue after the current track…', 'busy'); return; }
+    if (queueRunning) { queueRunning = false; setStatus(i18n.t('web.stopping_queue_after_the_current_tra',"Stopping queue after the current track…"), 'busy'); return; }
     queue = []; qsave(); renderQueue();
   });
   qload(); renderQueue();
@@ -1170,7 +1157,7 @@
       sel.innerHTML = '';
       var placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = models.length ? 'Choose a text model…' : 'No installed text models';
+      placeholder.textContent = models.length ? i18n.t('web.choose_a_text_model',"Choose a text model…") : i18n.t('web.no_installed_text_models',"No installed text models");
       sel.appendChild(placeholder);
       models.forEach(function (m) {
         var o = document.createElement('option');
@@ -1210,16 +1197,16 @@
     'Stay with the rhythm, never look back\n\n[Outro]\nStay with the rhythm, let it carry us home';
   var TPL_BUILTIN = {
     style: [
-      { title: 'City pop', body: 'City Pop, upbeat, danceable, groovy bass, electric guitar, synth, energetic, joyful, neon city night' },
-      { title: 'Jazz-funk', body: 'Jazz-funk, warm lead vocal, Rhodes piano, electric bass, tight drums' },
-      { title: 'Jazz ballad', body: 'Jazz, expressive lead vocal, piano, tenor saxophone, upright bass, brushed drums, no guitar, spacious modern harmony' },
-      { title: 'Indie pop', body: 'English, indie pop, bright acoustic guitar, soft drums, warm lead vocal' },
-      { title: 'Romanian pop', body: 'Romanian pop, warm female vocal, synth pads, deep bass, tight drums, sunny summer mood' },
-      { title: 'Manele modern', body: 'Romanian manele, oriental scales, accordion, synth brass, emotional male vocal, deep bass' },
-      { title: 'Rock', body: 'Romanian rock, energetic electric guitar, driving drums, gritty male vocal, anthemic chorus' }
+      { title: i18n.t('web.city_pop',"City pop"), body: 'City Pop, upbeat, danceable, groovy bass, electric guitar, synth, energetic, joyful, neon city night' },
+      { title: i18n.t('web.jazz_funk',"Jazz-funk"), body: 'Jazz-funk, warm lead vocal, Rhodes piano, electric bass, tight drums' },
+      { title: i18n.t('web.jazz_ballad',"Jazz ballad"), body: 'Jazz, expressive lead vocal, piano, tenor saxophone, upright bass, brushed drums, no guitar, spacious modern harmony' },
+      { title: i18n.t('web.indie_pop',"Indie pop"), body: 'English, indie pop, bright acoustic guitar, soft drums, warm lead vocal' },
+      { title: i18n.t('web.romanian_pop',"Romanian pop"), body: 'Romanian pop, warm female vocal, synth pads, deep bass, tight drums, sunny summer mood' },
+      { title: i18n.t('web.manele_modern',"Manele modern"), body: 'Romanian manele, oriental scales, accordion, synth brass, emotional male vocal, deep bass' },
+      { title: i18n.t('web.rock',"Rock"), body: 'Romanian rock, energetic electric guitar, driving drums, gritty male vocal, anthemic chorus' }
     ],
     lyrics: [
-      { title: 'Song skeleton', body: '[Intro]\n\n[Verse]\n\n\n[Chorus]\n\n\n[Verse]\n\n\n[Chorus]\n\n\n[Bridge]\n\n\n[Outro]\n' }
+      { title: i18n.t('web.song_skeleton',"Song skeleton"), body: '[Intro]\n\n[Verse]\n\n\n[Chorus]\n\n\n[Verse]\n\n\n[Chorus]\n\n\n[Bridge]\n\n\n[Outro]\n' }
     ]
   };
   var TPL_KEY = { style: 'prospero-tpl-style', lyrics: 'prospero-tpl-lyrics' };
@@ -1233,10 +1220,14 @@
     var anchor = $(field);
     var row = document.createElement('div');
     row.className = 'enh-row';
-    row.innerHTML = '<button id="enh-' + field + '" type="button">\u2728 Enhance</button>' +
-      '<button id="tpl-' + field + '" type="button" title="templates">\uD83D\uDCDA Templates</button>' +
-      '<select id="tplmenu-' + field + '" hidden title="pick a template"></select>' +
+    row.innerHTML = '<button id="enh-' + field + '" type="button"></button>' +
+      '<button id="tpl-' + field + '" type="button"></button>' +
+      '<select id="tplmenu-' + field + '" hidden></select>' +
       '<span id="enh-' + field + '-status" class="enh-status"></span>';
+    row.querySelector('#enh-' + field).textContent = i18n.t('web.mu_enhance', "✨ Enhance");
+    row.querySelector('#tpl-' + field).textContent = i18n.t('web.mu_templates', "📚 Templates");
+    row.querySelector('#tpl-' + field).title = i18n.t('web.mu_templates_title', "templates");
+    row.querySelector('#tplmenu-' + field).title = i18n.t('web.mu_pick_template_title', "pick a template");
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
     return row;
   }
@@ -1261,7 +1252,7 @@
       btn.disabled = tplBtn.disabled = false;
       return;
     }
-    enhStatus(field, 'Rewriting with ' + ((cSel && cSel.selectedIndex > -1) ? cSel.options[cSel.selectedIndex].text : chatModel) + ' (first call may load the chat model, ~1 min)\u2026', true);
+    enhStatus(field, i18n.t('web.mu_rewriting_with', "Rewriting with {0} (first call may load the chat model, ~1 min)…", ((cSel && cSel.selectedIndex > -1) ? cSel.options[cSel.selectedIndex].text : chatModel)), true);
     var sys, user, predict;
     if (field === 'style') {
       sys = ENH_STYLE_SYS;
@@ -1284,18 +1275,18 @@
     ], num_predict: predict, temperature: 0.2 }, 240000).then(function (j) {
       var out = stripWrap(j && j.message ? j.message.content : '');
       if (j && j.error && !out) throw new Error(String(j.error).slice(0, 120));
-      if (!out) throw new Error('empty rewrite, try again');
+      if (!out) throw new Error(i18n.t('web.empty_rewrite_try_again',"empty rewrite, try again"));
       el.value = out;
       el.dispatchEvent(new Event('input'));
-      enhStatus(field, '\u2713 rewritten in ' + ((j.elapsed_ms || 0) ? (j.elapsed_ms / 1000).toFixed(0) + 's' : 'a moment'));
+      enhStatus(field, i18n.t('web.mu_rewritten_in', "✓ rewritten in {0}", ((j.elapsed_ms || 0) ? (j.elapsed_ms / 1000).toFixed(0) + 's' : i18n.t('web.mu_a_moment', "a moment"))));
     }).catch(function (e) {
-      enhStatus(field, '\u2717 ' + (e.name === 'AbortError' ? 'timeout' : String(e.message || e).slice(0, 140)));
+      enhStatus(field, '\u2717 ' + (e.name === 'AbortError' ? i18n.t('web.mu_timeout', "timeout") : String(e.message || e).slice(0, 140)));
     }).then(function () { btn.disabled = tplBtn.disabled = false; });
   }
   function refreshTplMenu(field) {
     var sel = $('tplmenu-' + field);
     sel.innerHTML = '';
-    var og1 = document.createElement('optgroup'); og1.label = 'Built-in';
+    var og1 = document.createElement('optgroup'); og1.label = i18n.t('web.built_in',"Built-in");
     TPL_BUILTIN[field].forEach(function (t, i) {
       var o = document.createElement('option');
       o.value = 'b:' + i; o.textContent = t.title; og1.appendChild(o);
@@ -1303,7 +1294,7 @@
     sel.appendChild(og1);
     var saved = tplLoad(field);
     if (saved.length) {
-      var og2 = document.createElement('optgroup'); og2.label = 'Saved';
+      var og2 = document.createElement('optgroup'); og2.label = i18n.t('web.saved',"Saved");
       saved.forEach(function (t, i) {
         var o = document.createElement('option');
         o.value = 's:' + i; o.textContent = t.title; og2.appendChild(o);
@@ -1311,13 +1302,13 @@
       sel.appendChild(og2);
     }
     var og3 = document.createElement('optgroup'); og3.label = '\u2014';
-    var os = document.createElement('option'); os.value = 'save'; os.textContent = '\uD83D\uDCBE Save current as\u2026'; og3.appendChild(os);
+    var os = document.createElement('option'); os.value = 'save'; os.textContent = i18n.t('web.save_current_as',"💾 Save current as…"); og3.appendChild(os);
     if (saved.length) {
-      var od = document.createElement('option'); od.value = 'del'; od.textContent = '\uD83D\uDDD1 Delete saved\u2026'; og3.appendChild(od);
+      var od = document.createElement('option'); od.value = 'del'; od.textContent = i18n.t('web.delete_saved',"🗑 Delete saved…"); og3.appendChild(od);
     }
     sel.appendChild(og3);
     var osel = document.createElement('option');
-    osel.value = ''; osel.textContent = 'Pick a template\u2026'; osel.selected = true;
+    osel.value = ''; osel.textContent = i18n.t('web.pick_a_template',"Pick a template…"); osel.selected = true;
     sel.insertBefore(osel, sel.firstChild);
   }
   function tplMenuAction(field) {
@@ -1325,18 +1316,18 @@
     if (!v) return;
     var el = $(field);
     if (v === 'save') {
-      var title = (window.prompt('Template name:', el.value.trim().split('\n')[0].slice(0, 40)) || '').trim();
+      var title = (window.prompt(i18n.t('web.template_name',"Template name:"), el.value.trim().split('\n')[0].slice(0, 40)) || '').trim();
       if (title && el.value.trim()) {
         var list = tplLoad(field).filter(function (t) { return t.title !== title; });
         list.unshift({ title: title, body: el.value });
         tplSave(field, list);
-        enhStatus(field, '\u2713 saved \u201e' + title + '\u201d');
+        enhStatus(field, i18n.t('web.mu_tpl_saved', "✓ saved “{0}”", title));
       }
     } else if (v === 'del') {
       var saved2 = tplLoad(field);
-      var name = (window.prompt('Delete which saved template? Type its exact name:', '') || '').trim();
+      var name = (window.prompt(i18n.t('web.delete_which_saved_template_type_its',"Delete which saved template? Type its exact name:"), '') || '').trim();
       var keep = saved2.filter(function (t) { return t.title !== name; });
-      if (keep.length !== saved2.length) { tplSave(field, keep); enhStatus(field, '\uD83D\uDDD1 deleted \u201e' + name + '\u201d'); }
+      if (keep.length !== saved2.length) { tplSave(field, keep); enhStatus(field, i18n.t('web.mu_tpl_deleted', "🗑 deleted “{0}”", name)); }
     } else {
       var parts = v.split(':');
       var arr = parts[0] === 's' ? tplLoad(field) : TPL_BUILTIN[field];

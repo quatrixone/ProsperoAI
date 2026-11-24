@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {createContext, runInNewContext, runInContext} from 'node:vm';
+import {createContext, runInContext} from 'node:vm';
+import {runInNewContext, englishI18n} from './english_i18n.mjs';
 import {test} from 'node:test';
 
 const workspaceSource = readFileSync(new URL('../assets/web/workspace.js', import.meta.url), 'utf8');
@@ -236,7 +237,7 @@ function imageSubmitHarness(jobResults) {
         });
         return elements.get(id);
     };
-    const context = createContext({
+    const context = createContext({i18n: englishI18n,
         $: getElement, document: {getElementById: getElement},
         api: async (path, options = {}) => {
             calls.push({path, options, body: options.body ? JSON.parse(options.body) : null});
@@ -381,7 +382,7 @@ test('Inpainting masks have labeled keyboard rectangle controls that paint and e
     };
     const edit = topLevelFunction(appSource, 'function editMaskRectangle(erase=false)');
     assert.notEqual(edit, '', 'the keyboard editor has a rectangle painting implementation');
-    const context = createContext({$: id => elements[id], imageSourceFile: {name: 'source.png'}});
+    const context = createContext({i18n: englishI18n, $: id => elements[id], imageSourceFile: {name: 'source.png'}});
     runInContext(`let imageMaskPainted=false; ${edit}; editMaskRectangle(false)`, context);
     assert.deepEqual(drawCalls.at(-1), {style: '#fff', args: [20, 20, 60, 40]});
     assert.equal(runInContext('imageMaskPainted', context), true);
