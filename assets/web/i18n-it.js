@@ -75,7 +75,7 @@ globalThis.i18n.register('it', {
   'web.image_to_image': 'Da immagine a immagine',
   'web.inpainting': 'Inpainting',
   'web.prompt': 'Prompt',
-  'web.optional_details_to_avoid': 'Facoltativo: dettagli da evitare',
+  'web.optional_details_to_avoid': 'Facoltativo: dettagli da escludere',
   'web.negative_prompt': 'Prompt negativo',
   'web.width': 'Larghezza',
   'web.height': 'Altezza',

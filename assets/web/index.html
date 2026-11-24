@@ -9,6 +9,8 @@
   <script src="/voice-catalog.js" defer></script>
   <script src="/voice-recording.js" defer></script>
   <script src="/workspace.js" defer></script>
+  <script src="/i18n.js" defer></script>
+  <script src="/i18n-it.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/lame.min.js" defer></script>
   <script src="/music.js" defer></script>
@@ -17,252 +19,252 @@
   <div class="shell">
     <header>
       <a class="brand" href="#workspace"><svg class="mark" viewBox="0 0 50 50" aria-hidden="true"></svg>ProsperoAI</a>
-      <nav aria-label="Main navigation">
-        <button data-page="workspace" class="selected">Workspace</button>
-        <button data-page="media">Media</button>
-        <button data-page="models">Models</button>
-        <button data-page="settings">Settings</button>
+      <nav aria-label="Main navigation" data-i18n-attr="aria-label:web.main_navigation">
+        <button data-i18n="tab.workspace" data-page="workspace" class="selected">Workspace</button>
+        <button data-i18n="tab.media" data-page="media">Media</button>
+        <button data-i18n="tab.models" data-page="models">Models</button>
+        <button data-i18n="tab.settings" data-page="settings">Settings</button>
       </nav>
       <div class="console-status">
         <span id="status" class="chip">Connecting…</span>
-        <small id="memory-model" class="muted" role="status" aria-label="Loaded model and device-wide Vulkan allocation">Memory: checking…</small>
+        <small id="memory-model" class="muted" role="status" aria-label="Loaded model and device-wide Vulkan allocation" data-i18n-attr="aria-label:web.loaded_model_and_device_wide_vulkan">Memory: checking…</small>
       </div>
     </header>
 
     <main id="workspace">
-      <section class="workspace-toolbar" aria-label="Workspace controls">
-        <div class="workspace-modes" role="tablist" aria-label="Workspace mode">
-          <button type="button" role="tab" aria-selected="true" class="selected" data-mode="text">Text</button>
-          <button type="button" role="tab" aria-selected="false" data-mode="image">Image</button>
-          <button type="button" role="tab" aria-selected="false" data-mode="audio">Audio</button>
+      <section class="workspace-toolbar" aria-label="Workspace controls" data-i18n-attr="aria-label:web.workspace_controls">
+        <div class="workspace-modes" role="tablist" aria-label="Workspace mode" data-i18n-attr="aria-label:web.workspace_mode">
+          <button type="button" role="tab" aria-selected="true" class="selected" data-mode="text" data-i18n="screen.text">Text</button>
+          <button type="button" role="tab" aria-selected="false" data-mode="image" data-i18n="screen.image">Image</button>
+          <button type="button" role="tab" aria-selected="false" data-mode="audio" data-i18n="screen.audio">Audio</button>
         </div>
       </section>
 
-      <section id="workspace-image" class="workspace-image" hidden aria-label="Image Workspace">
-        <nav class="image-destinations" aria-label="Image workspace">
-          <button type="button" class="selected" aria-current="page" data-image-destination="create">Create</button>
-          <button type="button" data-image-destination="gallery">Gallery</button>
+      <section id="workspace-image" class="workspace-image" hidden aria-label="Image Workspace" data-i18n-attr="aria-label:web.image_workspace">
+        <nav class="image-destinations" aria-label="Image workspace" data-i18n-attr="aria-label:web.image_workspace_2">
+          <button type="button" class="selected" aria-current="page" data-image-destination="create" data-i18n="web.create">Create</button>
+          <button type="button" data-image-destination="gallery" data-i18n="web.gallery">Gallery</button>
         </nav>
-        <section id="image-studio" aria-label="Create image">
+        <section id="image-studio" aria-label="Create image" data-i18n-attr="aria-label:web.create_image">
           <div class="audio-heading">
-            <div><h1>Image Studio</h1><p class="muted">Create from a prompt, refine an image, paint a mask, or follow a guide.</p></div>
+            <div><h1 data-i18n="web.image_studio">Image Studio</h1><p class="muted" data-i18n="web.create_from_a_prompt_refine_an_image">Create from a prompt, refine an image, paint a mask, or follow a guide.</p></div>
           </div>
           <div class="audio-layout image-studio-layout">
-            <section class="glass audio-create image-create-panel" aria-label="Image generation form">
-              <label for="image-model">Image model<select id="image-model" aria-label="Choose an image model"></select></label>
+            <section class="glass audio-create image-create-panel" aria-label="Image generation form" data-i18n-attr="aria-label:web.image_generation_form">
+              <label for="image-model"><span data-i18n="web.image_model">Image model</span><select id="image-model" aria-label="Choose an image model" data-i18n-attr="aria-label:web.choose_an_image_model"></select></label>
               <p id="image-model-defaults" class="muted"></p>
-              <p id="image-model-empty" class="audio-empty-models" role="status" hidden>No image models are installed. Open Models to choose an image preset.</p>
+              <p id="image-model-empty" class="audio-empty-models" role="status" hidden data-i18n="web.no_image_models_are_installed_open_m">No image models are installed. Open Models to choose an image preset.</p>
               <p id="image-capability-note" class="muted" role="status"></p>
-              <div class="image-mode-tabs" role="tablist" aria-label="Image mode">
-                <button type="button" role="tab" aria-selected="true" aria-pressed="true" data-image-mode="text_to_image" aria-controls="image-studio-form">Text to image</button>
-                <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="image_to_image" aria-controls="image-studio-form">Image to image</button>
-                <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="inpainting" aria-controls="image-studio-form">Inpainting</button>
+              <div class="image-mode-tabs" role="tablist" aria-label="Image mode" data-i18n-attr="aria-label:web.image_mode">
+                <button type="button" role="tab" aria-selected="true" aria-pressed="true" data-image-mode="text_to_image" aria-controls="image-studio-form" data-i18n="web.text_to_image">Text to image</button>
+                <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="image_to_image" aria-controls="image-studio-form" data-i18n="web.image_to_image">Image to image</button>
+                <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="inpainting" aria-controls="image-studio-form" data-i18n="web.inpainting">Inpainting</button>
                 <button type="button" role="tab" aria-selected="false" aria-pressed="false" data-image-mode="controlnet" aria-controls="image-studio-form">ControlNet</button>
               </div>
               <p id="image-mode-note" class="muted" role="status"></p>
               <form id="image-studio-form">
-                <label for="image-prompt">Prompt<textarea id="image-prompt" rows="3" placeholder="Describe what you want to create" required></textarea></label>
-                <label for="image-negative-prompt">Negative prompt<textarea id="image-negative-prompt" rows="2" placeholder="Optional: details to avoid"></textarea></label>
+                <label for="image-prompt"><span data-i18n="web.prompt">Prompt</span><textarea id="image-prompt" rows="3" placeholder="Describe what you want to create" data-i18n-attr="placeholder:web.image_prompt_placeholder" required></textarea></label>
+                <label for="image-negative-prompt"><span data-i18n="web.negative_prompt">Negative prompt</span><textarea id="image-negative-prompt" rows="2" placeholder="Optional: details to avoid" data-i18n-attr="placeholder:web.optional_details_to_avoid"></textarea></label>
                 <div class="image-input-grid">
-                  <label for="image-width">Width<input id="image-width" type="number" min="256" max="1536" step="64"></label>
-                  <label for="image-height">Height<input id="image-height" type="number" min="256" max="1536" step="64"></label>
-                  <label for="image-steps">Steps<input id="image-steps" type="number" min="1" max="50" step="1"></label>
-                  <label for="image-cfg-scale">CFG scale<input id="image-cfg-scale" type="number" min="0" max="20" step="0.1"></label>
-                  <label for="image-seed">Seed<input id="image-seed" type="number" min="-1" max="4294967295" step="1" value="-1"></label>
-                  <label for="image-sampler">Sampler<select id="image-sampler"><option>euler</option><option>euler_a</option><option>heun</option><option>dpm2</option><option>dpm++2s_a</option><option>dpm++2m</option><option>dpm++2mv2</option><option>ipndm</option><option>ipndm_v</option><option>lcm</option><option>ddim_trailing</option><option>tcd</option><option>res_multistep</option><option>res_2s</option><option>er_sde</option><option>euler_cfg_pp</option><option>euler_a_cfg_pp</option><option>euler_ge</option><option>dpm++2m_sde</option><option>dpm++2m_sde_bt</option><option>lms</option></select></label>
-                  <label for="image-scheduler">Scheduler<select id="image-scheduler"><option value="">Model default</option><option>discrete</option><option>karras</option><option>exponential</option><option>ays</option><option>gits</option><option>sgm_uniform</option><option>simple</option><option>smoothstep</option><option>kl_optimal</option><option>lcm</option><option>bong_tangent</option><option>ltx2</option><option>logit_normal</option><option>flux2</option><option>flux</option><option>beta</option><option>llada_image</option></select></label>
+                  <label for="image-width"><span data-i18n="web.width">Width</span><input id="image-width" type="number" min="256" max="1536" step="64"></label>
+                  <label for="image-height"><span data-i18n="web.height">Height</span><input id="image-height" type="number" min="256" max="1536" step="64"></label>
+                  <label for="image-steps"><span data-i18n="web.steps">Steps</span><input id="image-steps" type="number" min="1" max="50" step="1"></label>
+                  <label for="image-cfg-scale"><span data-i18n="web.cfg_scale">CFG scale</span><input id="image-cfg-scale" type="number" min="0" max="20" step="0.1"></label>
+                  <label for="image-seed"><span data-i18n="web.seed">Seed</span><input id="image-seed" type="number" min="-1" max="4294967295" step="1" value="-1"></label>
+                  <label for="image-sampler"><span data-i18n="web.sampler">Sampler</span><select id="image-sampler"><option>euler</option><option>euler_a</option><option>heun</option><option>dpm2</option><option>dpm++2s_a</option><option>dpm++2m</option><option>dpm++2mv2</option><option>ipndm</option><option>ipndm_v</option><option>lcm</option><option>ddim_trailing</option><option>tcd</option><option>res_multistep</option><option>res_2s</option><option>er_sde</option><option>euler_cfg_pp</option><option>euler_a_cfg_pp</option><option>euler_ge</option><option>dpm++2m_sde</option><option>dpm++2m_sde_bt</option><option>lms</option></select></label>
+                  <label for="image-scheduler"><span data-i18n="web.scheduler">Scheduler</span><select id="image-scheduler"><option value="" data-i18n="web.model_default">Model default</option><option>discrete</option><option>karras</option><option>exponential</option><option>ays</option><option>gits</option><option>sgm_uniform</option><option>simple</option><option>smoothstep</option><option>kl_optimal</option><option>lcm</option><option>bong_tangent</option><option>ltx2</option><option>logit_normal</option><option>flux2</option><option>flux</option><option>beta</option><option>llada_image</option></select></label>
                 </div>
-                <label id="image-strength-control" for="image-strength">Strength <input id="image-strength" type="number" min="0" max="1" step="0.05" value="0.75"></label>
-                <label id="image-control-strength-control" for="image-control-strength">Control strength <input id="image-control-strength" type="number" min="0" max="2" step="0.05" value="1"></label>
-                <label id="image-canny-control" class="check" for="image-canny"><input id="image-canny" type="checkbox" checked>Apply Canny edge detection</label>
-                <label for="image-upscale">Upscale with Real-ESRGAN (needs the upscaler model) <select id="image-upscale"><option value="0">Off</option><option value="2">2×</option><option value="4">4×</option></select></label>
+                <label id="image-strength-control" for="image-strength"><span data-i18n="web.strength">Strength</span> <input id="image-strength" type="number" min="0" max="1" step="0.05" value="0.75"></label>
+                <label id="image-control-strength-control" for="image-control-strength"><span data-i18n="web.control_strength">Control strength</span> <input id="image-control-strength" type="number" min="0" max="2" step="0.05" value="1"></label>
+                <label id="image-canny-control" class="check" for="image-canny"><input id="image-canny" type="checkbox" checked><span data-i18n="web.apply_canny_edge_detection">Apply Canny edge detection</span></label>
+                <label for="image-upscale"><span data-i18n="web.upscale_with_real_esrgan_needs_the_u">Upscale with Real-ESRGAN (needs the upscaler model)</span> <select id="image-upscale"><option value="0" data-i18n="web.off">Off</option><option value="2">2×</option><option value="4">4×</option></select></label>
                 <div id="image-source-control" class="image-file-control">
-                  <label for="image-source-file">Source image<input id="image-source-file" type="file" accept="image/png,image/jpeg"></label>
-                  <div id="image-source-preview" class="image-source-preview" hidden><img id="image-source-preview-img" alt="Selected source image"><button id="image-source-remove" class="secondary" type="button">Remove image</button></div>
+                  <label for="image-source-file"><span data-i18n="web.source_image">Source image</span><input id="image-source-file" type="file" accept="image/png,image/jpeg"></label>
+                  <div id="image-source-preview" class="image-source-preview" hidden><img id="image-source-preview-img" alt="Selected source image" data-i18n-attr="alt:web.selected_source_image"><button id="image-source-remove" class="secondary" type="button" data-i18n="web.remove_image">Remove image</button></div>
                 </div>
                 <div id="image-mask-control" class="image-file-control" hidden>
-                  <p>Paint the area to regenerate. White marks the mask; unpainted areas stay black.</p>
-                  <div id="image-mask-stage" class="image-mask-stage" hidden><img id="image-mask-source" alt="Image under the inpainting mask"><canvas id="image-mask-canvas" aria-label="Paint inpainting mask"></canvas></div>
-                  <div class="image-actions"><button id="image-mask-paint" type="button" aria-pressed="true">Paint</button><button id="image-mask-erase" type="button" aria-pressed="false">Erase</button><label for="image-brush-size">Brush size<input id="image-brush-size" type="range" min="8" max="160" value="48"></label><button id="image-mask-clear" class="secondary" type="button">Clear mask</button></div>
-                  <div id="image-mask-keyboard-controls" class="image-mask-keyboard-controls" role="group" aria-label="Keyboard mask editor" aria-describedby="image-mask-keyboard-help">
-                    <p id="image-mask-keyboard-help">Set a rectangle as percentages of the image, then use Paint selected rectangle or Erase selected rectangle.</p>
+                  <p data-i18n="web.paint_the_area_to_regenerate_white_m">Paint the area to regenerate. White marks the mask; unpainted areas stay black.</p>
+                  <div id="image-mask-stage" class="image-mask-stage" hidden><img id="image-mask-source" alt="Image under the inpainting mask" data-i18n-attr="alt:web.image_under_the_inpainting_mask"><canvas id="image-mask-canvas" aria-label="Paint inpainting mask" data-i18n-attr="aria-label:web.paint_inpainting_mask"></canvas></div>
+                  <div class="image-actions"><button id="image-mask-paint" type="button" aria-pressed="true" data-i18n="web.paint">Paint</button><button id="image-mask-erase" type="button" aria-pressed="false" data-i18n="web.erase">Erase</button><label for="image-brush-size"><span data-i18n="web.brush_size">Brush size</span><input id="image-brush-size" type="range" min="8" max="160" value="48"></label><button id="image-mask-clear" class="secondary" type="button" data-i18n="web.clear_mask">Clear mask</button></div>
+                  <div id="image-mask-keyboard-controls" class="image-mask-keyboard-controls" role="group" aria-label="Keyboard mask editor" aria-describedby="image-mask-keyboard-help" data-i18n-attr="aria-label:web.keyboard_mask_editor">
+                    <p id="image-mask-keyboard-help" data-i18n="web.set_a_rectangle_as_percentages_of_th">Set a rectangle as percentages of the image, then use Paint selected rectangle or Erase selected rectangle.</p>
                     <div class="image-mask-coordinate-grid">
-                      <label for="image-mask-x">Left (%)<input id="image-mask-x" type="number" min="0" max="100" step="1" value="25"></label>
-                      <label for="image-mask-y">Top (%)<input id="image-mask-y" type="number" min="0" max="100" step="1" value="25"></label>
-                      <label for="image-mask-width">Width (%)<input id="image-mask-width" type="number" min="1" max="100" step="1" value="30"></label>
-                      <label for="image-mask-height">Height (%)<input id="image-mask-height" type="number" min="1" max="100" step="1" value="30"></label>
+                      <label for="image-mask-x"><span data-i18n="web.left">Left (%)</span><input id="image-mask-x" type="number" min="0" max="100" step="1" value="25"></label>
+                      <label for="image-mask-y"><span data-i18n="web.top">Top (%)</span><input id="image-mask-y" type="number" min="0" max="100" step="1" value="25"></label>
+                      <label for="image-mask-width"><span data-i18n="web.width_2">Width (%)</span><input id="image-mask-width" type="number" min="1" max="100" step="1" value="30"></label>
+                      <label for="image-mask-height"><span data-i18n="web.height_2">Height (%)</span><input id="image-mask-height" type="number" min="1" max="100" step="1" value="30"></label>
                     </div>
-                    <div class="image-actions"><button id="image-mask-paint-rectangle" type="button">Paint selected rectangle</button><button id="image-mask-erase-rectangle" class="secondary" type="button">Erase selected rectangle</button></div>
+                    <div class="image-actions"><button id="image-mask-paint-rectangle" type="button" data-i18n="web.paint_selected_rectangle">Paint selected rectangle</button><button id="image-mask-erase-rectangle" class="secondary" type="button" data-i18n="web.erase_selected_rectangle">Erase selected rectangle</button></div>
                   </div>
                   <canvas id="image-mask-output" hidden></canvas>
                 </div>
                 <div id="image-guide-control" class="image-file-control" hidden>
-                  <label for="image-guide-file">ControlNet guide<input id="image-guide-file" type="file" accept="image/png,image/jpeg"></label>
-                  <div id="image-guide-preview" class="image-source-preview" hidden><img id="image-guide-preview-img" alt="Selected ControlNet guide"><button id="image-guide-remove" class="secondary" type="button">Remove guide</button></div>
+                  <label for="image-guide-file"><span data-i18n="web.controlnet_guide">ControlNet guide</span><input id="image-guide-file" type="file" accept="image/png,image/jpeg"></label>
+                  <div id="image-guide-preview" class="image-source-preview" hidden><img id="image-guide-preview-img" alt="Selected ControlNet guide" data-i18n-attr="alt:web.selected_controlnet_guide"><button id="image-guide-remove" class="secondary" type="button" data-i18n="web.remove_guide">Remove guide</button></div>
                 </div>
-                <div class="image-actions"><button id="image-generate" class="primary" type="submit">Generate image</button><button id="image-retry" class="secondary" type="button" hidden>Retry</button></div>
+                <div class="image-actions"><button id="image-generate" class="primary" type="submit" data-i18n="web.generate_image">Generate image</button><button id="image-retry" class="secondary" type="button" hidden data-i18n="web.retry">Retry</button></div>
                 <p id="image-status" role="status" aria-live="polite"></p>
                 <div id="image-result" class="image-result" aria-live="polite"></div>
               </form>
             </section>
-            <section id="image-library-panel" class="glass audio-library-panel" aria-label="Generated images">
-              <div class="audio-library-heading"><h2>Library</h2><button id="image-library-refresh" type="button" title="Refresh library" aria-label="Refresh library">⟳</button></div>
+            <section id="image-library-panel" class="glass audio-library-panel" aria-label="Generated images" data-i18n-attr="aria-label:web.generated_images">
+              <div class="audio-library-heading"><h2 data-i18n="web.library">Library</h2><button id="image-library-refresh" type="button" title="Refresh library" aria-label="Refresh library" data-i18n-attr="aria-label:web.refresh_library;title:web.refresh_library">⟳</button></div>
               <div id="image-library" class="audio-library"></div>
             </section>
           </div>
         </section>
       </section>
 
-      <section id="workspace-audio" class="workspace-audio" hidden aria-label="Audio Workspace">
-        <div class="workspace-audio-sections" role="tablist" aria-label="Audio section">
-          <button id="workspace-audio-music-tab" type="button" role="tab" aria-selected="true" class="selected" aria-controls="workspace-audio-music" data-audio-section="music">Music</button>
+      <section id="workspace-audio" class="workspace-audio" hidden aria-label="Audio Workspace" data-i18n-attr="aria-label:web.audio_workspace">
+        <div class="workspace-audio-sections" role="tablist" aria-label="Audio section" data-i18n-attr="aria-label:web.audio_section">
+          <button id="workspace-audio-music-tab" type="button" role="tab" aria-selected="true" class="selected" aria-controls="workspace-audio-music" data-audio-section="music" data-i18n="web.music">Music</button>
           <button id="workspace-audio-tts-tab" type="button" role="tab" aria-selected="false" aria-controls="workspace-audio-tts" data-audio-section="tts">TTS</button>
         </div>
         <section id="workspace-audio-music" class="workspace-audio-panel" role="tabpanel" aria-labelledby="workspace-audio-music-tab">
           <div class="audio-heading">
-            <div><h1>Music Studio</h1><p class="muted">Compose, arrange, and explore your audio creations.</p></div>
+            <div><h1 data-i18n="web.music_studio">Music Studio</h1><p class="muted" data-i18n="web.compose_arrange_and_explore_your_aud">Compose, arrange, and explore your audio creations.</p></div>
           </div>
           <div class="audio-layout music-studio">
             <section id="music-composer" class="audio-create">
               <div class="music-model-controls">
-                <label for="model">Music model<select id="model" aria-label="Music generation model"></select></label>
-                <label for="chat-model">Enhance model<select id="chat-model" aria-label="Text model for Enhance"></select></label>
-                <span id="status-dot" class="dot" role="status" aria-label="Model list status"></span>
+                <label for="model"><span data-i18n="web.music_model">Music model</span><select id="model" aria-label="Music generation model" data-i18n-attr="aria-label:web.music_generation_model"></select></label>
+                <label for="chat-model"><span data-i18n="web.enhance_model">Enhance model</span><select id="chat-model" aria-label="Text model for Enhance" data-i18n-attr="aria-label:web.text_model_for_enhance"></select></label>
+                <span id="status-dot" class="dot" role="status" aria-label="Model list status" data-i18n-attr="aria-label:web.model_list_status"></span>
               </div>
-              <label for="lyrics">Lyrics</label>
-              <textarea id="lyrics" rows="10" placeholder="[verse]&#10;Write your lyrics here..."></textarea>
-              <label for="style">Style (prompt)</label>
-              <textarea id="style" rows="3" placeholder="romanian pop, female vocal, deep bass..."></textarea>
+              <label for="lyrics" data-i18n="web.lyrics">Lyrics</label>
+              <textarea id="lyrics" rows="10" placeholder="[verse]&#10;Write your lyrics here..." data-i18n-attr="placeholder:web.verse_write_your_lyrics_here"></textarea>
+              <label for="style" data-i18n="web.style_prompt">Style (prompt)</label>
+              <textarea id="style" rows="3" placeholder="romanian pop, female vocal, deep bass..." data-i18n-attr="placeholder:web.romanian_pop_female_vocal_deep_bass"></textarea>
               <details id="row-abc" class="audio-abc" open>
-                <summary id="abc-summary">ABC notation &amp; advanced options</summary>
+                <summary id="abc-summary" data-i18n="web.abc_notation_advanced_options">ABC notation & advanced options</summary>
                 <div id="abc-col">
-                  <label for="abc">ABC notation (optional)</label>
+                  <label for="abc" data-i18n="web.abc_notation_optional">ABC notation (optional)</label>
                   <textarea id="abc" rows="8" placeholder="X:1&#10;M:2/4&#10;L:1/16&#10;K:C..."></textarea>
                   <div id="abc-status" hidden></div>
                   <div id="abc-actions" class="audio-actions">
-                    <input id="abc-name" type="text" value="studio.abc" aria-label="ABC filename">
-                    <button id="abc-save" type="button">Save ABC</button>
-                    <button id="abc-load" type="button">Load into editor</button>
-                    <select id="abc-files" title="Existing .abc files" aria-label="Existing ABC files"></select>
+                    <input id="abc-name" type="text" value="studio.abc" aria-label="ABC filename" data-i18n-attr="aria-label:web.abc_filename">
+                    <button id="abc-save" type="button" data-i18n="web.save_abc">Save ABC</button>
+                    <button id="abc-load" type="button" data-i18n="web.load_into_editor">Load into editor</button>
+                    <select id="abc-files" title="Existing .abc files" aria-label="Existing ABC files" data-i18n-attr="aria-label:web.existing_abc_files;title:web.existing_abc_files_2"></select>
                     <input id="abc-disk" type="file" accept=".abc,text/plain" hidden>
-                    <button id="abc-open" type="button">From file</button>
-                    <button id="abc-clear" type="button">Clear</button>
+                    <button id="abc-open" type="button" data-i18n="web.from_file">From file</button>
+                    <button id="abc-clear" type="button" data-i18n="web.clear">Clear</button>
                   </div>
                   <div id="cover-row">
-                    <label for="cover-file">Cover: upload a song (MP3/WAV/…) — SheetSage2 transcribes it to ABC on the console</label>
+                    <label for="cover-file" data-i18n="web.cover_upload_a_song_mp3_wav_sheetsag">Cover: upload a song (MP3/WAV/…) — SheetSage2 transcribes it to ABC on the console</label>
                     <div id="cover-actions" class="audio-actions">
-                      <input id="cover-file" type="file" accept="audio/*" aria-label="Choose a song for Cover">
-                      <button id="cover-go" type="button">Convert to ABC</button>
-                      <button id="lib-save" type="button" title="Store the chosen MP3/WAV in the console library as-is">Save to library</button>
+                      <input id="cover-file" type="file" accept="audio/*" aria-label="Choose a song for Cover" data-i18n-attr="aria-label:web.choose_a_song_for_cover">
+                      <button id="cover-go" type="button" data-i18n="web.convert_to_abc">Convert to ABC</button>
+                      <button id="lib-save" type="button" title="Store the chosen MP3/WAV in the console library as-is" data-i18n="web.save_to_library" data-i18n-attr="title:web.store_the_chosen_mp3_wav_in_the_cons">Save to library</button>
                     </div>
                     <div id="cover-status" role="status"></div>
                   </div>
                 </div>
                 <div id="opts-col" class="music-options">
-                  <label for="cot">Melody guidance<select id="cot"><option value="melody">ABC as guide</option><option value="">Lyrics/style only</option></select></label>
-                  <label for="abc-max">ABC max tokens<input id="abc-max" type="number" value="2000" min="100" max="4000" step="100"></label>
-                  <label id="duration-control" for="duration">Duration (seconds)<span id="dur-row"><input id="duration" type="range" min="30" max="300" step="5" value="240"><output id="dur-val">240</output></span></label>
-                  <label for="seed">Seed<span id="seed-row"><input id="seed" type="number" value="42" min="1" max="4294967295"><button id="dice" type="button" title="Random seed">🎲</button></span></label>
+                  <label for="cot"><span data-i18n="web.melody_guidance">Melody guidance</span><select id="cot"><option value="melody" data-i18n="web.abc_as_guide">ABC as guide</option><option value="" data-i18n="web.lyrics_style_only">Lyrics/style only</option></select></label>
+                  <label for="abc-max"><span data-i18n="web.abc_max_tokens">ABC max tokens</span><input id="abc-max" type="number" value="2000" min="100" max="4000" step="100"></label>
+                  <label id="duration-control" for="duration"><span data-i18n="web.duration_seconds">Duration (seconds)</span><span id="dur-row"><input id="duration" type="range" min="30" max="300" step="5" value="240"><output id="dur-val">240</output></span></label>
+                  <label for="seed"><span data-i18n="web.seed">Seed</span><span id="seed-row"><input id="seed" type="number" value="42" min="1" max="4294967295"><button id="dice" type="button" title="Random seed" data-i18n-attr="title:web.random_seed">🎲</button></span></label>
                 </div>
               </details>
-              <label for="track-name">Track name (optional)</label>
-              <input id="track-name" type="text" placeholder="e.g. summer-sunshine" autocomplete="off">
+              <label for="track-name" data-i18n="web.track_name_optional">Track name (optional)</label>
+              <input id="track-name" type="text" placeholder="e.g. summer-sunshine" autocomplete="off" data-i18n-attr="placeholder:web.e_g_summer_sunshine">
               <div id="gen-row" class="audio-actions">
-                <button id="generate" class="primary" type="button">Generate</button>
-                <button id="regen" type="button" title="Keep everything and generate again with seed +1">Seed +1</button>
+                <button id="generate" class="primary" type="button" data-i18n="web.generate">Generate</button>
+                <button id="regen" type="button" title="Keep everything and generate again with seed +1" data-i18n="web.seed_1" data-i18n-attr="title:web.keep_everything_and_generate_again_w">Seed +1</button>
               </div>
               <div id="queue-row" class="audio-queue-controls">
-                <label for="q-count">Queue count<input id="q-count" type="number" value="3" min="1" max="20"></label>
-                <button id="q-add" type="button" title="Queue this setup with consecutive seeds">Add to queue</button>
-                <button id="q-run" type="button">Run queue</button>
-                <button id="q-clear" type="button" aria-label="Clear queue">Clear</button>
+                <label for="q-count"><span data-i18n="web.queue_count">Queue count</span><input id="q-count" type="number" value="3" min="1" max="20"></label>
+                <button id="q-add" type="button" title="Queue this setup with consecutive seeds" data-i18n="web.add_to_queue" data-i18n-attr="title:web.queue_this_setup_with_consecutive_se">Add to queue</button>
+                <button id="q-run" type="button" data-i18n="web.run_queue">Run queue</button>
+                <button id="q-clear" type="button" aria-label="Clear queue" data-i18n="web.clear" data-i18n-attr="aria-label:web.clear_queue">Clear</button>
               </div>
               <div id="queue-log" class="audio-queue" role="status"></div>
               <div id="gen-status" role="status"></div>
               <div id="result"></div>
             </section>
             <section id="library" class="audio-library-panel">
-              <div class="audio-library-heading"><h2>Library</h2><button id="refresh" type="button" title="Refresh library" aria-label="Refresh library">⟳</button></div>
+              <div class="audio-library-heading"><h2 data-i18n="web.library">Library</h2><button id="refresh" type="button" title="Refresh library" aria-label="Refresh library" data-i18n-attr="aria-label:web.refresh_library;title:web.refresh_library">⟳</button></div>
               <div id="tracks" class="audio-library"></div>
             </section>
           </div>
         </section>
         <section id="workspace-audio-tts" class="workspace-audio-panel" role="tabpanel" aria-labelledby="workspace-audio-tts-tab" hidden>
-          <h1>Voice</h1>
-          <p id="workspace-tts-loading" class="muted" role="status">Loading compatible voice models…</p>
-          <p id="workspace-tts-empty" class="audio-empty-models" hidden>No compatible voice model is installed. Install a compatible voice model from Models to start a voice conversation.</p>
-          <p><button id="workspace-tts-install" class="secondary" type="button" data-page="models" hidden>Install a voice model</button></p>
-          <p id="workspace-tts-unavailable" class="muted" role="status" hidden>Could not check installed voice models. Reconnect to your PS5 and try again.</p>
-          <p id="workspace-tts-ready" class="muted" hidden>Turn your words into speech with a voice model.</p>
+          <h1 data-i18n="web.voice">Voice</h1>
+          <p id="workspace-tts-loading" class="muted" role="status" data-i18n="web.loading_compatible_voice_models">Loading compatible voice models…</p>
+          <p id="workspace-tts-empty" class="audio-empty-models" hidden data-i18n="web.no_compatible_voice_model_is_install">No compatible voice model is installed. Install a compatible voice model from Models to start a voice conversation.</p>
+          <p><button id="workspace-tts-install" class="secondary" type="button" data-page="models" hidden data-i18n="web.install_a_voice_model">Install a voice model</button></p>
+          <p id="workspace-tts-unavailable" class="muted" role="status" hidden data-i18n="web.could_not_check_installed_voice_mode">Could not check installed voice models. Reconnect to your PS5 and try again.</p>
+          <p id="workspace-tts-ready" class="muted" hidden data-i18n="web.turn_your_words_into_speech_with_a_v">Turn your words into speech with a voice model.</p>
           <small id="voice-count" class="muted">Connecting…</small>
-          <p><button id="workspace-tts-start" class="primary" type="button" hidden>Start a voice conversation</button></p>
+          <p><button id="workspace-tts-start" class="primary" type="button" hidden data-i18n="web.start_a_voice_conversation">Start a voice conversation</button></p>
         </section>
       </section>
 
       <section id="welcome">
         <div class="hero-copy">
-          <p class="eyebrow">A LITTLE CURIOSITY. ENDLESS POSSIBILITY.</p>
-          <h1>Big ideas.<br><span>Right here.</span></h1>
-          <p class="intro">A space to think, imagine, and create.<br>Powered by your PS5. Entirely yours.</p>
-          <div class="start-row"><button id="start" class="primary">Start a conversation</button><span class="muted">Ready when you are</span></div>
+          <p class="eyebrow" data-i18n="web.a_little_curiosity_endless_possibili">A LITTLE CURIOSITY. ENDLESS POSSIBILITY.</p>
+          <h1><span data-i18n="web.big_ideas">Big ideas.</span><br><span data-i18n="web.right_here">Right here.</span></h1>
+          <p class="intro"><span data-i18n="web.a_space_to_think_imagine_and_create">A space to think, imagine, and create.</span><br><span data-i18n="web.powered_by_your_ps5_entirely_yours">Powered by your PS5. Entirely yours.</span></p>
+          <div class="start-row"><button id="start" class="primary" data-i18n="web.start_conversation">Start a conversation</button><span class="muted" data-i18n="web.ready">Ready when you are</span></div>
         </div>
-        <div class="hero-art"><canvas id="sculpture" width="720" height="720" aria-hidden="true"></canvas><p class="eyebrow">THOUGHT, TAKING SHAPE</p></div>
+        <div class="hero-art"><canvas id="sculpture" width="720" height="720" aria-hidden="true"></canvas><p class="eyebrow" data-i18n="web.thought_taking_shape">THOUGHT, TAKING SHAPE</p></div>
         <div class="kinds">
-          <button id="converse" class="glass" type="button"><span class="eyebrow">TEXT</span><strong>Converse</strong><small id="text-count">Connecting…</small><span class="kind-icon">◎</span></button>
-          <button id="imagine" class="glass" type="button"><span class="eyebrow">IMAGE</span><strong>Imagine</strong><small id="image-count">Connecting…</small><span class="kind-icon image-art">◇</span></button>
-          <button id="compose" class="glass" type="button"><span class="eyebrow">AUDIO</span><strong>Compose</strong><small id="audio-count">Connecting…</small><span class="kind-icon sound-art">≋</span></button>
+          <button id="converse" class="glass" type="button"><span class="eyebrow" data-i18n="web.text">TEXT</span><strong data-i18n="web.converse">Converse</strong><small id="text-count">Connecting…</small><span class="kind-icon">◎</span></button>
+          <button id="imagine" class="glass" type="button"><span class="eyebrow" data-i18n="web.image">IMAGE</span><strong data-i18n="web.imagine">Imagine</strong><small id="image-count">Connecting…</small><span class="kind-icon image-art">◇</span></button>
+          <button id="compose" class="glass" type="button"><span class="eyebrow" data-i18n="web.audio">AUDIO</span><strong data-i18n="web.compose">Compose</strong><small id="audio-count">Connecting…</small><span class="kind-icon sound-art">≋</span></button>
         </div>
       </section>
 
       <section id="chat" hidden>
         <aside class="glass">
-          <div class="side-title"><span class="eyebrow">YOUR SPACE</span><div class="side-title-actions"><button id="new" aria-label="New conversation">＋</button><button id="history-close" aria-label="Close conversation list">✕</button></div></div>
-          <details id="workspace-generation"><summary>Generation settings</summary>
+          <div class="side-title"><span class="eyebrow" data-i18n="web.your_space">YOUR SPACE</span><div class="side-title-actions"><button id="new" aria-label="New conversation" data-i18n-attr="aria-label:web.new_conversation">＋</button><button id="history-close" aria-label="Close conversation list" data-i18n-attr="aria-label:web.close_conversation_list">✕</button></div></div>
+          <details id="workspace-generation"><summary data-i18n="web.generation_settings">Generation settings</summary>
             <div id="workspace-model-controls" class="workspace-model-controls">
-              <label class="history-control" for="workspace-model">Model</label>
-              <select id="workspace-model" aria-label="Choose a model">
-                <option value="">Choose a model…</option>
+              <label class="history-control" for="workspace-model" data-i18n="web.model">Model</label>
+              <select id="workspace-model" aria-label="Choose a model" data-i18n-attr="aria-label:web.choose_a_model">
+                <option value="" data-i18n="web.choose_a_model_2">Choose a model…</option>
               </select>
-              <small id="model-load-status" class="muted" role="status">Choose a model. It loads when you submit.</small>
+              <small id="model-load-status" class="muted" role="status" data-i18n="web.choose_a_model_it_loads_when_you_sub">Choose a model. It loads when you submit.</small>
             </div>
-            <div id="workspace-voice-group" hidden><label class="history-control" id="workspace-voice-label" for="workspace-voice">Voice</label><select id="workspace-voice" aria-label="Voice"></select><label class="history-control" id="workspace-language-label" for="workspace-language" hidden>Language</label><select id="workspace-language" aria-label="Spoken language" hidden></select><div id="chatterbox-record-controls" hidden><button id="voice-record-open" type="button" class="secondary">Record my voice</button></div><small id="workspace-voice-feedback" class="muted" role="status"></small></div>
-            <small id="workspace-tts-duration-note" class="muted" hidden>Audio duration depends on the length of the text you submit.</small>
+            <div id="workspace-voice-group" hidden><label class="history-control" id="workspace-voice-label" for="workspace-voice" data-i18n="web.voice">Voice</label><select id="workspace-voice" aria-label="Voice" data-i18n-attr="aria-label:web.voice"></select><label class="history-control" id="workspace-language-label" for="workspace-language" hidden data-i18n="settings.language">Language</label><select id="workspace-language" aria-label="Spoken language" hidden data-i18n-attr="aria-label:web.spoken_language"></select><div id="chatterbox-record-controls" hidden><button id="voice-record-open" type="button" class="secondary" data-i18n="web.record_my_voice">Record my voice</button></div><small id="workspace-voice-feedback" class="muted" role="status"></small></div>
+            <small id="workspace-tts-duration-note" class="muted" hidden data-i18n="web.audio_duration_depends_on_the_length">Audio duration depends on the length of the text you submit.</small>
             <div id="workspace-text-settings">
-              <label>Temperature<input id="temperature" type="range" min="0" max="1.5" step="0.05" value="0.7"><output id="temperature-value">0.7</output></label>
-              <label>Response limit<select id="length"><option value="0" selected>Auto</option><option value="64">64 tokens</option><option value="128">128 tokens</option><option value="192">192 tokens</option><option value="256">256 tokens</option><option value="512">512 tokens</option><option value="1024">1024 tokens</option><option value="2048">2048 tokens</option><option value="4096">4096 tokens</option><option value="8192">8192 tokens</option><option value="16384">16384 tokens</option><option value="32768">32768 tokens</option><option value="65536">65536 tokens</option><option value="131072">131072 tokens</option></select></label>
-              <label>Context length<select id="runtime-context"><option value="auto">Auto</option><option value="4k">4K</option><option value="8k">8K</option><option value="16k">16K</option><option value="32k">32K</option><option value="64k">64K</option><option value="128k">128K</option><option value="256k">256K</option></select></label>
-              <small class="muted">KV cache is selected automatically for the model and context.</small>
-              <label class="check"><input id="runtime-thinking" type="checkbox">Thinking</label>
+              <label><span data-i18n="web.temperature">Temperature</span><input id="temperature" type="range" min="0" max="1.5" step="0.05" value="0.7"><output id="temperature-value">0.7</output></label>
+              <label><span data-i18n="web.response_limit">Response limit</span><select id="length"><option value="0" selected data-i18n="web.auto">Auto</option><option value="64">64 tokens</option><option value="128">128 tokens</option><option value="192">192 tokens</option><option value="256">256 tokens</option><option value="512">512 tokens</option><option value="1024">1024 tokens</option><option value="2048">2048 tokens</option><option value="4096">4096 tokens</option><option value="8192">8192 tokens</option><option value="16384">16384 tokens</option><option value="32768">32768 tokens</option><option value="65536">65536 tokens</option><option value="131072">131072 tokens</option></select></label>
+              <label><span data-i18n="web.context_length">Context length</span><select id="runtime-context"><option value="auto" data-i18n="web.auto">Auto</option><option value="4k">4K</option><option value="8k">8K</option><option value="16k">16K</option><option value="32k">32K</option><option value="64k">64K</option><option value="128k">128K</option><option value="256k">256K</option></select></label>
+              <small class="muted" data-i18n="web.kv_cache_is_selected_automatically_f">KV cache is selected automatically for the model and context.</small>
+              <label class="check"><input id="runtime-thinking" type="checkbox"><span data-i18n="web.thinking">Thinking</span></label>
             </div>
             <p id="runtime-feedback" class="muted" role="status"></p>
           </details>
-          <label class="history-control" for="history-kind">Conversation type</label><select id="history-kind"><option value="all">All types</option><option value="text-to-text">Text</option><option value="text-to-image">Image</option><option value="text-to-audio">Audio</option><option value="text-to-speech">Voice</option><option value="other">Other</option></select>
-          <label class="history-control" for="history-archive-mode">Show</label><select id="history-archive-mode"><option value="active">Active conversations</option><option value="archived">Archived conversations</option><option value="all">All conversations</option></select>
-          <label class="history-control" for="history-search">Search conversations</label><input id="history-search" type="search" placeholder="Title, model or message…">
-          <label class="history-control" for="history-import">Import conversation</label><input id="history-import" type="file" accept="application/json,.json">
+          <label class="history-control" for="history-kind" data-i18n="web.conversation_type">Conversation type</label><select id="history-kind"><option value="all" data-i18n="web.all_types">All types</option><option value="text-to-text" data-i18n="screen.text">Text</option><option value="text-to-image" data-i18n="screen.image">Image</option><option value="text-to-audio" data-i18n="screen.audio">Audio</option><option value="text-to-speech" data-i18n="web.voice">Voice</option><option value="other" data-i18n="web.other">Other</option></select>
+          <label class="history-control" for="history-archive-mode" data-i18n="web.show">Show</label><select id="history-archive-mode"><option value="active" data-i18n="web.active_conversations">Active conversations</option><option value="archived" data-i18n="web.archived_conversations">Archived conversations</option><option value="all" data-i18n="web.all_conversations">All conversations</option></select>
+          <label class="history-control" for="history-search" data-i18n="web.search_conversations">Search conversations</label><input id="history-search" type="search" placeholder="Title, model or message…" data-i18n-attr="placeholder:web.history_search_placeholder">
+          <label class="history-control" for="history-import" data-i18n="web.import_conversation">Import conversation</label><input id="history-import" type="file" accept="application/json,.json">
           <small id="history-count" role="status"></small><div id="history"></div>
         </aside>
         <div class="conversation">
-          <div class="chat-heading"><button id="workspace-back" class="secondary" type="button">← Back to Workspace</button><button id="history-toggle" aria-label="Show conversations" aria-expanded="false">☰</button><div><p class="eyebrow">WORKSPACE</p><h2 id="chat-title">A little room for big ideas.</h2></div><span id="model-chip" class="chip" hidden></span></div>
+          <div class="chat-heading"><button id="workspace-back" class="secondary" type="button" data-i18n="web.back_to_workspace">← Back to Workspace</button><button id="history-toggle" aria-label="Show conversations" aria-expanded="false" data-i18n-attr="aria-label:web.show_conversations">☰</button><div><p class="eyebrow" data-i18n="web.workspace">WORKSPACE</p><h2 id="chat-title" data-i18n="web.a_little_room_for_big_ideas">A little room for big ideas.</h2></div><span id="model-chip" class="chip" hidden></span></div>
           <div id="messages" role="log" aria-live="polite" aria-relevant="additions text"></div><p id="feedback" role="status"></p>
           <form id="composer" class="glass">
-            <textarea id="prompt" rows="1" placeholder="What’s on your mind?" aria-label="Message ProsperoAI" required></textarea><button id="send" class="primary" aria-label="Send message">↑</button>
+            <textarea id="prompt" rows="1" placeholder="What’s on your mind?" data-i18n-attr="placeholder:web.prompt_placeholder" aria-label="Message ProsperoAI" required></textarea><button id="send" class="primary" aria-label="Send message" data-i18n-attr="aria-label:web.send_message">↑</button>
           </form>
-          <small class="composer-note">Entirely on your PS5. A conversation remembers its model.</small>
+          <small class="composer-note" data-i18n="web.composer_note">Entirely on your PS5. A conversation remembers its model.</small>
         </div>
       </section>
 
     </main>
 
-    <main id="media" hidden><p class="eyebrow">YOUR CREATIONS</p><h1 id="media-heading">Media library</h1><p class="muted">Generated images and audio referenced by saved conversations. Files stay on your PS5.</p><div class="media-filters" role="group" aria-label="Media type"><button type="button" data-media-filter="all" aria-pressed="true" class="selected">All media</button><button type="button" data-media-filter="image" aria-pressed="false">Images</button><button type="button" data-media-filter="audio" aria-pressed="false">Audio</button></div><div id="media-library" class="model-grid" aria-live="polite"></div></main>
-    <main id="models" hidden><p class="eyebrow">YOUR SPACE</p><h1>Your models.</h1><p class="intro">A little intelligence. A world of possibilities.</p><div class="model-tools"><input id="search" type="search" placeholder="Search your models" aria-label="Search models"><div id="model-filters" class="model-filters" aria-label="Model categories"><button data-kind="all" class="selected">All</button><button data-kind="0">Text</button><button data-kind="1">Image</button><button data-kind="2">Audio</button><button data-kind="3">Voice</button></div></div><div id="model-list" class="model-grid"></div><p id="model-count"></p><section class="glass downloader"><p class="eyebrow">MODEL LIBRARY</p><h2>Find a model.</h2><p class="muted">Search by name, browse matching repositories, and download a verified GGUF model.</p><form id="download-repo" class="download-form"><label for="model-query">Model name</label><div><input id="model-query" name="query" type="search" placeholder="Mistral 7B, Llama 3, Qwen…" autocomplete="off" maxlength="96" required><button id="browse-models" class="primary">Search models</button></div></form><p id="download-status" role="status" aria-live="polite">Enter a model name to search public repositories.</p><progress id="download-progress" max="100" value="0" hidden aria-label="Model download progress"></progress><button id="download-cancel" type="button" hidden>Cancel download</button><div id="download-list" class="download-list"></div></section></main>
-    <main id="settings" hidden><p class="eyebrow">SETTINGS</p><h1>Make it feel like yours.</h1><div class="settings-grid"><div class="glass settings-categories" role="tablist" aria-label="Settings categories"><button data-category="appearance" role="tab" aria-selected="true" class="selected">Appearance</button><button data-category="sound" role="tab" aria-selected="false">Sound</button><button data-category="accessibility" role="tab" aria-selected="false">Accessibility</button><button data-category="opencode" role="tab" aria-selected="false">OpenCode</button><button data-category="about" role="tab" aria-selected="false">About</button></div><div class="glass settings-panel"><section id="setting-appearance"><label>Color theme<select id="theme"><option value="midnight">Midnight</option><option value="daylight">Daylight</option></select></label><label>Accent color<select id="accent"><option value="gold">Amber</option><option value="blue">Soft blue</option><option value="green">Quiet green</option></select></label></section><section id="setting-sound" hidden><label class="check"><input id="sounds" type="checkbox">Interface sounds</label><label>Volume<input id="volume" type="range" min="0" max="1" step="0.05" value="0.4"></label></section><section id="setting-accessibility" hidden><label>Text size<select id="text-size"><option value="normal">Standard</option><option value="large">Large</option></select></label><label class="check"><input id="motion" type="checkbox">Reduced motion</label><label class="check"><input id="contrast" type="checkbox">High contrast</label></section><section id="setting-opencode" hidden><h2>OpenCode</h2><p class="muted">Connect coding tools to your PS5 and configure built-in web search.</p><button id="access" class="secondary">Connection key</button><h3>Connection security</h3><p id="connection-security" class="muted" role="status">Checking API security…</p></section><section id="setting-about" hidden><h2>ProsperoAI</h2><p class="muted">A space to think, imagine, and create.<br>Models run on your PS5. No account, no cloud, nothing uploaded.</p><p class="muted">Made by BlackBearReloaded and Quatrixone.</p><h3>Diagnostics</h3><p class="muted">Export recent lifecycle and model errors. Prompts, responses, keys and recordings are excluded.</p><button id="export-diagnostics" class="secondary" type="button">Export diagnostics</button></section></div><section class="glass settings-preview"><p class="eyebrow">LIVE PREVIEW</p><div class="preview-user">Tell me a story.</div><strong><span>◎</span> ProsperoAI</strong><p>Once, a small light learned to think for itself.</p><button class="primary" type="button" id="preview-send">Send</button><span class="preview-wave">≋</span></section></div></main>
-    <footer><span>PRIVATE BY DESIGN</span><span id="footer-note">Entirely yours.</span></footer>
+    <main id="media" hidden><p class="eyebrow" data-i18n="web.your_creations">YOUR CREATIONS</p><h1 id="media-heading" data-i18n="web.media_library">Media library</h1><p class="muted" data-i18n="web.generated_images_and_audio_reference">Generated images and audio referenced by saved conversations. Files stay on your PS5.</p><div class="media-filters" role="group" aria-label="Media type" data-i18n-attr="aria-label:web.media_type"><button type="button" data-media-filter="all" aria-pressed="true" class="selected" data-i18n="web.all_media">All media</button><button type="button" data-media-filter="image" aria-pressed="false" data-i18n="web.images">Images</button><button type="button" data-media-filter="audio" aria-pressed="false" data-i18n="screen.audio">Audio</button></div><div id="media-library" class="model-grid" aria-live="polite"></div></main>
+    <main id="models" hidden><p class="eyebrow" data-i18n="web.your_space">YOUR SPACE</p><h1 data-i18n="web.your_models">Your models.</h1><p class="intro" data-i18n="web.a_little_intelligence_a_world_of_pos">A little intelligence. A world of possibilities.</p><div class="model-tools"><input id="search" type="search" placeholder="Search your models" aria-label="Search models" data-i18n-attr="placeholder:web.search_your_models;aria-label:web.search_models"><div id="model-filters" class="model-filters" aria-label="Model categories" data-i18n-attr="aria-label:web.model_categories"><button data-kind="all" class="selected" data-i18n="web.all">All</button><button data-kind="0" data-i18n="screen.text">Text</button><button data-kind="1" data-i18n="screen.image">Image</button><button data-kind="2" data-i18n="screen.audio">Audio</button><button data-kind="3" data-i18n="web.voice">Voice</button></div></div><div id="model-list" class="model-grid"></div><p id="model-count"></p><section class="glass downloader"><p class="eyebrow" data-i18n="web.model_library">MODEL LIBRARY</p><h2 data-i18n="web.find_a_model">Find a model.</h2><p class="muted" data-i18n="web.search_by_name_browse_matching_repos">Search by name, browse matching repositories, and download a verified GGUF model.</p><form id="download-repo" class="download-form"><label for="model-query" data-i18n="web.model_name">Model name</label><div><input id="model-query" name="query" type="search" placeholder="Mistral 7B, Llama 3, Qwen…" autocomplete="off" maxlength="96" required data-i18n-attr="placeholder:web.mistral_7b_llama_3_qwen"><button id="browse-models" class="primary" data-i18n="web.search_models">Search models</button></div></form><p id="download-status" role="status" aria-live="polite" data-i18n="web.enter_a_model_name_to_search_public">Enter a model name to search public repositories.</p><progress id="download-progress" max="100" value="0" hidden aria-label="Model download progress" data-i18n-attr="aria-label:web.model_download_progress"></progress><button id="download-cancel" type="button" hidden data-i18n="web.cancel_download">Cancel download</button><div id="download-list" class="download-list"></div></section></main>
+    <main id="settings" hidden><p class="eyebrow" data-i18n="web.settings_eyebrow">SETTINGS</p><h1 data-i18n="web.settings_title">Make it feel like yours.</h1><div class="settings-grid"><div class="glass settings-categories" role="tablist" aria-label="Settings categories" data-i18n-attr="aria-label:web.settings_categories"><button data-category="appearance" data-i18n="web.cat.appearance" role="tab" aria-selected="true" class="selected">Appearance</button><button data-category="sound" data-i18n="web.cat.sound" role="tab" aria-selected="false">Sound</button><button data-category="accessibility" data-i18n="web.cat.accessibility" role="tab" aria-selected="false">Accessibility</button><button data-category="opencode" data-i18n="web.cat.opencode" role="tab" aria-selected="false">OpenCode</button><button data-category="about" data-i18n="web.cat.about" role="tab" aria-selected="false">About</button></div><div class="glass settings-panel"><section id="setting-appearance"><label><span data-i18n="web.color_theme">Color theme</span><select id="theme"><option value="midnight" data-i18n="web.theme.midnight">Midnight</option><option value="daylight" data-i18n="web.theme.daylight">Daylight</option></select></label><label><span data-i18n="settings.language">Language</span><select id="language"><option value="en">English</option><option value="it">Italiano</option></select></label><label><span data-i18n="web.accent_color">Accent color</span><select id="accent"><option value="gold" data-i18n="web.amber">Amber</option><option value="blue" data-i18n="web.accent.blue">Soft blue</option><option value="green" data-i18n="web.accent.green">Quiet green</option></select></label></section><section id="setting-sound" hidden><label class="check"><input id="sounds" type="checkbox"><span data-i18n="web.interface_sounds">Interface sounds</span></label><label><span data-i18n="web.volume">Volume</span><input id="volume" type="range" min="0" max="1" step="0.05" value="0.4"></label></section><section id="setting-accessibility" hidden><label><span data-i18n="web.text_size">Text size</span><select id="text-size"><option value="normal" data-i18n="web.size.normal">Standard</option><option value="large" data-i18n="web.size.large">Large</option></select></label><label class="check"><input id="motion" type="checkbox"><span data-i18n="web.reduced_motion">Reduced motion</span></label><label class="check"><input id="contrast" type="checkbox"><span data-i18n="web.high_contrast">High contrast</span></label></section><section id="setting-opencode" hidden><h2 data-i18n="web.cat.opencode">OpenCode</h2><p class="muted" data-i18n="web.connect_coding_tools_to_your_ps5_and">Connect coding tools to your PS5 and configure built-in web search.</p><button id="access" class="secondary" data-i18n="web.connection_key">Connection key</button><h3 data-i18n="web.connection_security">Connection security</h3><p id="connection-security" class="muted" role="status" data-i18n="web.checking_security">Checking API security…</p></section><section id="setting-about" hidden><h2>ProsperoAI</h2><p class="muted"><span data-i18n="web.a_space_to_think_imagine_and_create">A space to think, imagine, and create.</span><br><span data-i18n="web.models_run_on_your_ps5_no_account_no">Models run on your PS5. No account, no cloud, nothing uploaded.</span></p><p class="muted" data-i18n="web.made_by_blackbearreloaded_and_quatri">Made by BlackBearReloaded and Quatrixone.</p><h3 data-i18n="web.diagnostics">Diagnostics</h3><p class="muted" data-i18n="web.export_recent_lifecycle_and_model_er">Export recent lifecycle and model errors. Prompts, responses, keys and recordings are excluded.</p><button id="export-diagnostics" class="secondary" type="button" data-i18n="web.export_diagnostics">Export diagnostics</button></section></div><section class="glass settings-preview"><p class="eyebrow" data-i18n="web.live_preview">LIVE PREVIEW</p><div class="preview-user" data-i18n="web.tell_me_a_story">Tell me a story.</div><strong><span>◎</span> ProsperoAI</strong><p data-i18n="web.once_a_small_light_learned_to_think">Once, a small light learned to think for itself.</p><button class="primary" type="button" id="preview-send" data-i18n="web.send">Send</button><span class="preview-wave">≋</span></section></div></main>
+    <footer><span data-i18n="web.private_by_design">PRIVATE BY DESIGN</span><span id="footer-note" data-i18n="web.entirely_yours">Entirely yours.</span></footer>
   </div>
-  <dialog id="key-dialog"><form method="dialog" class="glass"><p class="eyebrow">YOUR PRIVATE SPACE</p><h2>Connect to your PS5.</h2><p>Enter the connection key configured on your console. Leave API authentication off to use the web UI without a key.</p><label>Connection key<input id="key" type="password" autocomplete="off" required></label><p id="key-error" role="alert"></p><button id="connect" class="primary" value="connect">Connect</button><button value="cancel" class="secondary" formnovalidate>Cancel</button></form></dialog>
-  <dialog id="model-dialog"><form method="dialog" class="glass"><p class="eyebrow">CONVERSATION</p><h2>Use this model?</h2><p id="model-description"></p><p class="muted">A new conversation will use this model.</p><button value="use" class="primary">Use model</button><button value="cancel" class="secondary">Cancel</button></form></dialog>
-  <dialog id="confirm-dialog"><form method="dialog" class="glass"><h2 id="confirm-title">Are you sure?</h2><p id="confirm-description"></p><button value="cancel">Cancel</button><button id="confirm-accept" value="confirm" class="primary">Confirm</button></form></dialog>
-  <dialog id="delete-dialog"><form method="dialog" class="glass"><h2>Delete conversation?</h2><p id="delete-description"></p><p>The conversation will be removed. Generated image, audio, and voice files on your PS5 will remain.</p><button value="cancel">Cancel</button><button value="delete" class="primary">Delete</button></form></dialog>
-  <dialog id="voice-record-dialog" aria-labelledby="voice-record-title"><div class="glass voice-record"><p class="eyebrow">MY VOICE</p><h2 id="voice-record-title">Record a voice sample</h2><p class="muted">Speak clearly for up to five seconds. Your sample is saved on your PS5 only when you choose Save and use.</p><label class="voice-record-field" for="voice-record-source">Microphone<select id="voice-record-source"><option value="browser">This phone or computer</option><option value="ps5">PS5 microphone / DualSense</option></select></label><p id="voice-record-hint" class="voice-record-hint"></p><progress id="voice-record-progress" max="5" value="0" aria-label="Recording duration"></progress><p id="voice-record-status" class="voice-record-status" role="status">Ready to record.</p><audio id="voice-record-preview" controls hidden></audio><input id="voice-record-file" type="file" accept="audio/*" capture="user" hidden><div class="voice-record-actions"><button id="voice-record-cancel" class="secondary" type="button">Cancel</button><button id="voice-record-start" class="secondary" type="button">Start recording</button><button id="voice-record-stop" class="secondary" type="button" hidden>Stop</button><button id="voice-record-save" class="primary" type="button" disabled>Save and use</button></div></div></dialog>
+  <dialog id="key-dialog"><form method="dialog" class="glass"><p class="eyebrow" data-i18n="web.your_private_space">YOUR PRIVATE SPACE</p><h2 data-i18n="web.connect_to_your_ps5">Connect to your PS5.</h2><p data-i18n="web.enter_the_connection_key_configured">Enter the connection key configured on your console. Leave API authentication off to use the web UI without a key.</p><label><span data-i18n="web.connection_key">Connection key</span><input id="key" type="password" autocomplete="off" required></label><p id="key-error" role="alert"></p><button id="connect" class="primary" value="connect" data-i18n="web.connect">Connect</button><button value="cancel" class="secondary" formnovalidate data-i18n="web.cancel">Cancel</button></form></dialog>
+  <dialog id="model-dialog"><form method="dialog" class="glass"><p class="eyebrow" data-i18n="web.conversation">CONVERSATION</p><h2 data-i18n="web.use_this_model">Use this model?</h2><p id="model-description"></p><p class="muted" data-i18n="web.a_new_conversation_will_use_this_mod">A new conversation will use this model.</p><button value="use" class="primary" data-i18n="web.use_model">Use model</button><button value="cancel" class="secondary" data-i18n="web.cancel">Cancel</button></form></dialog>
+  <dialog id="confirm-dialog"><form method="dialog" class="glass"><h2 id="confirm-title" data-i18n="web.are_you_sure">Are you sure?</h2><p id="confirm-description"></p><button value="cancel" data-i18n="web.cancel">Cancel</button><button id="confirm-accept" value="confirm" class="primary" data-i18n="web.confirm">Confirm</button></form></dialog>
+  <dialog id="delete-dialog"><form method="dialog" class="glass"><h2 data-i18n="web.delete_conversation">Delete conversation?</h2><p id="delete-description"></p><p data-i18n="web.the_conversation_will_be_removed_gen">The conversation will be removed. Generated image, audio, and voice files on your PS5 will remain.</p><button value="cancel" data-i18n="web.cancel">Cancel</button><button value="delete" class="primary" data-i18n="web.delete">Delete</button></form></dialog>
+  <dialog id="voice-record-dialog" aria-labelledby="voice-record-title"><div class="glass voice-record"><p class="eyebrow" data-i18n="web.my_voice">MY VOICE</p><h2 id="voice-record-title" data-i18n="web.record_a_voice_sample">Record a voice sample</h2><p class="muted" data-i18n="web.speak_clearly_for_up_to_five_seconds">Speak clearly for up to five seconds. Your sample is saved on your PS5 only when you choose Save and use.</p><label class="voice-record-field" for="voice-record-source"><span data-i18n="web.microphone">Microphone</span><select id="voice-record-source"><option value="browser" data-i18n="web.this_phone_or_computer">This phone or computer</option><option value="ps5" data-i18n="web.ps5_microphone_dualsense">PS5 microphone / DualSense</option></select></label><p id="voice-record-hint" class="voice-record-hint"></p><progress id="voice-record-progress" max="5" value="0" aria-label="Recording duration" data-i18n-attr="aria-label:web.recording_duration"></progress><p id="voice-record-status" class="voice-record-status" role="status" data-i18n="web.ready_to_record">Ready to record.</p><audio id="voice-record-preview" controls hidden></audio><input id="voice-record-file" type="file" accept="audio/*" capture="user" hidden><div class="voice-record-actions"><button id="voice-record-cancel" class="secondary" type="button" data-i18n="web.cancel">Cancel</button><button id="voice-record-start" class="secondary" type="button" data-i18n="web.start_recording">Start recording</button><button id="voice-record-stop" class="secondary" type="button" hidden data-i18n="web.stop">Stop</button><button id="voice-record-save" class="primary" type="button" disabled data-i18n="web.save_and_use">Save and use</button></div></div></dialog>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
+import { runInNewContext } from './english_i18n.mjs';
 import { test } from 'node:test';
 
 const source = readFileSync(new URL('../assets/web/app.js', import.meta.url), 'utf8');
@@ -30,6 +30,7 @@ test('the web KV selector exposes all cache types and saves its selection', () =
     const contextLabel = makeElement();
     const oldHint = makeElement();
     oldHint.textContent = 'KV cache is selected automatically for the model and context.';
+    oldHint.dataset = { i18n: 'web.kv_cache_is_selected_automatically_f' };
     contextLabel.nextElementSibling = oldHint;
     const elements = {
         'runtime-feedback': feedback,
@@ -164,4 +165,20 @@ test('runtime settings restore the selected KV type and roll back a failed chang
     response = { ok: false };
     await scope.apply({ kv: 'f16' });
     assert.equal(elements['runtime-kv'].value, 'q4_0');
+});
+
+test('the old KV hint is removed even when the page is translated', () => {
+    const start = source.indexOf('const kvCacheLabel=document.createElement(\'label\');');
+    const end = source.indexOf('const audioDurationLabel=', start);
+    const contextLabel = makeElement();
+    const oldHint = makeElement();
+    oldHint.textContent = 'La cache KV è scelta automaticamente per il modello e il contesto.';
+    oldHint.dataset = { i18n: 'web.kv_cache_is_selected_automatically_f' };
+    contextLabel.nextElementSibling = oldHint;
+    const scope = {
+        document: { createElement: makeElement },
+        $: id => id === 'runtime-context' ? { parentElement: contextLabel } : makeElement(),
+    };
+    runInNewContext(source.slice(start, end), scope);
+    assert.equal(oldHint.removed, true);
 });

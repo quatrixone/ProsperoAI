@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import assert from 'node:assert/strict';
 import {existsSync, readFileSync} from 'node:fs';
-import {runInNewContext} from 'node:vm';
+import {runInNewContext} from './english_i18n.mjs';
 import {test} from 'node:test';
 
 const modulePath = new URL('../assets/web/workspace.js', import.meta.url);
@@ -459,7 +459,7 @@ test('Music requests share Workspace auth and model purpose metadata', () => {
 
 test('Audio subsection navigation is recorded and restored by browser history', () => {
     const start = appSource.indexOf('function setAudioSection(');
-    const end = appSource.indexOf('\nconst imageModeLabels', start);
+    const end = appSource.indexOf('\nconst imageModeLabel', start);
     const renderStart = appSource.indexOf('function renderWorkspaceAudio()');
     const renderEnd = appSource.indexOf('\nfunction navigateWorkspaceMode', renderStart);
     const setSection = appSource.slice(start, end);
